@@ -2,8 +2,8 @@
 
 **Self-Hosted Edition (Cloud-Ready)**
 
-Version: Draft 1.0
-Date: 2026-03-26
+Version: Draft 1.3
+Date: 2026-03-28
 Author: Luigi Tanzillo
 
 ---
@@ -101,6 +101,294 @@ Browser (LAN)
 - REST for commands (power, fan speed, config CRUD)
 - WebSocket for live sensor streaming (push model)
 - Both on the same port (default: 3000)
+
+### 2.4 Modular Architecture
+
+IPMILink is built as a **module-based platform**. The core provides infrastructure (auth, database, WebSocket, IPMI service). Every feature (sensors, FanPilot, power, SEL, FRU) is a self-contained module that plugs into the core.
+
+#### 2.4.1 Module Structure
+
+Each module lives in its own directory and contains everything it needs:
+
+```
+modules/
+├── sensors/
+│   ├── manifest.py          # Module metadata + registration
+│   ├── routes.py            # FastAPI router (REST endpoints)
+│   ├── tasks.py             # Background async tasks
+│   ├── models.py            # Pydantic schemas
+│   ├── migrations/          # SQLite migration files
+│   │   └── 001_initial.sql
+│   └── widgets.json         # Widget definitions for the dashboard
+│
+├── fanpilot/
+│   ├── manifest.py
+│   ├── routes.py
+│   ├── engine.py            # Fan curve interpolation + hysteresis
+│   ├── tasks.py             # Fan control async loop
+│   ├── models.py
+│   ├── migrations/
+│   └── widgets.json
+│
+├── power/
+├── sel/
+└── fru/
+```
+
+#### 2.4.2 Module Manifest
+
+Every module declares its capabilities via a `manifest.py`:
+
+```python
+from core.modules import ModuleManifest
+
+module = ModuleManifest(
+    id="fanpilot",
+    name="FanPilot",
+    version="1.0.0",
+    description="Intelligent fan curve control with drag-and-drop editor",
+    author="IPMILink",
+    category="cooling",
+    icon="fan",
+    dependencies=["sensors"],       # Requires sensors module
+    routes=router,                  # FastAPI APIRouter
+    background_tasks=[fan_loop],    # Async tasks to start
+    event_handlers={                # Events this module listens to
+        "sensor_reading": on_sensor_reading,
+    },
+    migrations_dir="migrations/",
+)
+```
+
+#### 2.4.3 Module Lifecycle
+
+On application startup, the core:
+
+1. Scans the `modules/` directory for `manifest.py` files
+2. Validates dependencies (error if a required module is missing)
+3. Sorts modules by dependency order (topological sort)
+4. Runs pending database migrations for each module
+5. Mounts each module's routes under `/api/<module_id>/`
+6. Registers event handlers on the event bus
+7. Starts background tasks
+8. Loads widget definitions for the frontend
+
+#### 2.4.4 Module Enable/Disable
+
+Each module can be toggled on/off from Settings. Disabled modules:
+- Do not have their routes mounted
+- Do not run background tasks
+- Do not respond to events
+- Do not appear in the dashboard widget catalog
+- Keep their data in SQLite (not deleted)
+
+State is stored in `app_config` table: `modules.fanpilot.enabled = true/false`
+
+#### 2.4.5 Event Bus
+
+Modules communicate through an async event bus. The core provides it; modules emit and subscribe.
+
+| Event | Emitted by | Consumed by | Payload |
+|---|---|---|---|
+| `sensor_reading` | sensors | fanpilot, (future: alerts) | `{ server_id, sensor_name, value, unit }` |
+| `temperature_critical` | sensors | fanpilot | `{ server_id, sensor_name, value, threshold }` |
+| `fan_speed_changed` | fanpilot | sensors (for logging) | `{ server_id, speed_pct, profile }` |
+| `power_state_changed` | power | (future: alerts, scheduler) | `{ server_id, state, previous_state }` |
+| `sel_critical_event` | sel | (future: alerts) | `{ server_id, event_type, description }` |
+| `module_installed` | core | core (UI refresh) | `{ module_id }` |
+| `module_uninstalled` | core | core (UI refresh) | `{ module_id }` |
+
+The event bus is in-process (asyncio queues). No external message broker needed.
+
+#### 2.4.6 Module Config
+
+Each module owns its own config section in `config.yaml`:
+
+```yaml
+modules:
+  sensors:
+    enabled: true
+    poll_interval: 5
+    retention_days: 365
+  fanpilot:
+    enabled: true
+    safety_threshold: 85
+    hysteresis: 3
+    loop_interval: 5
+  power:
+    enabled: true
+    poll_interval: 10
+  sel:
+    enabled: true
+  fru:
+    enabled: true
+```
+
+The core passes only the relevant section to each module. Modules never read each other's config.
+
+### 2.5 Widget Grid System
+
+The dashboard home is a **customizable widget grid** where the user composes their own layout from widgets provided by installed modules.
+
+#### 2.5.1 Grid Specification
+
+- Base grid: **6 columns** (desktop), **4 columns** (tablet), **2 columns** (mobile)
+- Row height: **120px** (fixed)
+- Gap: **16px**
+- Library: **react-grid-layout** (drag-and-drop, resize, responsive breakpoints, layout serialization)
+
+#### 2.5.2 Widget Sizes
+
+| Size | Columns x Rows | Use Case |
+|---|---|---|
+| `1x1` | 1 col, 1 row | Single metric — current CPU temp, power status dot |
+| `2x1` | 2 col, 1 row | Status bar — FanPilot mode + speed, PSU summary |
+| `2x2` | 2 col, 2 row | Standard card — mini chart, quick actions, profile selector |
+| `3x2` | 3 col, 2 row | Medium chart — temperature last 1h, fan RPM trend |
+| `4x2` | 4 col, 2 row | Large chart — multi-sensor overlay, power consumption |
+| `6x2` | Full width, 2 row | Panoramic chart — full timeline with zoom |
+| `6x3` | Full width, 3 row | Full editor — fan curve editor inline on dashboard |
+
+#### 2.5.3 Widget Definition (per module)
+
+Each module declares its widgets in `widgets.json`:
+
+```json
+{
+  "widgets": [
+    {
+      "id": "fanpilot-curve",
+      "name": "Fan Curve",
+      "description": "Live fan curve with current temperature indicator",
+      "sizes": ["2x2", "3x2", "6x3"],
+      "default_size": "3x2",
+      "refresh_interval": 5,
+      "category": "cooling"
+    },
+    {
+      "id": "fanpilot-status",
+      "name": "FanPilot Quick Status",
+      "description": "Current mode, active profile, fan speed",
+      "sizes": ["1x1", "2x1"],
+      "default_size": "2x1",
+      "refresh_interval": 5,
+      "category": "cooling"
+    },
+    {
+      "id": "fanpilot-actions",
+      "name": "FanPilot Quick Actions",
+      "description": "Profile switcher and manual override buttons",
+      "sizes": ["2x2"],
+      "default_size": "2x2",
+      "refresh_interval": null,
+      "category": "cooling"
+    }
+  ]
+}
+```
+
+Frontend widget components are registered in an index:
+
+```typescript
+// frontend/src/modules/fanpilot/widgets/index.ts
+export const widgets = {
+  "fanpilot-curve": FanCurveWidget,
+  "fanpilot-status": FanPilotStatusWidget,
+  "fanpilot-actions": FanPilotActionsWidget,
+}
+```
+
+#### 2.5.4 Dashboard Layout Persistence
+
+- Layout is a JSON array of `{ widget_id, module_id, server_id, x, y, w, h }`
+- Saved in SQLite `dashboard_layouts` table per user
+- Default layout provided when no custom layout exists
+- Reset to default button available in Settings
+
+```sql
+CREATE TABLE dashboard_layouts (
+    user_id INTEGER REFERENCES users(id),
+    layout JSON NOT NULL,  -- Serialized react-grid-layout state
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id)
+);
+```
+
+#### 2.5.5 Widget Interaction Flow
+
+1. User clicks "+" button on dashboard (or "Add Widget" in empty area)
+2. Widget catalog slides in — shows all widgets from installed modules, grouped by category
+3. Each widget shows a preview thumbnail, name, available sizes
+4. User clicks a widget — it's added to the grid at default size in the first available position
+5. User drags to reposition, drags corner to resize (within declared sizes)
+6. User clicks "x" on a widget to remove it from dashboard (module stays installed)
+7. Layout auto-saves on every change
+
+### 2.6 Module Marketplace (Roadmap)
+
+The marketplace is the long-term vision for module distribution. Not in MVP scope, but the architecture supports it from day one.
+
+#### 2.6.1 Phases
+
+**Phase 1 (MVP):** All modules are **built-in**. They ship with the app. Users can enable/disable from Settings. Widget grid is fully functional.
+
+**Phase 2:** Module catalog page (`/modules`) shows built-in modules as cards with enable/disable toggle, description, widget previews, and dependency info.
+
+**Phase 3:** External module registry. Users can browse, download, and install community modules from within the app.
+
+#### 2.6.2 Registry (Phase 3)
+
+A static JSON index hosted at `registry.ipmilink.io` (GitHub Pages or static endpoint):
+
+```json
+{
+  "version": 1,
+  "modules": [
+    {
+      "id": "alerts",
+      "name": "Alerts",
+      "version": "1.0.0",
+      "author": "IPMILink",
+      "category": "notifications",
+      "description": "Configurable alert thresholds with email, webhook, and Telegram notifications",
+      "icon": "bell",
+      "dependencies": ["sensors"],
+      "min_core_version": "2.0.0",
+      "download_url": "https://registry.ipmilink.io/modules/alerts-1.0.0.zip",
+      "checksum": "sha256:abc123...",
+      "widgets": [
+        { "id": "alerts-panel", "name": "Active Alerts", "sizes": ["2x2", "4x2"] },
+        { "id": "alerts-history", "name": "Alert History", "sizes": ["3x2", "6x2"] }
+      ]
+    }
+  ]
+}
+```
+
+#### 2.6.3 Installation Flow (Phase 3)
+
+1. User opens `/modules` page
+2. "Available" tab shows modules from the registry not yet installed
+3. User clicks "Install" on a module
+4. Backend downloads the ZIP, verifies SHA-256 checksum
+5. Extracts to `modules/<module_id>/`
+6. Runs module migrations
+7. Registers routes, tasks, event handlers
+8. Module's widgets appear in the dashboard widget catalog
+9. No restart required (hot-load)
+
+#### 2.6.4 Future Module Ideas
+
+| Module | Category | Description |
+|---|---|---|
+| **alerts** | notifications | Configurable thresholds + email/webhook/Telegram |
+| **scheduler** | automation | Scheduled profile switches (e.g., Silent at night) |
+| **metrics-exporter** | integrations | Prometheus `/metrics` endpoint for Grafana |
+| **console (SOL)** | remote-access | Serial over LAN via xterm.js in browser |
+| **discovery** | network | Auto-scan LAN for BMC devices |
+| **backup** | system | Export/import config + profiles + data as ZIP |
+| **benchmarks** | diagnostics | Thermal stress test to validate fan profiles |
+| **multi-server** | management | Panoramic view of all servers with status overview |
 
 ---
 
@@ -330,87 +618,152 @@ Note: These are Dell iDRAC-specific commands. Future versions will add support f
 
 ## 5. Dashboard Design
 
-### 5.1 Visual Style: Dark Tech/Cyber
+### 5.1 Visual Style: shadcn/ui Professional Dark
 
-The dashboard follows a dark, high-contrast, server-monitoring aesthetic.
+The dashboard follows a professional, minimal dark theme inspired by shadcn/ui. No neon, no glow effects — clean, readable, and production-grade.
 
-#### 5.1.1 Color Palette
+#### 5.1.1 Color Palette (Zinc-based dark)
 
-| Role | Color | Hex |
+| Role | Token | Hex |
 |---|---|---|
-| **Background (primary)** | Deep navy/charcoal | `#1e1e2e` |
-| **Background (card/surface)** | Slightly lighter | `#252532` |
-| **Background (input/elevated)** | Dark blue-grey | `#2a2a3e` |
-| **Border** | Subtle grey | `#3a3a4a` |
-| **Text (primary)** | Light grey | `#e0e0e0` |
-| **Text (secondary/muted)** | Medium grey | `#a0a0a0` |
-| **Accent (primary)** | Cyan | `#00d4ff` |
-| **Accent (success)** | Neon green | `#00ff88` |
-| **Accent (danger)** | Red | `#ff5555` |
-| **Accent (warning)** | Amber | `#ffaa00` |
+| **Background** | `--background` | `#09090b` |
+| **Foreground** | `--foreground` | `#fafafa` |
+| **Card** | `--card` | `#0a0a0c` |
+| **Muted** | `--muted` | `#18181b` |
+| **Muted foreground** | `--muted-foreground` | `#a1a1aa` |
+| **Border** | `--border` | `#27272a` |
+| **Primary** | `--primary` | `#f4f4f5` |
+| **Destructive** | `--destructive` | `#ef4444` |
+| **Chart Blue** | `--chart-1` | `#2563eb` |
+| **Chart Emerald** | `--chart-2` | `#10b981` |
+| **Chart Amber** | `--chart-3` | `#f59e0b` |
+| **Chart Violet** | `--chart-4` | `#8b5cf6` |
+| **Success** | `--success` | `#22c55e` |
+| **Warning** | `--warning` | `#eab308` |
+| **Danger** | `--danger` | `#ef4444` |
 
 #### 5.1.2 Typography
 
-- **Font:** `'Segoe UI', system-ui, -apple-system, sans-serif`
-- **Monospace (values/data):** `'JetBrains Mono', 'Fira Code', 'Courier New', monospace`
-- **Headings:** Uppercase, letter-spacing 1-2px, font-weight 600-700
-- **Labels:** 12px uppercase, `#a0a0a0`
-- **Values/metrics:** Monospace, larger size, accent color
+- **Sans:** `'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`
+- **Monospace (values/data):** `'JetBrains Mono', 'Fira Code', monospace`
+- **Headings:** Normal case (not uppercase), letter-spacing -0.02em, font-weight 600
+- **Labels:** 13px, font-weight 500, `--muted-foreground`
+- **Values/metrics:** Monospace, larger size, `--foreground`
 
-#### 5.1.3 Component Styling
+#### 5.1.3 Component Styling (shadcn patterns)
 
-- Cards: `bg-[#252532]`, `rounded-xl`, `border border-[#3a3a4a]`, subtle shadow
-- Buttons: Gradient backgrounds, hover lift (`translateY(-2px)`), glow shadow on accent color
-- Inputs: Dark bg, border glow on focus (cyan), monospace for passwords
-- Charts: Dark grid, colored lines with glow, semi-transparent area fills
-- Status indicators: Pulsing dots (green=ok, red=critical, yellow=warning)
-- Transitions: 200-300ms ease on all interactive elements
+- Cards: `bg-card`, `rounded-[0.5rem]`, `border border-border`, subtle shadow-sm
+- Buttons: Flat backgrounds, no gradients, subtle hover (`bg-muted`), no glow
+- Inputs: `bg-input`, `border-border`, ring on focus
+- Charts: Minimal grid lines, solid colored lines, 8% opacity area fills
+- Status indicators: Static dots (no animation), `--success`/`--danger`/`--warning`
+- Badges: Pill-shaped, 12% opacity background tint of the semantic color
+- Transitions: 150ms ease on interactive elements
 
 ### 5.2 Layout
 
-#### 5.2.1 Page Structure
+#### 5.2.1 Page Structure (Sidebar + Main)
 
 ```
-+----------------------------------------------------------+
-| TOPBAR: Logo | Server Selector | Status Dots | Settings   |
-+----------------------------------------------------------+
-|                                                          |
-|  MAIN CONTENT AREA (scrollable)                          |
-|                                                          |
-|  +--------------------+  +--------------------+          |
-|  | TEMP CHART (large) |  | FAN RPM CHART      |          |
-|  |                    |  |                    |          |
-|  +--------------------+  +--------------------+          |
-|                                                          |
-|  +--------------------+  +--------------------+          |
-|  | POWER CARD         |  | FANPILOT CARD      |          |
-|  | Status + Buttons   |  | Active Profile +   |          |
-|  |                    |  | Mini Curve Preview  |          |
-|  +--------------------+  +--------------------+          |
-|                                                          |
-|  +--------------------+  +--------------------+          |
-|  | VOLTAGE SPARKLINES |  | PSU STATUS          |          |
-|  +--------------------+  +--------------------+          |
-|                                                          |
-+----------------------------------------------------------+
++----------+---------------------------------------------+
+|          | HEADER: Breadcrumb | Time Tabs | + Add Widget |
+| SIDEBAR  +---------------------------------------------+
+|          |                                             |
+| Logo     |  WIDGET GRID (6-col, scrollable)            |
+| -------- |                                             |
+| Platform |  +------+ +------+ +------+ +------+ ...   |
+|  Dashbrd |  | CPU  | | Inlet| | Fan% | | Watt |       |
+|  FanPlot |  | R720 | | R720 | | R630 | | R720 |       |
+|  SEL     |  +------+ +------+ +------+ +------+       |
+|  FRU     |                                             |
+| -------- |  +------------------+ +------------------+  |
+| System   |  | Temp Chart R720  | | Fan Curve R720   |  |
+|  Modules |  +------------------+ +------------------+  |
+|  Settings|                                             |
+| -------- |  +------------------+ +----------+ +-----+  |
+| [Server] |  | Fan RPM R630     | | Power    | |Volts|  |
+| Dell R720|  |                  | | R720     | |R720 |  |
+| .1.110   |  +------------------+ +----------+ +-----+  |
++----------+---------------------------------------------+
 ```
+
+Key design decisions:
+- **Sidebar** is always visible on desktop, collapsible on tablet, hidden on mobile
+- **Server selector** in sidebar footer — shows the "active context" server with status dot
+- **Dashboard widgets are cross-server** — each widget has a server_id, shown as a subtle tag
+- **Module pages (FanPilot, SEL, FRU)** operate on the selected context server from the sidebar
 
 #### 5.2.2 Pages / Routes
 
-| Route | Page | Description |
-|---|---|---|
-| `/` | Dashboard | Main view with sensor charts, power control, FanPilot status |
-| `/fanpilot` | Fan Curve Editor | Full-page fan curve editor with profile management |
-| `/sel` | System Event Log | SEL table viewer with filters |
-| `/fru` | Hardware Inventory | FRU card view |
-| `/settings` | Settings | Server management (add/remove BMC), config, auth |
-| `/setup` | First-Run Wizard | Shown on first boot — credentials, first BMC, connection test |
+| Route | Page | Server Scope | Description |
+|---|---|---|---|
+| `/` | Dashboard | **All servers** (cross-server widgets) | Customizable widget grid |
+| `/fanpilot` | Fan Curve Editor | Context server (from sidebar) | Full-page editor with profile management |
+| `/sel` | System Event Log | Context server | SEL table with filters |
+| `/fru` | Hardware Inventory | Context server | FRU card view |
+| `/modules` | Module Catalog | N/A | Enable/disable modules |
+| `/settings` | Settings | N/A | Server management, config, auth |
+| `/settings/servers` | Server Management | N/A | Add/edit/remove servers |
+| `/setup` | First-Run Wizard | N/A | First boot — credentials, first BMC |
 
 #### 5.2.3 Responsive Behavior
 
-- **Desktop (>1280px):** 2-column grid for charts and cards
-- **Tablet (768-1280px):** Single column, charts stack vertically
-- **Mobile (<768px):** Single column, simplified charts, bottom nav
+- **Desktop (>1280px):** Sidebar (240px) + 6-column widget grid
+- **Tablet (768-1280px):** Sidebar collapsed to icons (48px) + 4-column grid
+- **Mobile (<768px):** No sidebar (hamburger menu), 2-column grid
+
+### 5.3 Multi-Server Management
+
+#### 5.3.1 Server Entity
+
+Each server is a configured BMC connection with:
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | UUID | Unique identifier |
+| `name` | String | User-defined display name (e.g., "Dell R720 - Plex") |
+| `description` | String | Optional description (e.g., "Living room rack, top unit") |
+| `host` | String | BMC IP address |
+| `port` | Integer | IPMI port (default: 623) |
+| `username` | String (encrypted) | IPMI username |
+| `password` | String (encrypted) | IPMI password |
+| `vendor` | Enum | `dell`, `supermicro`, `hpe`, `generic` |
+| `color` | String | Hex color for visual identification in widgets |
+| `icon` | String | Optional icon identifier |
+
+#### 5.3.2 Server Selector (Sidebar Footer)
+
+- Shows the **active context server**: name, IP, connection status dot
+- Click opens a dropdown/popover listing all configured servers with:
+  - Status dot (green=online, red=offline, gray=not polling)
+  - Server name + IP
+  - Click to switch context
+- "Manage Servers" link at the bottom → navigates to `/settings/servers`
+- The context server determines which server's data is shown on FanPilot, SEL, FRU pages
+
+#### 5.3.3 Cross-Server Dashboard
+
+The dashboard (`/`) is **not tied to one server**. Each widget on the grid is bound to a specific server.
+
+- When adding a widget via "+ Add Widget", the user selects:
+  1. Which module's widget (e.g., "Temperature Chart" from sensors module)
+  2. Which server it displays data from
+  3. Widget size
+- Each widget shows a subtle **server tag** in the header (e.g., "R720" or a colored dot) so the user knows which server each widget belongs to
+- This allows layouts like:
+  - R720 CPU temp next to R630 CPU temp for comparison
+  - All servers' power status in one row
+  - FanPilot status for R720 + temperature chart for R630
+
+#### 5.3.4 Server Color Coding
+
+Each server has an assigned color (user-configurable). This color appears as:
+- A thin left-border accent on widgets belonging to that server
+- The status dot color ring in the server selector
+- Legend entries in multi-server comparison charts
+
+Default colors are auto-assigned from a predefined professional palette:
+`#2563eb` (blue), `#10b981` (emerald), `#f59e0b` (amber), `#8b5cf6` (violet), `#ec4899` (pink), `#6366f1` (indigo)
 
 ---
 
@@ -471,6 +824,19 @@ The dashboard follows a dark, high-contrast, server-monitoring aesthetic.
 |---|---|---|
 | `GET` | `/api/servers/:id/fru` | Get FRU data |
 | `POST` | `/api/servers/:id/fru/refresh` | Force re-fetch from BMC |
+
+#### Dashboard
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/dashboard/layout` | Get current user's widget grid layout |
+| `PUT` | `/api/dashboard/layout` | Save widget grid layout (JSON body) |
+| `DELETE` | `/api/dashboard/layout` | Reset layout to default |
+
+#### Context
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/context/server` | Get active context server ID |
+| `PUT` | `/api/context/server` | Set active context server (body: `{ server_id }`) |
 
 #### System
 | Method | Endpoint | Description |
@@ -554,14 +920,18 @@ CREATE TABLE users (
 CREATE TABLE servers (
     id TEXT PRIMARY KEY,  -- UUID
     name TEXT NOT NULL,
+    description TEXT,     -- user-defined description
     host TEXT NOT NULL,
     port INTEGER DEFAULT 623,
     username_enc TEXT NOT NULL,  -- AES-256 encrypted
     password_enc TEXT NOT NULL,  -- AES-256 encrypted
     vendor TEXT DEFAULT 'dell',  -- dell, supermicro, hpe, generic
+    color TEXT DEFAULT '#2563eb', -- hex color for widget identification
     poll_interval INTEGER DEFAULT 5,
     fanpilot_profile_id INTEGER REFERENCES fan_profiles(id),
     fanpilot_enabled INTEGER DEFAULT 0,
+    is_online INTEGER DEFAULT 0,  -- cached connection status
+    last_seen DATETIME,           -- last successful poll timestamp
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -748,17 +1118,22 @@ ipmilink/
 
 ## 9. Security
 
-### 9.1 Authentication
+### 9.1 Authentication (Simplified — LAN Only)
 
-- **First-run setup:** Wizard creates a local admin user (username + password)
+Authentication is **optional and local-only**. There is no OAuth, no cloud accounts, no JWT refresh flow.
+
+- **First-run setup:** Wizard offers to create a username + password. User can skip this step.
 - **Password storage:** bcrypt hash in SQLite `users` table
-- **Session:** JWT token with configurable expiry (default: 24h)
-- **JWT secret:** Auto-generated on first run, stored in `app_config` table
+- **Session:** Simple session cookie with configurable expiry (default: 24h). No JWT complexity needed for LAN.
+- **Disable auth:** In Settings, the user can toggle authentication off entirely. When disabled, the app is open to anyone on the LAN. A warning banner is shown.
+- **Change credentials:** Username and password are editable in Settings. Can also be reset via CLI: `ipmilink reset-password`
+- **No multi-user:** Single user account. If auth is enabled, one set of credentials.
 
 ### 9.2 BMC Credential Security
 
 - BMC usernames and passwords are encrypted with **AES-256-CBC**
-- Encryption key is derived from the admin password using **PBKDF2** (not a hardcoded key like V1)
+- Encryption key is derived from a generated app secret stored in `app_config` (not from the user password, since auth can be disabled)
+- App secret is generated once at first run, stored in SQLite
 - Credentials are decrypted in-memory only when executing IPMI commands
 - Never logged, never sent to the frontend
 
@@ -775,7 +1150,7 @@ ipmilink/
 - All API inputs validated with Pydantic models
 - IP addresses validated against regex pattern
 - No shell injection possible: ipmitool args passed as list (not string concatenation)
-- Rate limiting on auth endpoints (5 attempts / minute)
+- Basic rate limiting on login endpoint (5 attempts / minute) when auth is enabled
 
 ---
 
@@ -839,7 +1214,271 @@ IPMILINK_DATA_DB_PATH=/custom/path/db.sqlite
 
 ---
 
-## 11. Cloud-Readiness Checklist
+## 11. UX Features
+
+### 11.1 Dark/Light Mode Toggle
+
+- Toggle in sidebar header or Settings page
+- Uses shadcn/ui theming system — CSS variables swap between dark and light tokens
+- Preference saved in `app_config` table and `localStorage`
+- Default: dark mode
+- System preference detection (`prefers-color-scheme`) as initial default
+
+### 11.2 Command Palette (Cmd+K)
+
+Global search and action launcher accessible from anywhere via `Cmd+K` (Mac) or `Ctrl+K` (Windows/Linux).
+
+**Search categories:**
+- **Servers:** Jump to server context ("Dell R720", "192.0.2.10")
+- **Pages:** Navigate to any page ("FanPilot", "Event Log", "Settings")
+- **Actions:** Execute commands ("Power off R720", "Switch to Silent profile", "Export SEL")
+- **Sensors:** Jump to specific sensor data ("CPU Temp R720", "Fan 1 RPM")
+
+**Implementation:** shadcn `<Command>` component (built on cmdk). Backend provides a `/api/search` endpoint for server/sensor queries; pages and actions are client-side.
+
+### 11.3 Keyboard Shortcuts
+
+| Shortcut | Action |
+|---|---|
+| `Cmd/Ctrl + K` | Open command palette |
+| `1` - `9` | Switch to server 1-9 (context) |
+| `D` | Go to Dashboard |
+| `F` | Go to FanPilot |
+| `E` | Go to Event Log (SEL) |
+| `H` | Go to Hardware (FRU) |
+| `M` | Go to Modules |
+| `Space` | Pause/resume live polling |
+| `Cmd/Ctrl + Shift + E` | Export dashboard as image |
+| `?` | Show keyboard shortcuts help |
+
+Shortcuts are active only when no input/textarea is focused. Help modal shows all shortcuts.
+
+### 11.4 Toast Notifications
+
+Every user action and system event produces a toast notification using Sonner (shadcn's recommended toast library).
+
+| Event | Toast Type | Example |
+|---|---|---|
+| Fan speed changed | Success | "FanPilot: speed set to 35% on R720" |
+| Power command executed | Success | "R720: soft power off initiated" |
+| Profile switched | Info | "FanPilot: switched to Silent profile" |
+| IPMI command error | Error | "R720: connection timeout" |
+| Server went offline | Warning | "R630 is unreachable" |
+| Safety override triggered | Warning | "FanPilot: CPU at 87°C — fans set to 100%" |
+| Widget added/removed | Info | "Temperature Chart added to dashboard" |
+| Config saved | Success | "Settings saved" |
+
+Position: bottom-right. Auto-dismiss after 4 seconds. Errors persist until dismissed.
+
+### 11.5 Export Dashboard as Image
+
+- Button in header: "Export" (or `Cmd+Shift+E`)
+- Uses `html-to-image` library to capture the widget grid as PNG
+- Includes IPMILink watermark (small, bottom-right)
+- Opens browser download dialog
+- Useful for sharing setups on Reddit, forums, Discord
+
+### 11.6 Drag Widget from Sidebar
+
+Alternative to the "+ Add Widget" → catalog flow:
+
+- In edit mode (toggle via pencil icon in header), the sidebar shows a "Widgets" section below the nav
+- Widgets are listed as small draggable chips grouped by module
+- User drags a chip onto the grid → it becomes a widget at default size
+- Server assignment: uses the current context server by default, changeable via widget settings
+
+### 11.7 Comparison Widget
+
+A special widget provided by the sensors module that overlays the same sensor from multiple servers on one chart.
+
+- Widget ID: `sensors-comparison`
+- Available sizes: `3x2`, `4x2`, `6x2`
+- Configuration: select sensor type (e.g., "CPU Temp") + select 2-6 servers
+- Each server's line uses that server's assigned color
+- Legend shows server name + current value
+- Useful for thermal comparison across identical hardware
+
+### 11.8 Sparklines in Metric Widgets
+
+The 1x1 metric widgets (CPU temp, inlet temp, power draw, fan speed) include a mini sparkline showing the last 5 minutes of data.
+
+- Sparkline is a simple polyline SVG, 60px wide, rendered below the metric value
+- Color matches the metric's semantic color (blue for temp, amber for fan, etc.)
+- No axes, no labels — just the trend shape
+- Data comes from the same WebSocket feed, buffered client-side (last 60 data points)
+
+### 11.9 Onboarding Tour
+
+On first login after setup, a guided tour highlights key UI elements:
+
+1. **Sidebar navigation** — "This is where you switch between modules"
+2. **Server selector** — "Your servers are here. Click to switch context"
+3. **Widget grid** — "This is your dashboard. Drag widgets to rearrange"
+4. **Add Widget button** — "Click here to add new widgets from your modules"
+5. **FanPilot** — "Set up fan curves to keep your servers cool and quiet"
+
+Implementation: lightweight library (e.g., `driver.js` or custom overlay). Tour can be restarted from Settings. Dismissed state saved in `localStorage`.
+
+### 11.10 Empty States
+
+Every page has a designed empty state with illustration and call-to-action:
+
+| Page | Empty State Message | CTA |
+|---|---|---|
+| Dashboard (no widgets) | "Your dashboard is empty" | "Add your first widget" |
+| Dashboard (no servers) | "No servers configured" | "Add a server" → Settings |
+| FanPilot (no profiles) | "No fan profiles yet" | "Create your first profile" |
+| SEL (no events) | "No events recorded" | "Refresh from BMC" |
+| Modules (all enabled) | "All modules are active" | N/A (informational) |
+
+Empty states use a minimal SVG illustration (monochrome, matching the theme) and a single primary CTA button.
+
+---
+
+## 12. Architectural Decisions
+
+### 12.1 Frontend State Management: Zustand
+
+Global state is managed with **Zustand** (lightweight, performant, no boilerplate).
+
+Stores:
+- `useServerStore` — server list, active context server, connection statuses
+- `useSensorStore` — latest sensor readings per server (fed by WebSocket)
+- `useLayoutStore` — dashboard widget grid layout
+- `useAuthStore` — auth state, user info
+- `useModuleStore` — installed modules, enabled/disabled state
+
+WebSocket data flows directly into Zustand stores. Widgets subscribe to the specific slice they need via selectors — only re-render when their data changes.
+
+### 12.2 Data Downsampling: Query-Time Aggregation
+
+Raw sensor data is stored at full resolution (every 5 seconds). When the frontend requests historical data, the backend aggregates on-the-fly using SQLite:
+
+| Requested Range | Aggregation | Approx Points |
+|---|---|---|
+| Last 5 min | None (raw) | 60 |
+| Last 1 hour | 30s average | 120 |
+| Last 6 hours | 2min average | 180 |
+| Last 24 hours | 5min average | 288 |
+| Last 7 days | 30min average | 336 |
+| Last 30 days | 2h average | 360 |
+| Custom | Auto (target ~300 points) | ~300 |
+
+Query pattern:
+```sql
+SELECT
+  strftime('%Y-%m-%d %H:%M', timestamp, 'start of minute', printf('-%d minutes', (strftime('%M', timestamp) % 5))) as bucket,
+  AVG(value) as value,
+  sensor_name
+FROM sensor_readings
+WHERE server_id = ? AND timestamp > ? AND sensor_name = ?
+GROUP BY bucket, sensor_name
+ORDER BY bucket
+```
+
+No background compaction job. Raw data stays intact until the retention cleanup deletes rows older than `retention_days`.
+
+### 12.3 Demo Mode (Mock IPMI)
+
+For development and for users who want to try the app without real hardware:
+
+- Activated via `--demo` flag or `IPMILINK_DEMO=true` env var
+- `DemoIPMIService` replaces `LocalIPMIService` — same interface, fake data
+- Generates realistic sensor data: CPU temp oscillating 35-55°C with noise, fan RPM correlated to temp, power draw 150-200W with spikes
+- Simulates 2 virtual servers ("Demo R720", "Demo R630")
+- All modules work normally — FanPilot applies curves to simulated temps, power control toggles virtual state, SEL has sample events
+- Demo mode shows a persistent banner: "Running in demo mode — no real hardware connected"
+
+### 12.4 Build Pipeline
+
+**Development:**
+```
+Terminal 1: cd backend && uvicorn main:app --reload --port 3000
+Terminal 2: cd frontend && npm run dev  (Vite dev server on :5173, proxies /api to :3000)
+```
+
+**Production (Docker):**
+```dockerfile
+# Stage 1: Build frontend
+FROM node:20-alpine AS frontend
+WORKDIR /app/frontend
+COPY frontend/ .
+RUN npm ci && npm run build
+
+# Stage 2: Python backend + built frontend
+FROM python:3.11-slim
+RUN apt-get update && apt-get install -y ipmitool && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY backend/ ./backend/
+COPY --from=frontend /app/frontend/dist ./backend/static/
+RUN pip install --no-cache-dir -e ./backend
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "3000"]
+```
+
+FastAPI serves the frontend static build from `backend/static/`. The frontend's `vite.config.ts` sets `base: '/'` and the build output goes to `dist/`.
+
+### 12.5 Graceful Shutdown
+
+On `SIGTERM` or `SIGINT` (Docker stop, Ctrl+C):
+
+```
+1. Stop accepting new WebSocket connections
+2. FanPilot: for each server with manual fan control active:
+     → Send `raw 0x30 0x30 0x01 0x01` (restore BMC auto mode)
+     → Log "Safety: restored auto mode on <server>"
+3. Stop all sensor polling loops
+4. Close all WebSocket connections
+5. Flush pending SQLite writes
+6. Close SQLite connection
+7. Exit
+```
+
+Step 2 is **critical** — if the app crashes without restoring auto mode, fans stay at the last manual speed. Python `atexit` + `signal` handlers ensure this runs even on unexpected termination. Docker `STOPSIGNAL SIGTERM` with a 30-second grace period.
+
+### 12.6 Error Handling Strategy
+
+| Error | Behavior | User Feedback |
+|---|---|---|
+| **ipmitool timeout** (BMC unreachable) | Mark server `is_online=false`, stop polling for that server, retry every 30s | Toast: "R720 is unreachable". Status dot goes red. |
+| **ipmitool command error** (bad credentials, unsupported command) | Log error, do not retry automatically | Toast: error message. Command log entry with error detail. |
+| **FanPilot fails to set speed** | Retry once after 5s. If still fails, restore auto mode for safety. | Toast: "FanPilot error on R720 — restored auto mode" |
+| **SQLite write fails** (disk full, locked) | Log error, continue polling (data lost for that tick), show warning | Toast: "Database write failed — check disk space" |
+| **WebSocket disconnect** (browser side) | Auto-reconnect with linear backoff: 1s, 3s, 5s, 10s, then every 10s | UI shows "Reconnecting..." badge in header |
+| **Module crash** (unhandled exception in a module) | Catch at module boundary, disable the module, log stack trace | Toast: "Module <name> encountered an error and was disabled" |
+
+### 12.7 Testing Strategy
+
+**Backend (pytest):**
+- Unit tests: IPMI parser (parse sdr/sel/fru output against real captured output files)
+- Unit tests: FanPilot engine (curve interpolation, hysteresis, safety override)
+- Unit tests: Module loader, event bus
+- Integration tests: FastAPI routes with `TestClient`, SQLite in-memory
+- Mock: `DemoIPMIService` used for all tests — no real BMC needed
+
+**Frontend (Vitest + React Testing Library):**
+- Unit tests: Zustand stores (sensor data flow, layout persistence)
+- Component tests: Widget rendering, fan curve editor interactions
+- No E2E for MVP — manual testing with demo mode
+
+**CI:** GitHub Actions — `pytest` + `npm run test` + `npm run build` on every PR.
+
+### 12.8 Frontend Routing: React Router v7
+
+```
+/              → Dashboard (widget grid)
+/fanpilot      → FanPilot page (context server)
+/sel           → SEL page (context server)
+/fru           → FRU page (context server)
+/modules       → Module catalog
+/settings      → Settings (general, servers, auth)
+/setup         → First-run wizard (redirect if already configured)
+```
+
+Lazy loading per page with `React.lazy()` + `Suspense`. Sidebar nav highlights the active route.
+
+---
+
+## 13. Cloud-Readiness Checklist
 
 These patterns are baked into the self-hosted code so the cloud transition is mechanical, not architectural:
 
@@ -854,36 +1493,62 @@ These patterns are baked into the self-hosted code so the cloud transition is me
 
 ---
 
-## 12. Roadmap
+## 14. Roadmap
 
 ### Phase 1 — MVP (Current Scope)
 
-- [ ] Project scaffolding (backend + frontend + Docker)
+**Core Infrastructure:**
+- [ ] Project scaffolding (core + module system + frontend + Docker)
+- [ ] Core: module loader, event bus, config, auth, database, WebSocket manager
+- [ ] Core: IPMIService interface + LocalIPMIService
 - [ ] Setup wizard (first-run user creation + first BMC)
-- [ ] Sensor polling loop + SQLite storage
-- [ ] WebSocket broadcast to frontend
-- [ ] Dashboard with live temperature + fan RPM charts
-- [ ] Power control (all 6 commands)
-- [ ] FanPilot: fan curve editor + profiles + async loop
-- [ ] SEL viewer with filters and export
-- [ ] FRU viewer
+
+**Modules:**
+- [ ] Module: sensors (polling loop, SQLite storage, WebSocket broadcast)
+- [ ] Module: power (6 commands, status polling)
+- [ ] Module: fanpilot (engine, async loop, curve editor, profiles)
+- [ ] Module: sel (viewer, filters, export)
+- [ ] Module: fru (viewer, caching)
+
+**Dashboard & Widgets:**
+- [ ] Widget grid with react-grid-layout (drag, drop, resize)
+- [ ] Widget catalog ("Add Widget" panel)
+- [ ] Dashboard layout persistence (per user)
+- [ ] Cross-server widgets (server_id per widget)
+- [ ] Sparklines in 1x1 metric widgets
+- [ ] Module enable/disable from Settings
+
+**UX:**
+- [ ] Dark/Light mode toggle
+- [ ] Command palette (Cmd+K)
+- [ ] Keyboard shortcuts
+- [ ] Toast notifications (Sonner)
+- [ ] Empty states with illustrations and CTAs
+- [ ] Onboarding tour (first login)
+
+**Packaging:**
 - [ ] Docker image + docker-compose
 
 ### Phase 2 — Multi-Server + Polish
 
-- [ ] Multi-server dashboard (panoramic view, add/remove servers)
-- [ ] Alert system (configurable thresholds, browser notifications)
+- [ ] Multi-server management (add/remove/edit servers with name, description, color)
+- [ ] Server groups/tags
+- [ ] Comparison widget (same sensor across multiple servers)
+- [ ] Drag widget from sidebar
+- [ ] Export dashboard as image
+- [ ] Module catalog page (`/modules`) with visual cards
+- [ ] Alert module (configurable thresholds, browser notifications)
+- [ ] Scheduler module (time-based profile switching)
 - [ ] Historical chart improvements (zoom, pan, comparison)
-- [ ] Voltage and power consumption charts
 - [ ] Profile import/export (JSON)
 - [ ] Improved mobile responsive layout
 
-### Phase 3 — Advanced
+### Phase 3 — Marketplace + Advanced
 
+- [ ] External module registry (`registry.ipmilink.io`)
+- [ ] In-app module install/uninstall (hot-load, no restart)
+- [ ] Metrics-exporter module (Prometheus `/metrics`)
+- [ ] Console module (SOL via xterm.js)
+- [ ] Discovery module (auto-scan LAN for BMCs)
 - [ ] Supermicro + HPE iLO vendor support
-- [ ] Serial over LAN (SOL) via browser terminal
-- [ ] Auto-discovery of BMCs on the network
-- [ ] Prometheus exporter (`/metrics` endpoint)
-- [ ] Config backup/restore
-- [ ] Plugin system for community extensions
 - [ ] Cloud Edition (relay + agent + OAuth + E2E encryption)
