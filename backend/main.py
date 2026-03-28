@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import signal
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -49,7 +48,6 @@ async def lifespan(app: FastAPI):
     config = load_config()
     _setup_logging(config.logging.level)
 
-    # Check for --demo flag or env
     if config.demo:
         logger.info("*** DEMO MODE — no real hardware ***")
 
@@ -73,7 +71,7 @@ async def lifespan(app: FastAPI):
         from backend.core.ipmi_service import LocalIPMIService
         ipmi_service = LocalIPMIService(timeout=config.ipmi.command_timeout)
 
-    # Inject globals into modules
+    # Inject globals into modules package
     import backend.modules as modules_pkg
     modules_pkg.db = db
     modules_pkg.ipmi = ipmi_service
@@ -81,10 +79,10 @@ async def lifespan(app: FastAPI):
     modules_pkg.ws = ws_manager
     modules_pkg.config = config
 
-    # Load modules
+    # Load modules (discover, run migrations, register events)
+    # Routes are already mounted statically below — this just does DB + events + tasks
     module_loader = ModuleLoader(db, event_bus)
     await module_loader.discover_and_load(config.modules)
-    module_loader.mount_routes(app)
 
     # Start module background tasks
     await module_loader.start_background_tasks()
@@ -118,13 +116,12 @@ async def websocket_endpoint(websocket: WebSocket):
     await ws_manager.connect(websocket)
     try:
         while True:
-            # Keep connection alive, receive pings
             await websocket.receive_text()
     except WebSocketDisconnect:
         ws_manager.disconnect(websocket)
 
 
-# === Import and mount API routes ===
+# === Mount API routes (static, at import time) ===
 
 from backend.api.auth_routes import router as auth_router
 from backend.api.server_routes import router as server_router
@@ -136,12 +133,39 @@ app.include_router(auth_router, prefix="/api/auth", tags=["Auth"])
 app.include_router(server_router, prefix="/api/servers", tags=["Servers"])
 app.include_router(system_router, prefix="/api", tags=["System"])
 app.include_router(dashboard_router, prefix="/api/dashboard", tags=["Dashboard"])
-app.include_router(module_router, prefix="/api/modules", tags=["Modules"])
+app.include_router(module_router, prefix="/api/admin/modules", tags=["Modules"])
 
-# Serve frontend static files (production build)
+# === Mount module routes statically (imported at module level) ===
+
+from backend.modules.sensors.routes import router as sensors_router
+from backend.modules.fanpilot.routes import router as fanpilot_router
+from backend.modules.power.routes import router as power_router
+from backend.modules.sel.routes import router as sel_router
+from backend.modules.fru.routes import router as fru_router
+
+app.include_router(sensors_router, prefix="/api/modules/sensors", tags=["Sensors"])
+app.include_router(fanpilot_router, prefix="/api/modules/fanpilot", tags=["FanPilot"])
+app.include_router(power_router, prefix="/api/modules/power", tags=["Power"])
+app.include_router(sel_router, prefix="/api/modules/sel", tags=["SEL"])
+app.include_router(fru_router, prefix="/api/modules/fru", tags=["FRU"])
+
+# === Serve frontend static files (SPA with fallback to index.html) ===
 static_dir = Path(__file__).parent / "static"
 if static_dir.exists():
-    app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="frontend")
+    from fastapi.responses import FileResponse
+
+    # Serve static assets (JS, CSS, images) directly
+    app.mount("/assets", StaticFiles(directory=str(static_dir / "assets")), name="static-assets")
+
+    # SPA fallback: any non-API route returns index.html for React Router
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        # Try to serve the exact file first (favicon.svg, etc.)
+        file_path = static_dir / full_path
+        if full_path and file_path.is_file():
+            return FileResponse(file_path)
+        # Otherwise return index.html for React Router
+        return FileResponse(static_dir / "index.html")
 
 
 # === CLI entry point ===
@@ -186,9 +210,9 @@ def _reset_password():
 
     async def _do_reset():
         cfg = load_config()
-        db = Database(cfg.data.db_path)
-        await db.connect()
-        am = AuthManager(db)
+        _db = Database(cfg.data.db_path)
+        await _db.connect()
+        am = AuthManager(_db)
         await am.initialize()
 
         username = input("Username: ")
@@ -199,7 +223,7 @@ def _reset_password():
         else:
             await am.create_user(username, password)
             print(f"User {username} created")
-        await db.close()
+        await _db.close()
 
     asyncio.run(_do_reset())
 
