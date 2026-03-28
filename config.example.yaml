@@ -1,0 +1,35 @@
+server:
+  host: 0.0.0.0
+  port: 3000
+  https: false
+  # cert_file: /path/to/cert.pem
+  # key_file: /path/to/key.pem
+
+auth:
+  enabled: true
+  session_expiry: 24h
+  max_login_attempts: 5
+
+ipmi:
+  poll_interval: 5            # seconds
+  power_poll_interval: 10     # seconds
+  command_timeout: 10         # seconds
+
+data:
+  retention_days: 365
+  cleanup_interval: 24h
+
+logging:
+  level: info                 # debug, info, warning, error
+
+modules:
+  sensors:
+    enabled: true
+  fanpilot:
+    enabled: true
+  power:
+    enabled: true
+  sel:
+    enabled: true
+  fru:
+    enabled: true

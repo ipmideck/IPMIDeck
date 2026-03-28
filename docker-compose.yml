@@ -1,0 +1,13 @@
+services:
+  ipmilink:
+    build: .
+    container_name: ipmilink
+    network_mode: host
+    volumes:
+      - ipmilink-data:/data
+    environment:
+      - IPMILINK_DEMO=false
+    restart: unless-stopped
+
+volumes:
+  ipmilink-data:

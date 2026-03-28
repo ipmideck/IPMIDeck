@@ -45,5 +45,8 @@ Thumbs.db
 # Docker
 ipmilink-data/
 
+# Local data directory
+data/
+
 # Claude
 .claude/
