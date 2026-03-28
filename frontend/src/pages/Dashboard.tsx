@@ -1,7 +1,32 @@
+import { useEffect } from "react";
 import { Header } from "@/components/layout/Header";
+import { WidgetGrid } from "@/components/dashboard/WidgetGrid";
+import { useLayoutStore } from "@/stores/layout-store";
+import { useServerStore } from "@/stores/server-store";
+import { get } from "@/api/client";
 import { Plus } from "lucide-react";
 
 export default function Dashboard() {
+  const { layout, setLayout } = useLayoutStore();
+  const contextServerId = useServerStore((s) => s.contextServerId);
+  const servers = useServerStore((s) => s.servers);
+
+  // Load layout from backend
+  useEffect(() => {
+    async function loadLayout() {
+      try {
+        const data = await get<{ layout: any[] }>("/api/dashboard/layout");
+        if (data.layout?.length > 0) {
+          setLayout(data.layout);
+        }
+      } catch { /* ignore */ }
+    }
+    loadLayout();
+  }, [setLayout]);
+
+  const hasWidgets = layout.length > 0;
+  const hasServers = servers.length > 0;
+
   return (
     <>
       <Header title="Dashboard">
@@ -19,26 +44,25 @@ export default function Dashboard() {
             7D
           </button>
         </div>
-        <button className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted">
-          <Plus className="h-3 w-3" />
-          Add Widget
-        </button>
       </Header>
       <div className="flex-1 overflow-auto p-6">
-        {/* Empty state */}
-        <div className="flex flex-col items-center justify-center py-24 text-center">
-          <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-xl bg-muted">
-            <Plus className="h-6 w-6 text-muted-foreground" />
+        {hasWidgets && hasServers ? (
+          <WidgetGrid />
+        ) : (
+          <div className="flex flex-col items-center justify-center py-24 text-center">
+            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-xl bg-muted">
+              <Plus className="h-6 w-6 text-muted-foreground" />
+            </div>
+            <h2 className="text-lg font-semibold">
+              {hasServers ? "Your dashboard is empty" : "No servers configured"}
+            </h2>
+            <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+              {hasServers
+                ? "Widgets will appear automatically when sensor data arrives."
+                : "Add a server in Settings to start monitoring."}
+            </p>
           </div>
-          <h2 className="text-lg font-semibold">Your dashboard is empty</h2>
-          <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-            Add widgets to monitor your servers. Click "Add Widget" to get started, or
-            configure a server first in Settings.
-          </p>
-          <button className="mt-4 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:opacity-90">
-            Add your first widget
-          </button>
-        </div>
+        )}
       </div>
     </>
   );
