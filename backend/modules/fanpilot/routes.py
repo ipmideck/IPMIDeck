@@ -1,0 +1,189 @@
+"""FanPilot routes — profiles CRUD, mode control, status."""
+
+from __future__ import annotations
+
+import json
+
+from fastapi import APIRouter
+from pydantic import BaseModel
+
+router = APIRouter()
+
+
+class ProfileCreate(BaseModel):
+    name: str
+    description: str = ""
+    curve_points: list[dict]
+    interpolation: str = "linear"
+    hysteresis: float = 3.0
+    safety_threshold: float = 85.0
+    source_sensor: str = "CPU Temp"
+
+
+class ProfileUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    curve_points: list[dict] | None = None
+    interpolation: str | None = None
+    hysteresis: float | None = None
+    safety_threshold: float | None = None
+    source_sensor: str | None = None
+
+
+class FanMode(BaseModel):
+    mode: str  # auto, manual, fanpilot
+    profile_id: int | None = None
+    manual_speed: int | None = None
+
+
+# === Profiles ===
+
+@router.get("/profiles")
+async def list_profiles():
+    import backend.modules as ctx
+    rows = await ctx.db.fetchall("SELECT * FROM fan_profiles ORDER BY is_preset DESC, name")
+    for row in rows:
+        row["curve_points"] = json.loads(row["curve_points"])
+    return {"profiles": rows}
+
+
+@router.post("/profiles")
+async def create_profile(body: ProfileCreate):
+    import backend.modules as ctx
+    await ctx.db.execute(
+        "INSERT INTO fan_profiles (name, description, curve_points, interpolation, hysteresis, safety_threshold, source_sensor) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (body.name, body.description, json.dumps(body.curve_points), body.interpolation,
+         body.hysteresis, body.safety_threshold, body.source_sensor),
+    )
+    await ctx.db.commit()
+    row = await ctx.db.fetchone("SELECT last_insert_rowid() as id")
+    return {"success": True, "profile_id": row["id"]}
+
+
+@router.get("/profiles/{profile_id}")
+async def get_profile(profile_id: int):
+    import backend.modules as ctx
+    row = await ctx.db.fetchone("SELECT * FROM fan_profiles WHERE id = ?", (profile_id,))
+    if not row:
+        return {"success": False, "error": "Profile not found"}
+    row["curve_points"] = json.loads(row["curve_points"])
+    return {"profile": row}
+
+
+@router.put("/profiles/{profile_id}")
+async def update_profile(profile_id: int, body: ProfileUpdate):
+    import backend.modules as ctx
+    existing = await ctx.db.fetchone("SELECT is_preset FROM fan_profiles WHERE id = ?", (profile_id,))
+    if not existing:
+        return {"success": False, "error": "Profile not found"}
+
+    updates = []
+    params = []
+    for field in ["name", "description", "interpolation", "hysteresis", "safety_threshold", "source_sensor"]:
+        val = getattr(body, field, None)
+        if val is not None:
+            updates.append(f"{field} = ?")
+            params.append(val)
+
+    if body.curve_points is not None:
+        updates.append("curve_points = ?")
+        params.append(json.dumps(body.curve_points))
+
+    if not updates:
+        return {"success": False, "error": "No fields to update"}
+
+    updates.append("updated_at = CURRENT_TIMESTAMP")
+    params.append(profile_id)
+    await ctx.db.execute(f"UPDATE fan_profiles SET {', '.join(updates)} WHERE id = ?", tuple(params))
+    await ctx.db.commit()
+    return {"success": True}
+
+
+@router.delete("/profiles/{profile_id}")
+async def delete_profile(profile_id: int):
+    import backend.modules as ctx
+    existing = await ctx.db.fetchone("SELECT is_preset FROM fan_profiles WHERE id = ?", (profile_id,))
+    if not existing:
+        return {"success": False, "error": "Profile not found"}
+    if existing["is_preset"]:
+        return {"success": False, "error": "Cannot delete preset profiles"}
+    await ctx.db.execute("DELETE FROM fan_profiles WHERE id = ?", (profile_id,))
+    await ctx.db.commit()
+    return {"success": True}
+
+
+# === Server FanPilot control ===
+
+@router.get("/{server_id}/status")
+async def get_fanpilot_status(server_id: str):
+    import backend.modules as ctx
+    server = await ctx.db.fetchone(
+        "SELECT fanpilot_enabled, fanpilot_profile_id FROM servers WHERE id = ?", (server_id,)
+    )
+    if not server:
+        return {"success": False, "error": "Server not found"}
+
+    profile = None
+    if server["fanpilot_profile_id"]:
+        profile = await ctx.db.fetchone(
+            "SELECT id, name FROM fan_profiles WHERE id = ?", (server["fanpilot_profile_id"],)
+        )
+
+    return {
+        "server_id": server_id,
+        "enabled": bool(server["fanpilot_enabled"]),
+        "profile": profile,
+    }
+
+
+@router.post("/{server_id}/mode")
+async def set_fanpilot_mode(server_id: str, body: FanMode):
+    import backend.modules as ctx
+    from backend.core.crypto import decrypt
+    from backend.main import auth
+
+    server = await ctx.db.fetchone(
+        "SELECT host, username_enc, password_enc FROM servers WHERE id = ?", (server_id,)
+    )
+    if not server:
+        return {"success": False, "error": "Server not found"}
+
+    key = auth.get_encryption_key()
+    host = server["host"]
+    user = decrypt(server["username_enc"], key)
+    pwd = decrypt(server["password_enc"], key)
+
+    if body.mode == "auto":
+        await ctx.ipmi.set_fan_mode(host, user, pwd, manual=False)
+        await ctx.db.execute(
+            "UPDATE servers SET fanpilot_enabled = 0 WHERE id = ?", (server_id,)
+        )
+    elif body.mode == "manual":
+        speed = body.manual_speed or 50
+        await ctx.ipmi.set_fan_mode(host, user, pwd, manual=True)
+        await ctx.ipmi.set_fan_speed(host, user, pwd, speed)
+        await ctx.db.execute(
+            "UPDATE servers SET fanpilot_enabled = 0 WHERE id = ?", (server_id,)
+        )
+    elif body.mode == "fanpilot":
+        profile_id = body.profile_id
+        if not profile_id:
+            return {"success": False, "error": "profile_id required for fanpilot mode"}
+        await ctx.db.execute(
+            "UPDATE servers SET fanpilot_enabled = 1, fanpilot_profile_id = ? WHERE id = ?",
+            (profile_id, server_id),
+        )
+    else:
+        return {"success": False, "error": f"Invalid mode: {body.mode}"}
+
+    await ctx.db.commit()
+
+    # Log
+    await ctx.db.execute(
+        "INSERT INTO command_log (server_id, command_type, command_detail, result) VALUES (?, ?, ?, ?)",
+        (server_id, "fan_mode", body.mode, "success"),
+    )
+    await ctx.db.commit()
+
+    return {"success": True, "mode": body.mode}
