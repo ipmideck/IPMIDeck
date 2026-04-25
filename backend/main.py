@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import logging
 import sys
 from contextlib import asynccontextmanager
@@ -216,7 +217,7 @@ def _reset_password():
         await am.initialize()
 
         username = input("Username: ")
-        password = input("New password: ")
+        password = getpass.getpass("New password: ")
         if await am.has_user():
             await am.update_password(username, password)
             print(f"Password updated for {username}")
