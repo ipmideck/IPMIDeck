@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -25,6 +26,12 @@ class AuthManager:
     def __init__(self, db: Database):
         self.db = db
         self._secret: str = ""
+        # SEC-03 brute-force lockout state (D-01, D-02): per-username, in-memory.
+        # Resets on server restart per D-02 (acceptable for LAN single-process).
+        # Format: {username: {"count": int, "last_failure": float, "locked_until": float}}
+        # Times are time.monotonic() seconds — do NOT mix with time.time().
+        self._fail_state: dict[str, dict] = {}
+        self._fail_lock = asyncio.Lock()
 
     async def initialize(self) -> None:
         """Load or generate app secret for session signing."""
@@ -69,6 +76,52 @@ class AuthManager:
             (pw_hash, username),
         )
         await self.db.commit()
+
+    # === SEC-03: Brute-force lockout (per-username, in-memory) ===
+
+    async def check_lockout(self, username: str) -> bool:
+        """Return True iff this username is currently locked out.
+
+        Per D-03: counter resets if last failure is > 1h ago.
+        Lock is held only for the dict R/M/W (no awaits inside) per RESEARCH lines 199-209.
+        """
+        async with self._fail_lock:
+            state = self._fail_state.get(username)
+            if not state:
+                return False
+            now = time.monotonic()
+            # Reset stale entries (> 1h since last failure)
+            if now - state["last_failure"] > 3600:
+                self._fail_state.pop(username, None)
+                return False
+            return state["locked_until"] > now
+
+    async def record_failure(self, username: str) -> None:
+        """Record a failed login attempt and apply exponential backoff if past threshold.
+
+        Per D-03: first 5 failures are silent (counter only). From the 6th failure onward,
+        lock for `min(60 * 2**(count-6), 3600)` seconds.
+        """
+        async with self._fail_lock:
+            now = time.monotonic()
+            state = self._fail_state.setdefault(
+                username, {"count": 0, "last_failure": 0.0, "locked_until": 0.0}
+            )
+            state["count"] += 1
+            state["last_failure"] = now
+            if state["count"] >= 6:
+                exponent = state["count"] - 6  # 0 on first lockout (count=6)
+                duration = min(60 * (2 ** exponent), 3600)
+                state["locked_until"] = now + duration
+                logger.warning(
+                    "Account '%s' locked for %ds after %d failures",
+                    username, duration, state["count"],
+                )
+
+    async def reset_failures(self, username: str) -> None:
+        """Clear failure state for a username (called after successful login)."""
+        async with self._fail_lock:
+            self._fail_state.pop(username, None)
 
     def create_session_token(self, username: str) -> str:
         payload = {
