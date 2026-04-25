@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from backend.core.auth import require_auth
 
 router = APIRouter()
 
@@ -22,7 +24,7 @@ async def health():
     }
 
 
-@router.get("/config")
+@router.get("/config", dependencies=[Depends(require_auth)])
 async def get_config():
     from backend.main import config
     return {
@@ -33,7 +35,7 @@ async def get_config():
     }
 
 
-@router.get("/logs")
+@router.get("/logs", dependencies=[Depends(require_auth)])
 async def get_command_log(limit: int = 50, server_id: str | None = None):
     from backend.main import db
     if server_id:
@@ -48,7 +50,7 @@ async def get_command_log(limit: int = 50, server_id: str | None = None):
     return {"logs": rows}
 
 
-@router.get("/search")
+@router.get("/search", dependencies=[Depends(require_auth)])
 async def search(q: str):
     """Global search for command palette — searches servers, sensors, actions."""
     from backend.main import db, module_loader

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Cookie, Request, Response
+from fastapi import APIRouter, Cookie, Depends, Request, Response
 from pydantic import BaseModel
+
+from backend.core.auth import require_auth
 
 router = APIRouter()
 
@@ -18,7 +20,7 @@ class SetupRequest(BaseModel):
     password: str
 
 
-@router.get("/me")
+@router.get("/me", dependencies=[Depends(require_auth)])
 async def get_me(request: Request):
     from backend.main import auth
     if not await auth.is_auth_enabled():
@@ -54,7 +56,7 @@ async def login(body: LoginRequest, response: Response):
     return {"success": True, "username": body.username}
 
 
-@router.post("/logout")
+@router.post("/logout", dependencies=[Depends(require_auth)])
 async def logout(response: Response):
     response.delete_cookie("session")
     return {"success": True}
@@ -80,7 +82,18 @@ async def auth_status():
 
 @router.post("/toggle")
 async def toggle_auth(request: Request):
+    """Toggle auth on/off.
+
+    Per D-08 (SEC-02): when auth is currently ENABLED, require a valid session.
+    When auth is DISABLED, anyone may re-enable it (bootstrap path; no users yet
+    means no one can authenticate).
+    """
     from backend.main import auth
+    if await auth.is_auth_enabled():
+        token = request.cookies.get("session")
+        if not token or not auth.verify_session_token(token):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=401, detail={"error": "unauthorized"})
     body = await request.json()
     enabled = body.get("enabled", True)
     await auth.set_auth_enabled(enabled)
