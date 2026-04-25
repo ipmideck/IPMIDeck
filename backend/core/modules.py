@@ -110,12 +110,20 @@ class ModuleLoader:
         self._enabled[module_id] = enabled
         await self.db.set_config(f"modules.{module_id}.enabled", str(enabled).lower())
 
-    def mount_routes(self, app: Any) -> None:
-        """Mount all enabled module routers on the FastAPI app."""
+    def mount_routes(self, app: Any, dependencies: list | None = None) -> None:
+        """Mount all enabled module routers on the FastAPI app.
+
+        Per FIX-04 / D-09: only ENABLED modules get their routes mounted.
+        Disabled modules return 404 for /api/modules/{id}/* (route never registered).
+
+        `dependencies` is forwarded to FastAPI's include_router for auth gating
+        (typically [Depends(require_auth)] from main.py lifespan).
+        """
+        deps = dependencies or []
         for mod in self.get_enabled_modules():
             if mod.router:
                 prefix = f"/api/modules/{mod.id}"
-                app.include_router(mod.router, prefix=prefix, tags=[mod.name])
+                app.include_router(mod.router, prefix=prefix, tags=[mod.name], dependencies=deps)
                 logger.info("Mounted routes: %s -> %s", mod.name, prefix)
 
     async def start_background_tasks(self) -> None:

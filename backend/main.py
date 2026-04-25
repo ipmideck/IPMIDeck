@@ -10,10 +10,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
-from backend.core.auth import AuthManager
+from backend.core.auth import AuthManager, require_auth
 from backend.core.config import AppConfig, load_config, save_default_config
 from backend.core.database import Database
 from backend.core.events import EventBus
@@ -81,9 +81,12 @@ async def lifespan(app: FastAPI):
     modules_pkg.config = config
 
     # Load modules (discover, run migrations, register events)
-    # Routes are already mounted statically below — this just does DB + events + tasks
     module_loader = ModuleLoader(db, event_bus)
     await module_loader.discover_and_load(config.modules)
+
+    # FIX-04: dynamically mount only enabled modules' routes (with auth guard).
+    # Disabled modules will never have their routes registered → 404 instead of 200.
+    module_loader.mount_routes(app, dependencies=[Depends(require_auth)])
 
     # Start module background tasks
     await module_loader.start_background_tasks()
@@ -131,24 +134,11 @@ from backend.api.dashboard_routes import router as dashboard_router
 from backend.api.module_routes import router as module_router
 
 app.include_router(auth_router, prefix="/api/auth", tags=["Auth"])
-app.include_router(server_router, prefix="/api/servers", tags=["Servers"])
+app.include_router(server_router, prefix="/api/servers", tags=["Servers"], dependencies=[Depends(require_auth)])
 app.include_router(system_router, prefix="/api", tags=["System"])
-app.include_router(dashboard_router, prefix="/api/dashboard", tags=["Dashboard"])
-app.include_router(module_router, prefix="/api/admin/modules", tags=["Modules"])
+app.include_router(dashboard_router, prefix="/api/dashboard", tags=["Dashboard"], dependencies=[Depends(require_auth)])
+app.include_router(module_router, prefix="/api/admin/modules", tags=["Modules"], dependencies=[Depends(require_auth)])
 
-# === Mount module routes statically (imported at module level) ===
-
-from backend.modules.sensors.routes import router as sensors_router
-from backend.modules.fanpilot.routes import router as fanpilot_router
-from backend.modules.power.routes import router as power_router
-from backend.modules.sel.routes import router as sel_router
-from backend.modules.fru.routes import router as fru_router
-
-app.include_router(sensors_router, prefix="/api/modules/sensors", tags=["Sensors"])
-app.include_router(fanpilot_router, prefix="/api/modules/fanpilot", tags=["FanPilot"])
-app.include_router(power_router, prefix="/api/modules/power", tags=["Power"])
-app.include_router(sel_router, prefix="/api/modules/sel", tags=["SEL"])
-app.include_router(fru_router, prefix="/api/modules/fru", tags=["FRU"])
 
 # === Serve frontend static files (SPA with fallback to index.html) ===
 static_dir = Path(__file__).parent / "static"
