@@ -86,7 +86,13 @@ async def lifespan(app: FastAPI):
 
     # FIX-04: dynamically mount only enabled modules' routes (with auth guard).
     # Disabled modules will never have their routes registered → 404 instead of 200.
+    # IMPORTANT: must happen BEFORE the SPA fallback route is registered so FastAPI
+    # routes module paths correctly (catch-all "/{full_path:path}" would shadow them).
     module_loader.mount_routes(app, dependencies=[Depends(require_auth)])
+
+    # Register SPA fallback AFTER all API routes (including dynamically mounted modules).
+    # The catch-all /{full_path:path} must come last or it shadows module routes.
+    _mount_spa(app)
 
     # Start module background tasks
     await module_loader.start_background_tasks()
@@ -140,17 +146,38 @@ app.include_router(dashboard_router, prefix="/api/dashboard", tags=["Dashboard"]
 app.include_router(module_router, prefix="/api/admin/modules", tags=["Modules"], dependencies=[Depends(require_auth)])
 
 
-# === Serve frontend static files (SPA with fallback to index.html) ===
-static_dir = Path(__file__).parent / "static"
-if static_dir.exists():
+def _mount_spa(app: FastAPI) -> None:
+    """Register static file serving and SPA fallback route.
+
+    Called at the END of lifespan startup, AFTER all API routes (including
+    dynamically mounted module routes) are registered. The catch-all
+    /{full_path:path} route must be last — any route registered after it is
+    unreachable because FastAPI matches routes in registration order.
+    """
+    static_dir = Path(__file__).parent / "static"
+    if not static_dir.exists():
+        return
+
     from fastapi.responses import FileResponse
 
     # Serve static assets (JS, CSS, images) directly
-    app.mount("/assets", StaticFiles(directory=str(static_dir / "assets")), name="static-assets")
+    if (static_dir / "assets").exists():
+        try:
+            app.mount("/assets", StaticFiles(directory=str(static_dir / "assets")), name="static-assets")
+        except Exception:
+            pass  # Already mounted (e.g., during --reload; ignore duplicate)
 
-    # SPA fallback: any non-API route returns index.html for React Router
+    # SPA fallback: non-API routes return index.html for React Router.
+    # API paths (/api/*) that don't match a registered route return 404 —
+    # this is critical for FIX-04: disabled modules must return 404, not 200.
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
+        from fastapi import HTTPException
+
+        # Reject unmatched /api/* paths so disabled modules return 404 (not SPA).
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not found")
+
         # Try to serve the exact file first (favicon.svg, etc.)
         file_path = static_dir / full_path
         if full_path and file_path.is_file():
