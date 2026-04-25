@@ -32,9 +32,9 @@ class AuthConfig:
 
 @dataclass
 class IPMIConfig:
-    poll_interval: int = 5
-    power_poll_interval: int = 10
-    command_timeout: int = 10
+    poll_interval: int = 30
+    power_poll_interval: int = 30
+    command_timeout: int = 15
     backend: str = "ipmitool"
 
 
@@ -103,7 +103,8 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
     config = AppConfig()
 
     if config_path is None:
-        config_path = _data_dir() / "config.yaml"
+        env_path = os.environ.get("IPMILINK_CONFIG_PATH")
+        config_path = Path(env_path) if env_path else (_data_dir() / "config.yaml")
 
     path = Path(config_path)
     if path.exists():
@@ -140,7 +141,7 @@ def save_default_config(config_path: str | Path) -> None:
     default = {
         "server": {"host": "0.0.0.0", "port": 3000, "https": False},
         "auth": {"enabled": True, "session_expiry": "24h", "max_login_attempts": 5},
-        "ipmi": {"poll_interval": 5, "power_poll_interval": 10, "command_timeout": 10},
+        "ipmi": {"poll_interval": 30, "power_poll_interval": 30, "command_timeout": 15},
         "data": {"retention_days": 365, "cleanup_interval": "24h"},
         "logging": {"level": "info"},
         "modules": {
