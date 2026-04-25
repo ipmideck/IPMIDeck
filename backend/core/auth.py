@@ -12,6 +12,8 @@ import time
 
 import bcrypt
 
+from fastapi import HTTPException, Request
+
 from backend.core.database import Database
 
 logger = logging.getLogger("ipmilink.auth")
@@ -99,3 +101,30 @@ class AuthManager:
         return hashlib.pbkdf2_hmac(
             "sha256", self._secret.encode(), b"ipmilink-cred-enc", 100000, dklen=32
         )
+
+
+async def require_auth(request: Request) -> str:
+    """FastAPI dependency: validate session cookie. Returns username or raises 401.
+
+    - If auth is DISABLED globally, returns "local" (no-op pass-through). This is critical
+      per Pitfall #2: when admin toggles auth off, every request must still succeed.
+    - If auth is ENABLED, requires a valid session cookie. Missing/invalid → HTTP 401
+      with JSON body {"error": "unauthorized"} per D-07.
+    - NO WWW-Authenticate header (avoids native browser popup in SPA).
+
+    Used as a router-level dep on protected routers and per-endpoint on mixed routers.
+    """
+    # Late import to avoid circular dep — same pattern used by route handlers.
+    from backend.main import auth as _auth
+
+    if not await _auth.is_auth_enabled():
+        return "local"
+
+    token = request.cookies.get("session")
+    if not token:
+        raise HTTPException(status_code=401, detail={"error": "unauthorized"})
+
+    username = _auth.verify_session_token(token)
+    if not username:
+        raise HTTPException(status_code=401, detail={"error": "unauthorized"})
+    return username
