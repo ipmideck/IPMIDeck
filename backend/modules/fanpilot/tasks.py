@@ -25,6 +25,75 @@ async def fanpilot_loop():
     _running = True
     logger.info("FanPilot loop started")
 
+    # === FIX-03 layer 3: Startup recovery ===
+    # If the previous run was killed uncleanly (kill -9, power loss, OOM kill),
+    # the lifespan shutdown hook may not have fired and fans could still be in
+    # manual mode on some BMCs. Detect this by reading command_log: any server
+    # whose latest fan_mode entry is 'manual' or 'fanpilot' (and not followed
+    # by 'auto') needs restoration BEFORE we start the main loop.
+    # Reads ONLY core schema (command_log, servers) — never module-specific tables.
+    try:
+        recovery_rows = await ctx.db.fetchall(
+            """
+            SELECT cl.server_id, cl.command_detail
+            FROM command_log cl
+            INNER JOIN (
+                SELECT server_id, MAX(timestamp) as max_ts
+                FROM command_log
+                WHERE command_type = 'fan_mode'
+                GROUP BY server_id
+            ) latest ON cl.server_id = latest.server_id AND cl.timestamp = latest.max_ts
+            WHERE cl.command_type = 'fan_mode'
+              AND cl.command_detail IN ('manual', 'fanpilot')
+            """
+        )
+        if recovery_rows:
+            logger.warning(
+                "FanPilot startup recovery: %d server(s) had unclean shutdown",
+                len(recovery_rows),
+            )
+            key = auth.get_encryption_key()
+            for row in recovery_rows:
+                server_id = row["server_id"]
+                prev_mode = row["command_detail"]
+                try:
+                    server = await ctx.db.fetchone(
+                        "SELECT host, username_enc, password_enc FROM servers WHERE id = ?",
+                        (server_id,),
+                    )
+                    if not server:
+                        logger.warning(
+                            "Recovery: server %s not found, skipping", server_id,
+                        )
+                        continue
+                    host = server["host"]
+                    user = decrypt(server["username_enc"], key)
+                    pwd = decrypt(server["password_enc"], key)
+                    await ctx.ipmi.set_fan_mode(host, user, pwd, manual=False)
+                    # Log the recovery so the next startup does not re-trigger.
+                    await ctx.db.execute(
+                        "INSERT INTO command_log (server_id, command_type, command_detail, result) "
+                        "VALUES (?, ?, ?, ?)",
+                        (server_id, "fan_mode", "auto", "recovered"),
+                    )
+                    await ctx.db.commit()
+                    logger.warning(
+                        "Recovered fan mode for server %s (was '%s')",
+                        server_id, prev_mode,
+                    )
+                except Exception:
+                    # Per-server isolation: one bad BMC must not block recovery for others.
+                    logger.exception("Failed recovery for server %s", server_id)
+        else:
+            logger.info("FanPilot startup recovery: no servers need restoration")
+    except Exception:
+        # Recovery is best-effort; if the query itself fails (e.g., DB issue),
+        # log and continue into the main loop. The main loop's per-iteration
+        # error handling will then take over.
+        logger.exception("FanPilot startup recovery query failed; continuing")
+
+    # === End FIX-03 layer 3 ===
+
     while _running:
         try:
             servers = await ctx.db.fetchall(
@@ -111,7 +180,7 @@ async def fanpilot_loop():
         except Exception:
             logger.exception("Error in FanPilot loop")
 
-        await asyncio.sleep(5)
+        await asyncio.sleep(30)
 
 
 async def fanpilot_shutdown():
