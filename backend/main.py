@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import logging
+import signal
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -213,6 +214,22 @@ def cli():
     if args.command == "reset-password":
         _reset_password()
         return
+
+    # === FIX-03 layer 2: belt-and-suspenders signal handlers ===
+    # Uvicorn installs its own SIGTERM/SIGINT handlers when it boots and triggers
+    # the lifespan shutdown (which restores fans via fanpilot_shutdown — layer 1).
+    # These handlers ONLY fire if uvicorn never reaches that stage (e.g., bind error,
+    # config load error). They log+exit so the OS doesn't terminate uncleanly.
+    # The actual safety net for kill -9 / power loss is the startup recovery query
+    # in fanpilot/tasks.py:fanpilot_loop (layer 3).
+    def _emergency_shutdown(signum, _frame):
+        logger.warning(
+            "Signal %d received before uvicorn lifespan started — exiting", signum
+        )
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, _emergency_shutdown)
+    signal.signal(signal.SIGINT, _emergency_shutdown)
 
     uvicorn.run(
         "backend.main:app",
