@@ -14,9 +14,6 @@ def encrypt(plaintext: str, key: bytes) -> str:
     iv = os.urandom(16)
     padder = PKCS7(128).padder()
     padded = padder.update(plaintext.encode()) + padder.finalize()
-    cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
-    ct = cipher.encryptor().update(padded) + cipher.encryptor().finalize()
-    # Simpler: use one-shot
     encryptor = Cipher(algorithms.AES(key), modes.CBC(iv)).encryptor()
     ct = encryptor.update(padded) + encryptor.finalize()
     return b64encode(iv + ct).decode()
