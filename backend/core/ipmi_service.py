@@ -60,24 +60,32 @@ class LocalIPMIService(IPMIService):
 
     def __init__(self, timeout: int = 10):
         self.timeout = timeout
+        self._host_locks: dict[str, asyncio.Semaphore] = {}
+
+    def _get_host_lock(self, host: str) -> asyncio.Semaphore:
+        """Return a per-host semaphore (max 1 concurrent call per BMC)."""
+        if host not in self._host_locks:
+            self._host_locks[host] = asyncio.Semaphore(1)
+        return self._host_locks[host]
 
     async def _exec(self, host: str, user: str, password: str, args: list[str]) -> str:
         cmd = ["ipmitool", "-I", "lanplus", "-H", host, "-U", user, "-P", password, *args]
         logger.debug("Executing: ipmitool -I lanplus -H %s -U %s ... %s", host, user, " ".join(args))
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=self.timeout)
-        except asyncio.TimeoutError:
-            proc.kill()
-            raise TimeoutError(f"ipmitool timed out after {self.timeout}s")
+        async with self._get_host_lock(host):
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            try:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=self.timeout)
+            except asyncio.TimeoutError:
+                proc.kill()
+                raise TimeoutError(f"ipmitool timed out after {self.timeout}s")
 
-        if proc.returncode != 0:
-            err = stderr.decode().strip()
-            raise RuntimeError(f"ipmitool error (code {proc.returncode}): {err}")
+            if proc.returncode != 0:
+                err = stderr.decode().strip()
+                raise RuntimeError(f"ipmitool error (code {proc.returncode}): {err}")
 
-        return stdout.decode()
+            return stdout.decode()
 
     async def get_sensor_readings(self, host: str, user: str, password: str) -> list[dict]:
         output = await self._exec(host, user, password, ["sdr", "elist"])
@@ -226,8 +234,8 @@ def _parse_fru(output: str) -> list[dict]:
         line = line.strip()
         if not line:
             continue
-        if ":" not in line and line.endswith(":") or "FRU Device" in line:
-            current_section = line.rstrip(":")
+        if line.endswith(":") or "FRU Device" in line:
+            current_section = line.rstrip(":").strip()
             continue
         if ":" in line:
             key, _, val = line.partition(":")
