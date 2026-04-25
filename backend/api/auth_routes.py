@@ -38,13 +38,37 @@ async def get_me(request: Request):
 
 @router.post("/login")
 async def login(body: LoginRequest, response: Response):
+    """Authenticate and issue session cookie.
+
+    SEC-03 lockout flow (D-03):
+    1. Pre-check: if user is currently locked out → return generic message (D-04).
+    2. verify_password → if False → record_failure → if NOW locked, return generic
+       message; otherwise return 'Invalid credentials'.
+    3. Success → reset_failures, then issue session cookie.
+
+    D-04: error messages MUST NOT reveal whether the username exists or when the
+    lockout expires.
+    """
     from backend.main import auth
+
     if not await auth.is_auth_enabled():
         return {"success": True, "message": "Auth disabled"}
 
+    # 1. Pre-check lockout BEFORE attempting password verify (avoids leaking timing).
+    if await auth.check_lockout(body.username):
+        return {"success": False, "error": "Too many failed attempts. Try again later."}
+
+    # 2. Verify password.
     if not await auth.verify_password(body.username, body.password):
+        await auth.record_failure(body.username)
+        # If this failure pushed us into lockout, return the generic message
+        # (Pitfall #3: must not leak that this specific attempt was the trigger).
+        if await auth.check_lockout(body.username):
+            return {"success": False, "error": "Too many failed attempts. Try again later."}
         return {"success": False, "error": "Invalid credentials"}
 
+    # 3. Success: clear any prior failure counter, issue session.
+    await auth.reset_failures(body.username)
     token = auth.create_session_token(body.username)
     response.set_cookie(
         key="session",
