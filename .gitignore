@@ -50,3 +50,7 @@ data/
 
 # Claude
 .claude/
+.mcp.json
+
+# GSD planning artifacts
+.planning/
