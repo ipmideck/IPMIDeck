@@ -54,3 +54,6 @@ data/
 
 # GSD planning artifacts
 .planning/
+
+# Playwright MCP
+.playwright-mcp/
