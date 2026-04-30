@@ -87,12 +87,20 @@ async def logout(response: Response):
 
 
 @router.post("/setup")
-async def setup(body: SetupRequest):
+async def setup(body: SetupRequest, response: Response):
     from backend.main import auth
     if await auth.has_user():
         return {"success": False, "error": "User already exists"}
     await auth.create_user(body.username, body.password)
-    return {"success": True}
+    token = auth.create_session_token(body.username)
+    response.set_cookie(
+        key="session",
+        value=token,
+        httponly=True,
+        samesite="lax",
+        max_age=86400,
+    )
+    return {"success": True, "username": body.username}
 
 
 @router.get("/status")
