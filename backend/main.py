@@ -191,8 +191,10 @@ def _mount_spa(app: FastAPI) -> None:
 
 def cli():
     parser = argparse.ArgumentParser(description="IPMILink — IPMI Management Platform")
-    parser.add_argument("--host", default="0.0.0.0", help="Bind host")
-    parser.add_argument("--port", type=int, default=3000, help="Bind port")
+    # default=None sentinels — lets us detect whether the user explicitly passed
+    # --host/--port so config.yaml can supply the value when the flag is absent.
+    parser.add_argument("--host", default=None, help="Bind host (default from config.yaml or 0.0.0.0)")
+    parser.add_argument("--port", type=int, default=None, help="Bind port (default from config.yaml or 3000)")
     parser.add_argument("--demo", action="store_true", help="Run in demo mode with simulated data")
     parser.add_argument("--config", type=str, help="Path to config.yaml")
     parser.add_argument("--reload", action="store_true", help="Enable auto-reload (dev)")
@@ -215,6 +217,27 @@ def cli():
         _reset_password()
         return
 
+    # === FIX-02 gap closure: load config BEFORE uvicorn.run() ===
+    # Without this, uvicorn binds using argparse defaults (or None) before
+    # lifespan() ever calls load_config(), so server.host/port from config.yaml
+    # (or IPMILINK_CONFIG_PATH-pointed file) are silently ignored at bind time.
+    # lifespan() still calls load_config() again — that is idempotent and
+    # intentional (lifespan needs an AppConfig for module setup regardless of
+    # how uvicorn was bound, e.g., when running via `uvicorn backend.main:app`).
+    try:
+        early_cfg = load_config()
+    except Exception as e:
+        # If config is malformed, fall back to hardcoded defaults so the
+        # server can still start and surface the error during lifespan.
+        # Logging is not yet configured here, so use print to stderr.
+        print(f"WARNING: early config load failed ({e}); using CLI/hardcoded defaults for bind", file=sys.stderr)
+        early_cfg = None
+
+    # Precedence: explicit CLI flag > config (which itself = env var > yaml > hardcoded) > hardcoded fallback.
+    # argparse default=None means args.host/args.port is None iff the user did NOT pass the flag.
+    effective_host = args.host if args.host is not None else (early_cfg.server.host if early_cfg is not None else "0.0.0.0")
+    effective_port = args.port if args.port is not None else (early_cfg.server.port if early_cfg is not None else 3000)
+
     # === FIX-03 layer 2: belt-and-suspenders signal handlers ===
     # Uvicorn installs its own SIGTERM/SIGINT handlers when it boots and triggers
     # the lifespan shutdown (which restores fans via fanpilot_shutdown — layer 1).
@@ -233,8 +256,8 @@ def cli():
 
     uvicorn.run(
         "backend.main:app",
-        host=args.host,
-        port=args.port,
+        host=effective_host,
+        port=effective_port,
         reload=args.reload,
         log_level="info",
     )
