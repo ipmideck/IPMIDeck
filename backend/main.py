@@ -98,7 +98,12 @@ async def lifespan(app: FastAPI):
     # Start module background tasks
     await module_loader.start_background_tasks()
 
-    logger.info("IPMILink started on %s:%d", config.server.host, config.server.port)
+    # Prefer effective bind values stashed by cli() (which applies CLI precedence
+    # over config). Fall back to config values when uvicorn is launched directly
+    # (e.g. from a test harness) without going through cli().
+    effective_host = getattr(app.state, "effective_host", None) or config.server.host
+    effective_port = getattr(app.state, "effective_port", None) or config.server.port
+    logger.info("IPMILink started on %s:%d", effective_host, effective_port)
     if config.demo:
         logger.info("Demo mode active — 2 virtual servers with simulated data")
 
@@ -237,6 +242,14 @@ def cli():
     # argparse default=None means args.host/args.port is None iff the user did NOT pass the flag.
     effective_host = args.host if args.host is not None else (early_cfg.server.host if early_cfg is not None else "0.0.0.0")
     effective_port = args.port if args.port is not None else (early_cfg.server.port if early_cfg is not None else 3000)
+
+    # Stash the resolved bind values on app.state so lifespan() can log them.
+    # Without this, the startup log line would print config.server.host/port and
+    # lie when CLI flags override config (e.g. --port 8080 with config :9999).
+    # lifespan() reads via getattr(..., None) so a direct uvicorn invocation
+    # (no cli()) still falls back to config.server.* correctly.
+    app.state.effective_host = effective_host
+    app.state.effective_port = effective_port
 
     # === FIX-03 layer 2: belt-and-suspenders signal handlers ===
     # Uvicorn installs its own SIGTERM/SIGINT handlers when it boots and triggers
