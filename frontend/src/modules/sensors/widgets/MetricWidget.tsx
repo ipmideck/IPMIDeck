@@ -40,44 +40,47 @@ export function MetricWidget({ serverId, sensorName, label }: MetricWidgetProps)
   const reading = useSensorStore((s) => s.readings[serverId]?.[sensorName]);
   const sparkline = useSensorStore((s) => s.sparklines[serverId]?.[sensorName] || []);
 
-  const value = reading?.value;
-  const unit = reading?.unit || "";
-  const status = reading?.status || "unknown";
+  if (!serverId) {
+    return <div className="flex h-full items-center justify-center text-muted-foreground">—</div>;
+  }
 
-  const statusColor =
-    status === "ok" ? "text-emerald-500" :
-    status === "warning" ? "text-yellow-500" :
-    status === "critical" ? "text-red-500" : "text-muted-foreground";
+  try {
+    const value = reading?.value;
+    const unit = reading?.unit || "";
+    const status = reading?.status || "unknown";
 
-  const badgeBg =
-    status === "ok" ? "bg-emerald-500/10 text-emerald-500" :
-    status === "warning" ? "bg-yellow-500/10 text-yellow-500" :
-    status === "critical" ? "bg-red-500/10 text-red-500" : "bg-muted text-muted-foreground";
+    const badgeBg =
+      status === "ok" ? "bg-emerald-500/10 text-emerald-500" :
+      status === "warning" ? "bg-yellow-500/10 text-yellow-500" :
+      status === "critical" ? "bg-red-500/10 text-red-500" : "bg-muted text-muted-foreground";
 
-  const chartColor =
-    unit === "C" ? "#2563eb" :
-    unit === "RPM" ? "#f59e0b" :
-    unit === "W" ? "#8b5cf6" :
-    unit === "V" ? "#10b981" : "#a1a1aa";
+    const chartColor =
+      unit === "C" ? "#2563eb" :
+      unit === "RPM" ? "#f59e0b" :
+      unit === "W" ? "#8b5cf6" :
+      unit === "V" ? "#10b981" : "#a1a1aa";
 
-  return (
-    <div className="flex h-full flex-col justify-center">
-      <div className="font-mono text-2xl font-bold leading-none tracking-tight">
-        {value !== null && value !== undefined ? (
-          <>
-            {typeof value === "number" ? (Number.isInteger(value) ? value : value.toFixed(1)) : value}
-            <span className="ml-0.5 text-sm font-normal text-muted-foreground">{unit}</span>
-          </>
-        ) : (
-          <span className="text-muted-foreground">—</span>
-        )}
+    return (
+      <div className="flex h-full flex-col justify-center">
+        <div className="font-mono text-2xl font-semibold leading-none tracking-tight">
+          {value !== null && value !== undefined ? (
+            <>
+              {typeof value === "number" ? (Number.isInteger(value) ? value : value.toFixed(1)) : value}
+              <span className="ml-0.5 text-sm font-normal text-muted-foreground">{unit}</span>
+            </>
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          )}
+        </div>
+        <div className="mt-1 flex items-center gap-2">
+          <span className={cn("inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-semibold", badgeBg)}>
+            {status === "ok" ? "Normal" : status}
+          </span>
+        </div>
+        <Sparkline data={Array.isArray(sparkline) ? sparkline : []} color={chartColor} />
       </div>
-      <div className="mt-1 flex items-center gap-2">
-        <span className={cn("inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-medium", badgeBg)}>
-          {status === "ok" ? "Normal" : status}
-        </span>
-      </div>
-      <Sparkline data={sparkline} color={chartColor} />
-    </div>
-  );
+    );
+  } catch {
+    return <div className="flex h-full items-center justify-center text-muted-foreground">—</div>;
+  }
 }
