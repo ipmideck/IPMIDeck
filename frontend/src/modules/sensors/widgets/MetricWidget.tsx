@@ -1,6 +1,12 @@
 import { useSensorStore } from "@/stores/sensor-store";
 import { cn } from "@/lib/utils";
 
+// Stable empty-array reference for the sparkline selector. Returning a fresh `[]`
+// on every render trips Zustand v5's Object.is equality check, triggering an
+// infinite re-render loop (React #185). A single module-level constant keeps the
+// reference stable across renders.
+const EMPTY: number[] = [];
+
 interface MetricWidgetProps {
   serverId: string;
   sensorName: string;
@@ -38,7 +44,7 @@ function Sparkline({ data, color }: { data: number[]; color: string }) {
 
 export function MetricWidget({ serverId, sensorName, label }: MetricWidgetProps) {
   const reading = useSensorStore((s) => s.readings[serverId]?.[sensorName]);
-  const sparkline = useSensorStore((s) => s.sparklines[serverId]?.[sensorName] || []);
+  const sparkline = useSensorStore((s) => s.sparklines[serverId]?.[sensorName] ?? EMPTY);
 
   if (!serverId) {
     return <div className="flex h-full items-center justify-center text-muted-foreground">—</div>;
