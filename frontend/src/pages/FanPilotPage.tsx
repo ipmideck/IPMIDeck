@@ -489,10 +489,14 @@ export default function FanPilotPage() {
   /* ---------- Fetch profiles ---------- */
   const fetchProfiles = useCallback(async () => {
     try {
-      const data = await get<FanProfile[]>("/api/modules/fanpilot/profiles");
-      setProfiles(data);
-      if (data.length > 0 && !selectedId) {
-        setSelectedId(data[0].id);
+      // Backend returns { profiles: [...] } (routes.py:47), NOT a bare array.
+      // Unwrap and guard so setProfiles only ever receives an array — otherwise
+      // profiles.map(...) in render throws "c.map is not a function".
+      const data = await get<{ profiles: FanProfile[] }>("/api/modules/fanpilot/profiles");
+      const list = Array.isArray(data.profiles) ? data.profiles : [];
+      setProfiles(list);
+      if (list.length > 0 && !selectedId) {
+        setSelectedId(list[0].id);
       }
     } catch {
       // API may not be ready yet
@@ -503,6 +507,11 @@ export default function FanPilotPage() {
   const fetchStatus = useCallback(async () => {
     if (!contextServerId) return;
     try {
+      // Backend status shape (routes.py:133-137) is { server_id, enabled, profile };
+      // it does NOT include `mode` or `current_speed_pct`. So the mode-active
+      // highlight (status?.mode === mode) simply never matches and the speed
+      // readout (current_speed_pct != null) renders "--" — both best-effort and
+      // null-safe. Not redesigned here (out of scope for the GAP-02 fix).
       const data = await get<FanStatus>(
         `/api/modules/fanpilot/${contextServerId}/status`
       );
@@ -556,25 +565,33 @@ export default function FanPilotPage() {
   const handleCreate = async () => {
     if (!newName.trim()) return;
     try {
-      const created = await post<FanProfile>("/api/modules/fanpilot/profiles", {
-        name: newName.trim(),
-        description: "Custom profile",
-        curve_points: [
-          { temp: 30, speed: 20 },
-          { temp: 50, speed: 40 },
-          { temp: 70, speed: 60 },
-          { temp: 85, speed: 80 },
-          { temp: 95, speed: 100 },
-        ],
-        hysteresis: 3,
-        safety_threshold: 85,
-        source_sensor: "CPU Temp",
-      });
+      // POST /profiles returns { success, profile_id } (routes.py:61), NOT a
+      // FanProfile. Select the new profile by its returned id (coerced to string
+      // — FanProfile ids are strings).
+      const created = await post<{ success: boolean; profile_id: number }>(
+        "/api/modules/fanpilot/profiles",
+        {
+          name: newName.trim(),
+          description: "Custom profile",
+          curve_points: [
+            { temp: 30, speed: 20 },
+            { temp: 50, speed: 40 },
+            { temp: 70, speed: 60 },
+            { temp: 85, speed: 80 },
+            { temp: 95, speed: 100 },
+          ],
+          hysteresis: 3,
+          safety_threshold: 85,
+          source_sensor: "CPU Temp",
+        }
+      );
       toast.success("Profile created");
       setCreating(false);
       setNewName("");
       await fetchProfiles();
-      setSelectedId(created.id);
+      if (created.profile_id != null) {
+        setSelectedId(String(created.profile_id));
+      }
     } catch (e: any) {
       toast.error(e.message || "Failed to create profile");
     }
