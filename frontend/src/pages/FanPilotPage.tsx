@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Header } from "@/components/layout/Header";
 import { useServerStore } from "@/stores/server-store";
 import { useSensorStore } from "@/stores/sensor-store";
+import type { SensorReading } from "@/stores/sensor-store";
 import { get, post, put, del } from "@/api/client";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -58,6 +59,11 @@ const TEMP_MIN = 20;
 const TEMP_MAX = 100;
 const SPEED_MIN = 0;
 const SPEED_MAX = 100;
+
+// Stable empty-readings reference so the Zustand selector below never returns a
+// fresh object on each render (otherwise Object.is sees a "change" → infinite
+// re-render → React #185 on cold load of /fanpilot). See GAP-04.
+const EMPTY_READINGS: Record<string, SensorReading> = {};
 
 // SVG viewport dimensions for the curve editor
 const SVG_PAD_LEFT = 48;
@@ -462,7 +468,7 @@ function CurveEditor({ points, onChange, currentTemp, readonly }: CurveEditorPro
 export default function FanPilotPage() {
   const contextServerId = useServerStore((s) => s.contextServerId);
   const sensorReadings = useSensorStore((s) =>
-    contextServerId ? s.readings[contextServerId] ?? {} : {}
+    (contextServerId ? s.readings[contextServerId] : undefined) ?? EMPTY_READINGS
   );
 
   // Profiles
