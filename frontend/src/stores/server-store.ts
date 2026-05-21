@@ -17,7 +17,9 @@ export interface Server {
 interface ServerState {
   servers: Server[];
   contextServerId: string | null;
+  loaded: boolean;
   setServers: (servers: Server[]) => void;
+  setLoaded: (loaded: boolean) => void;
   setContextServer: (id: string) => void;
   updateServerStatus: (id: string, isOnline: boolean) => void;
 }
@@ -25,12 +27,16 @@ interface ServerState {
 export const useServerStore = create<ServerState>((set) => ({
   servers: [],
   contextServerId: null,
+  loaded: false,
 
   setServers: (servers) =>
     set((state) => ({
       servers,
+      loaded: true,
       contextServerId: state.contextServerId || servers[0]?.id || null,
     })),
+
+  setLoaded: (loaded) => set({ loaded }),
 
   setContextServer: (id) => set({ contextServerId: id }),
 
