@@ -5,7 +5,8 @@ import { useThemeStore } from "@/stores/theme-store";
 import { get, post, put, del } from "@/api/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { Plus, Trash2, TestTube, Pencil, ExternalLink, Heart, Code2, Moon, Sun, Monitor } from "lucide-react";
+import { Plus, Trash2, TestTube, Pencil, ExternalLink, Heart, Code2, Moon, Sun, Monitor, Server as ServerIcon } from "lucide-react";
+import { EmptyState } from "@/components/common/EmptyState";
 
 export default function SettingsPage() {
   const { servers, setServers } = useServerStore();
@@ -164,7 +165,13 @@ export default function SettingsPage() {
             )}
 
             {servers.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No servers configured. Add one to start monitoring.</p>
+              <EmptyState
+                icon={ServerIcon}
+                title="No servers configured"
+                description="Add one to start monitoring."
+                action={{ label: "Add a Server", onClick: () => { setEditingId(null); setShowForm(true); } }}
+                className="py-12"
+              />
             ) : (
               <div className="space-y-2">
                 {servers.map((s) => (
