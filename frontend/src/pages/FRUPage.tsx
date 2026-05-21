@@ -3,7 +3,8 @@ import { Header } from "@/components/layout/Header";
 import { useServerStore } from "@/stores/server-store";
 import { get, post } from "@/api/client";
 import { toast } from "sonner";
-import { RefreshCw, Copy } from "lucide-react";
+import { EmptyState } from "@/components/common/EmptyState";
+import { RefreshCw, Copy, ServerOff, CircuitBoard } from "lucide-react";
 
 interface FRUData {
   sections: Record<string, { field: string; value: string }[]>;
@@ -56,13 +57,19 @@ export default function FRUPage() {
       </Header>
       <div className="flex-1 overflow-auto p-6">
         {!hasSections ? (
-          <div className="flex flex-col items-center justify-center py-24 text-center">
-            <h2 className="text-lg font-semibold">No hardware data</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Click Refresh to load FRU data from the BMC.</p>
-            <button onClick={refresh} className="mt-4 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">
-              Load hardware info
-            </button>
-          </div>
+          !contextServerId ? (
+            <EmptyState
+              icon={ServerOff}
+              title="No server selected"
+              description="Select a server from the sidebar to inspect its hardware inventory."
+            />
+          ) : (
+            <EmptyState
+              icon={CircuitBoard}
+              title="No hardware data"
+              description="This server returned no FRU inventory. Check the BMC connection."
+            />
+          )
         ) : (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {Object.entries(sections).map(([section, fields]) => (

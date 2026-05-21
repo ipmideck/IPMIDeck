@@ -4,7 +4,8 @@ import { useServerStore } from "@/stores/server-store";
 import { get, post } from "@/api/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { RefreshCw, Download, Trash2 } from "lucide-react";
+import { EmptyState } from "@/components/common/EmptyState";
+import { RefreshCw, Download, ServerOff, FileClock } from "lucide-react";
 
 interface SELEvent {
   event_id: string;
@@ -79,13 +80,19 @@ export default function SELPage() {
       </Header>
       <div className="flex-1 overflow-auto p-6">
         {filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-24 text-center">
-            <h2 className="text-lg font-semibold">No events</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Click Refresh to load events from the BMC.</p>
-            <button onClick={refresh} className="mt-4 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">
-              Refresh from BMC
-            </button>
-          </div>
+          !contextServerId ? (
+            <EmptyState
+              icon={ServerOff}
+              title="No server selected"
+              description="Select a server from the sidebar to view its hardware event log."
+            />
+          ) : (
+            <EmptyState
+              icon={FileClock}
+              title="No events logged"
+              description="The system event log is clear. Hardware events will appear here as they occur."
+            />
+          )
         ) : (
           <div className="rounded-lg border border-border">
             <table className="w-full text-sm">
