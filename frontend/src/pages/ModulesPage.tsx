@@ -38,9 +38,36 @@ export default function ModulesPage() {
 
   const toggleModule = async (id: string, enabled: boolean) => {
     try {
-      await put(`/api/admin/modules/${id}`, { enabled });
-      setModules((prev) => prev.map((m) => m.id === id ? { ...m, enabled } : m));
-      toast.success(`${id} ${enabled ? "enabled" : "disabled"}`);
+      const name = modules.find((m) => m.id === id)?.name ?? id;
+      const res = await put<{
+        enabled: boolean;
+        restart_required?: boolean;
+        stopped_dependents?: string[];
+      }>(`/api/admin/modules/${id}`, { enabled });
+      if (enabled) {
+        if (res.restart_required) {
+          toast.message(`${name} enabled — restart required to fully activate it.`);
+        } else {
+          toast.success(`${name} enabled`);
+        }
+      } else {
+        const deps = res.stopped_dependents ?? [];
+        if (deps.length > 0) {
+          const depNames = deps
+            .map((d) => modules.find((m) => m.id === d)?.name ?? d)
+            .join(", ");
+          toast.success(
+            `${name} disabled — also stopped dependent module(s): ${depNames}. Restart to fully remove API routes.`
+          );
+        } else {
+          toast.success(
+            `${name} disabled — background tasks stopped. Restart to fully remove its API routes.`
+          );
+        }
+      }
+      // Refresh so the page reflects the new enabled state (including any
+      // cascade-disabled dependents).
+      await loadModules();
     } catch {
       toast.error("Failed to toggle module");
     }
@@ -52,7 +79,7 @@ export default function ModulesPage() {
       <div className="flex-1 overflow-auto p-6">
         <div className="mx-auto max-w-3xl">
           <p className="mb-6 text-sm text-muted-foreground">
-            Enable or disable modules to customize your dashboard. Changes take effect on next restart.
+            Enable or disable modules to customize your dashboard. Disabling stops a module's background tasks immediately; its API routes are removed on next restart.
           </p>
           <div className="space-y-3">
             {modules.map((mod) => (
