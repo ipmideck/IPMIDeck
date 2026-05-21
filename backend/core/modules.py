@@ -47,7 +47,8 @@ class ModuleLoader:
         self.event_bus = event_bus
         self._modules: dict[str, ModuleManifest] = {}
         self._enabled: dict[str, bool] = {}
-        self._running_tasks: list[Any] = []
+        self._running_tasks: dict[str, list[Any]] = {}  # keyed by module_id
+        self._fully_started: set[str] = set()  # modules whose migrations+subscriptions+tasks ran this process
 
     async def discover_and_load(self, enabled_config: dict[str, Any] | None = None) -> None:
         """Discover built-in modules and load enabled ones."""
@@ -127,7 +128,16 @@ class ModuleLoader:
                 logger.info("Mounted routes: %s -> %s", mod.name, prefix)
 
     async def start_background_tasks(self) -> None:
-        """Start all enabled modules' background tasks."""
+        """Start all enabled modules' background tasks.
+
+        Records each started module in ``self._fully_started`` so that runtime
+        re-enable (``start_module``) knows whether the module's migrations,
+        event subscriptions, and routes were set up this process. Because
+        ``discover_and_load`` only runs migrations + event subscriptions for
+        modules enabled at startup and this method only iterates enabled
+        modules, ``self._fully_started`` ends up containing exactly the modules
+        whose tables, event handlers, and routes are live this process.
+        """
         import asyncio
 
         for mod in self.get_enabled_modules():
@@ -135,13 +145,86 @@ class ModuleLoader:
                 await mod.on_startup()
             for task_fn in mod.background_tasks:
                 task = asyncio.create_task(task_fn(), name=f"module_{mod.id}")
-                self._running_tasks.append(task)
+                self._running_tasks.setdefault(mod.id, []).append(task)
                 logger.info("Started background task for %s", mod.name)
+            self._fully_started.add(mod.id)
+
+    async def start_module(self, module_id: str) -> bool:
+        """Start one module's tasks. Returns False (restart_required) if the module
+        was disabled at process startup (its migrations/subscriptions/routes were
+        never set up this process), True if it restarted cleanly in-process."""
+        import asyncio
+
+        mod = self._modules.get(module_id)
+        if not mod:
+            return False
+        if module_id not in self._fully_started:
+            # Disabled at startup: tables/event-subscriptions/routes were skipped
+            # (discover_and_load) and routes mount once before SPA fallback. Do NOT
+            # start tasks against a half-initialized module — require a restart.
+            logger.info("Module %s was disabled at startup; enable requires a restart", module_id)
+            return False
+        if self._running_tasks.get(module_id):
+            return True  # already running
+        if mod.on_startup:
+            await mod.on_startup()
+        for task_fn in mod.background_tasks:
+            task = asyncio.create_task(task_fn(), name=f"module_{mod.id}")
+            self._running_tasks.setdefault(mod.id, []).append(task)
+        logger.info("Restarted background tasks for module %s", module_id)
+        return True
+
+    async def _stop_one(self, module_id: str) -> None:
+        """Cancel one module's own tasks (gathering before hooks) and run its
+        on_shutdown. No cascade — used by both stop_module and the cascade sweep."""
+        import asyncio
+
+        tasks = self._running_tasks.pop(module_id, [])
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        mod = self._modules.get(module_id)
+        if mod and mod.on_shutdown:
+            try:
+                await mod.on_shutdown()
+            except Exception:
+                logger.exception("Error in shutdown hook for %s", module_id)
+        logger.info("Stopped background tasks for module %s", module_id)
+
+    async def stop_module(self, module_id: str) -> list[str]:
+        """Stop one module's tasks AND any loaded module that declares it as a
+        dependency (single-level dependents sweep — sufficient for the 5 built-ins;
+        NOT a full topological engine). Runs on_shutdown for each. Returns the
+        list of dependent module_ids that were also stopped.
+
+        This is the fan-safety path: disabling ``sensors`` stops ``fanpilot`` FIRST
+        (running fanpilot's on_shutdown auto-mode restore) before/with ``sensors``,
+        so fans are never driven from stale ``sensor_readings``."""
+        dependents = [
+            mid
+            for mid, m in self._modules.items()
+            if mid != module_id
+            and module_id in m.dependencies
+            and self._running_tasks.get(mid)
+        ]
+        for dep_id in dependents:
+            await self._stop_one(dep_id)  # e.g. fanpilot before sensors — runs fan-safety on_shutdown
+            self._enabled[dep_id] = False  # reflect that the dependent is no longer running
+        await self._stop_one(module_id)
+        return dependents
 
     async def stop_background_tasks(self) -> None:
         """Stop all running background tasks and run shutdown hooks."""
-        for task in self._running_tasks:
+        import asyncio
+
+        all_tasks = [t for tasks in self._running_tasks.values() for t in tasks]
+        for task in all_tasks:
             task.cancel()
+        if all_tasks:
+            # Await cancellation before running hooks (avoids racing on_shutdown
+            # against still-cancelling tasks).
+            await asyncio.gather(*all_tasks, return_exceptions=True)
         self._running_tasks.clear()
 
         # Run shutdown hooks (critical for FanPilot safety)
