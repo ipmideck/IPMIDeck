@@ -39,4 +39,24 @@ async def toggle_module(module_id: str, body: ModuleToggle):
     if not mod:
         return {"success": False, "error": "Module not found"}
     await module_loader.set_enabled(module_id, body.enabled)
-    return {"success": True, "module_id": module_id, "enabled": body.enabled}
+    if body.enabled:
+        started = await module_loader.start_module(module_id)
+        # started is False when the module was disabled at process startup:
+        # its migrations/event-subscriptions/routes were never set up this
+        # process, so tasks must NOT run until a restart.
+        return {
+            "success": True,
+            "module_id": module_id,
+            "enabled": True,
+            "restart_required": not started,
+        }
+    else:
+        stopped_dependents = await module_loader.stop_module(module_id)
+        # stopped_dependents lists modules cascade-stopped because they depend
+        # on this one (e.g. ["fanpilot"] when disabling "sensors").
+        return {
+            "success": True,
+            "module_id": module_id,
+            "enabled": False,
+            "stopped_dependents": stopped_dependents,
+        }
