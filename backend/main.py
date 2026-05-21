@@ -81,9 +81,18 @@ async def lifespan(app: FastAPI):
     modules_pkg.ws = ws_manager
     modules_pkg.config = config
 
+    # GAP-05: read persisted per-module enable state (written by ModuleLoader.set_enabled
+    # via db.set_config) so a UI-disabled module stays disabled across restarts. No
+    # prefix-scan helper exists on Database, so query each built-in id explicitly.
+    persisted_enabled: dict[str, bool] = {}
+    for mod_id in ModuleLoader.BUILTIN_MODULES:
+        raw = await db.get_config(f"modules.{mod_id}.enabled")
+        if raw is not None:
+            persisted_enabled[mod_id] = raw.strip().lower() != "false"
+
     # Load modules (discover, run migrations, register events)
     module_loader = ModuleLoader(db, event_bus)
-    await module_loader.discover_and_load(config.modules)
+    await module_loader.discover_and_load(config.modules, persisted_enabled=persisted_enabled)
 
     # FIX-04: dynamically mount only enabled modules' routes (with auth guard).
     # Disabled modules will never have their routes registered → 404 instead of 200.

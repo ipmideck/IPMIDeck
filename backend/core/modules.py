@@ -50,9 +50,14 @@ class ModuleLoader:
         self._running_tasks: dict[str, list[Any]] = {}  # keyed by module_id
         self._fully_started: set[str] = set()  # modules whose migrations+subscriptions+tasks ran this process
 
-    async def discover_and_load(self, enabled_config: dict[str, Any] | None = None) -> None:
+    async def discover_and_load(
+        self,
+        enabled_config: dict[str, Any] | None = None,
+        persisted_enabled: dict[str, bool] | None = None,
+    ) -> None:
         """Discover built-in modules and load enabled ones."""
         enabled_config = enabled_config or {}
+        persisted_enabled = persisted_enabled or {}
 
         for mod_id in self.BUILTIN_MODULES:
             try:
@@ -65,6 +70,10 @@ class ModuleLoader:
             # Check if enabled (default: True)
             mod_conf = enabled_config.get(mod_id, {})
             is_enabled = mod_conf.enabled if hasattr(mod_conf, "enabled") else True
+
+            # GAP-05: persisted DB enable-state (UI toggles) overrides the YAML default.
+            if mod_id in persisted_enabled:
+                is_enabled = persisted_enabled[mod_id]
 
             self._modules[mod_id] = manifest
             self._enabled[mod_id] = is_enabled
