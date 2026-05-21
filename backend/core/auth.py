@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import hmac
 import json
 import logging
-import os
 import secrets
 import time
 
@@ -131,12 +131,20 @@ class AuthManager:
         }
         data = json.dumps(payload, separators=(",", ":"))
         sig = hmac.new(self._secret.encode(), data.encode(), hashlib.sha256).hexdigest()
-        return f"{data}.{sig}"
+        # base64url-encode the data part so the cookie value is RFC 6265-safe
+        # (raw JSON contains { } , " which browsers reject/truncate). Sign the raw
+        # JSON; encode only for transport.
+        b64 = base64.urlsafe_b64encode(data.encode()).decode().rstrip("=")
+        return f"{b64}.{sig}"
 
     def verify_session_token(self, token: str) -> str | None:
         """Returns username if valid, None otherwise."""
         try:
-            data_part, sig_part = token.rsplit(".", 1)
+            b64_part, sig_part = token.rsplit(".", 1)
+            # Re-pad and decode the base64url data part back to the raw JSON that was signed.
+            data_part = base64.urlsafe_b64decode(
+                b64_part + "=" * (-len(b64_part) % 4)
+            ).decode()
             expected_sig = hmac.new(
                 self._secret.encode(), data_part.encode(), hashlib.sha256
             ).hexdigest()
