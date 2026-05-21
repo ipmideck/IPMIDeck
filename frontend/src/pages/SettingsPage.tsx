@@ -5,7 +5,7 @@ import { useThemeStore } from "@/stores/theme-store";
 import { get, post, put, del } from "@/api/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { Plus, Trash2, TestTube, ExternalLink, Heart, Code2, Moon, Sun, Monitor } from "lucide-react";
+import { Plus, Trash2, TestTube, Pencil, ExternalLink, Heart, Code2, Moon, Sun, Monitor } from "lucide-react";
 
 export default function SettingsPage() {
   const { servers, setServers } = useServerStore();
@@ -13,6 +13,8 @@ export default function SettingsPage() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: "", description: "", host: "", username: "", password: "", vendor: "dell" });
   const [testing, setTesting] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({ name: "", description: "", host: "", username: "", password: "", vendor: "dell" });
 
   const loadServers = async () => {
     try {
@@ -75,6 +77,55 @@ export default function SettingsPage() {
     }
   };
 
+  const startEdit = (s: Server) => {
+    // Pre-fill from the server; credentials stay blank (blank = keep current).
+    // Only one edit open at a time, and opening edit closes the top add form.
+    setEditForm({
+      name: s.name,
+      description: s.description ?? "",
+      host: s.host,
+      username: "",
+      password: "",
+      vendor: s.vendor ?? "dell",
+    });
+    setEditingId(s.id);
+    setShowForm(false);
+  };
+
+  const saveEdit = async (id: string) => {
+    if (!editForm.host.trim()) {
+      toast.error("Host is required");
+      return;
+    }
+    // server_id is NEVER sent (D-13). Omit blank username/password so the
+    // backend keeps the existing encrypted credentials (do NOT send "").
+    const payload: Record<string, unknown> = {
+      name: editForm.name,
+      description: editForm.description,
+      host: editForm.host,
+      vendor: editForm.vendor,
+    };
+    if (editForm.username.trim()) payload.username = editForm.username;
+    if (editForm.password.trim()) payload.password = editForm.password;
+    try {
+      await put(`/api/servers/${id}`, payload);
+      toast.success("Server updated");
+      setEditingId(null);
+      await loadServers();
+    } catch {
+      toast.error("Failed to update server");
+    }
+  };
+
+  const openAddForm = () => {
+    // Add-form / edit-form mutual exclusivity.
+    setShowForm((prev) => {
+      const next = !prev;
+      if (next) setEditingId(null);
+      return next;
+    });
+  };
+
   return (
     <>
       <Header title="Settings" />
@@ -85,7 +136,7 @@ export default function SettingsPage() {
           <div className="rounded-lg border border-border bg-card p-5">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Servers</h2>
-              <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs font-medium hover:bg-muted">
+              <button onClick={openAddForm} className="flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs font-medium hover:bg-muted">
                 <Plus className="h-3 w-3" /> Add
               </button>
             </div>
@@ -117,20 +168,47 @@ export default function SettingsPage() {
             ) : (
               <div className="space-y-2">
                 {servers.map((s) => (
-                  <div key={s.id} className="flex items-center gap-3 rounded-md border border-border p-3">
-                    <div className={`h-2.5 w-2.5 shrink-0 rounded-full ${s.is_online ? "bg-emerald-500" : "bg-red-500"}`} />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium">{s.name}</div>
-                      <div className="font-mono text-xs text-muted-foreground">{s.host}</div>
+                  <div key={s.id}>
+                    <div className="flex items-center gap-3 rounded-md border border-border p-3">
+                      <div className={`h-2.5 w-2.5 shrink-0 rounded-full ${s.is_online ? "bg-emerald-500" : "bg-red-500"}`} />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium">{s.name}</div>
+                        <div className="font-mono text-xs text-muted-foreground">{s.host}</div>
+                      </div>
+                      <div className="flex gap-1">
+                        <button onClick={() => startEdit(s)} aria-label="Edit server" className="rounded-md border border-border p-1.5 hover:bg-muted">
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button onClick={() => testServer(s.id)} disabled={testing === s.id} aria-label="Test connection" className="rounded-md border border-border p-1.5 hover:bg-muted">
+                          <TestTube className={cn("h-3.5 w-3.5", testing === s.id && "animate-spin")} />
+                        </button>
+                        <button onClick={() => deleteServer(s.id)} aria-label="Delete server" className="rounded-md border border-border p-1.5 hover:bg-muted text-red-500">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex gap-1">
-                      <button onClick={() => testServer(s.id)} disabled={testing === s.id} className="rounded-md border border-border p-1.5 hover:bg-muted">
-                        <TestTube className={cn("h-3.5 w-3.5", testing === s.id && "animate-spin")} />
-                      </button>
-                      <button onClick={() => deleteServer(s.id)} className="rounded-md border border-border p-1.5 hover:bg-muted text-red-500">
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
+
+                    {editingId === s.id && (
+                      <div className="mt-2 space-y-3 rounded-md border border-border bg-muted/50 p-4">
+                        <div className="grid grid-cols-2 gap-3">
+                          <input placeholder="Name (e.g., Dell R720)" value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm" />
+                          <input placeholder="Description (optional)" value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm" />
+                          <input placeholder="BMC IP (e.g., 192.0.2.10)" value={editForm.host} onChange={(e) => setEditForm({ ...editForm, host: e.target.value })} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm" />
+                          <select value={editForm.vendor} onChange={(e) => setEditForm({ ...editForm, vendor: e.target.value })} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm">
+                            <option value="dell">Dell</option>
+                            <option value="supermicro">Supermicro</option>
+                            <option value="hpe">HPE</option>
+                            <option value="generic">Generic</option>
+                          </select>
+                          <input placeholder="Username (leave blank to keep current)" value={editForm.username} onChange={(e) => setEditForm({ ...editForm, username: e.target.value })} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm" />
+                          <input type="password" placeholder="Password (leave blank to keep current)" value={editForm.password} onChange={(e) => setEditForm({ ...editForm, password: e.target.value })} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-mono" />
+                        </div>
+                        <div className="flex justify-end gap-2">
+                          <button onClick={() => setEditingId(null)} className="rounded-md px-3 py-1.5 text-xs hover:bg-muted">Discard Changes</button>
+                          <button onClick={() => saveEdit(s.id)} className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground">Save Changes</button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -175,9 +253,12 @@ export default function SettingsPage() {
                 <div>
                   <p className="text-sm font-medium">Luigi Tanzillo</p>
                   <p className="text-xs text-muted-foreground">Creator & Developer</p>
-                  <a href="https://github.com/dev-luigi" target="_blank" rel="noopener noreferrer" className="mt-1.5 inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground">
-                    <Code2 className="h-3 w-3" /> dev-luigi <ExternalLink className="h-2.5 w-2.5" />
-                  </a>
+                  <div className="mt-1.5 flex items-center gap-2">
+                    <a href="https://github.com/dev-luigi" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground">
+                      <Code2 className="h-3 w-3" /> dev-luigi <ExternalLink className="h-2.5 w-2.5" />
+                    </a>
+                    <iframe src="https://github.com/sponsors/dev-luigi/button" title="Sponsor dev-luigi" height="32" width="114" style={{ border: 0, borderRadius: "6px" }} />
+                  </div>
                 </div>
               </div>
               <div className="border-t border-border" />
