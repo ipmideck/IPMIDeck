@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { get, put } from "@/api/client";
 import { useLayoutStore } from "@/stores/layout-store";
+import { useServerStore } from "@/stores/server-store";
+import { SUPPORTED_WIDGET_IDS } from "@/modules/registry";
 import { cn } from "@/lib/utils";
 import { X, LayoutGrid } from "lucide-react";
 import { toast } from "sonner";
@@ -24,17 +26,25 @@ interface WidgetCatalogProps {
 export function WidgetCatalog({ open, onClose }: WidgetCatalogProps) {
   const [widgets, setWidgets] = useState<CatalogWidget[]>([]);
   const [loading, setLoading] = useState(false);
+  const [selectedServer, setSelectedServer] = useState<string>("");
   const addWidget = useLayoutStore((s) => s.addWidget);
   const layout = useLayoutStore((s) => s.layout);
+  const servers = useServerStore((s) => s.servers);
+  const contextServerId = useServerStore((s) => s.contextServerId);
 
   useEffect(() => {
     if (!open) return;
     setLoading(true);
+    setSelectedServer(contextServerId || "");
     get<{ widgets: CatalogWidget[] }>("/api/dashboard/widgets")
-      .then((data) => setWidgets(data.widgets || []))
+      .then((data) =>
+        setWidgets(
+          (data.widgets || []).filter((w) => SUPPORTED_WIDGET_IDS.has(w.widget_id))
+        )
+      )
       .catch(() => setWidgets([]))
       .finally(() => setLoading(false));
-  }, [open]);
+  }, [open, contextServerId]);
 
   function handleAdd(widget: CatalogWidget) {
     const id = `${widget.widget_id}-${Date.now()}`;
@@ -42,6 +52,7 @@ export function WidgetCatalog({ open, onClose }: WidgetCatalogProps) {
       i: id,
       widget_id: widget.widget_id,
       module_id: widget.module_id,
+      server_id: selectedServer || contextServerId || undefined,
       x: 0,
       y: Infinity,
       w: widget.default_w,
@@ -86,14 +97,30 @@ export function WidgetCatalog({ open, onClose }: WidgetCatalogProps) {
         )}
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-border px-4 py-3">
-          <h2 className="text-sm font-semibold">Add Widget</h2>
-          <button
-            onClick={onClose}
-            className="rounded p-1 hover:bg-muted transition-colors"
-          >
-            <X className="h-4 w-4 text-muted-foreground" />
-          </button>
+        <div className="border-b border-border px-4 py-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold">Add Widget</h2>
+            <button
+              onClick={onClose}
+              className="rounded p-1 hover:bg-muted transition-colors"
+            >
+              <X className="h-4 w-4 text-muted-foreground" />
+            </button>
+          </div>
+          {servers.length > 1 && (
+            <select
+              aria-label="Assign widget to server"
+              value={selectedServer || contextServerId || ""}
+              onChange={(e) => setSelectedServer(e.target.value)}
+              className="mt-3 w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
+            >
+              {servers.map((server) => (
+                <option key={server.id} value={server.id}>
+                  {server.name}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
         {/* Content */}
