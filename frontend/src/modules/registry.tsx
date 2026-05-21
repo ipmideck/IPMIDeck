@@ -10,6 +10,8 @@ import { PowerStatusWidget } from "@/modules/power/widgets/PowerStatusWidget";
 import { PowerControlsWidget } from "@/modules/power/widgets/PowerControlsWidget";
 import { FanPilotStatusWidget } from "@/modules/fanpilot/widgets/FanPilotStatusWidget";
 import type { WidgetLayout } from "@/stores/layout-store";
+import { useModuleStore } from "@/stores/module-store";
+import { PowerOff } from "lucide-react";
 
 interface WidgetProps {
   serverId: string;
@@ -59,6 +61,36 @@ export function renderWidget(layout: WidgetLayout, defaultServerId: string): Rea
   }
   const serverId = layout.server_id || defaultServerId;
   return renderer({ serverId, config: layout.config, layout });
+}
+
+/**
+ * Hook-component that gates rendering on the owning module's enabled state.
+ * Subscribes to the module-enabled store via a real hook so a toggle re-renders
+ * reactively (no page reload, no convention-only subscription hack — MEDIUM #8).
+ * When the module is disabled, shows a placeholder inside the existing card
+ * chrome instead of stale/live data; otherwise delegates to renderWidget.
+ */
+export function WidgetRenderer({
+  layout,
+  defaultServerId,
+}: {
+  layout: WidgetLayout;
+  defaultServerId: string;
+}): React.ReactNode {
+  // real hook subscription -> re-renders when the module's enabled state changes
+  const enabled = useModuleStore((s) => s.isEnabled(layout.module_id));
+  if (!enabled) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center text-center text-sm text-muted-foreground">
+        <PowerOff className="mb-2 h-5 w-5" />
+        <p>Module disabled</p>
+        <p className="mt-1 text-xs">
+          Enable {layout.module_id} in Settings → Modules to restore this widget.
+        </p>
+      </div>
+    );
+  }
+  return renderWidget(layout, defaultServerId);
 }
 
 export function getWidgetTitle(layout: WidgetLayout): string {

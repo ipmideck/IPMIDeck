@@ -3,7 +3,8 @@ import { ResponsiveGridLayout } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import { useLayoutStore } from "@/stores/layout-store";
 import { useServerStore } from "@/stores/server-store";
-import { renderWidget, getWidgetTitle } from "@/modules/registry";
+import { useModuleStore } from "@/stores/module-store";
+import { WidgetRenderer, getWidgetTitle } from "@/modules/registry";
 import { ErrorBoundary, WidgetErrorFallback } from "@/components/ErrorBoundary";
 import { X, ChevronDown } from "lucide-react";
 import { put } from "@/api/client";
@@ -16,6 +17,12 @@ export function WidgetGrid() {
   const [width, setWidth] = useState(1000);
   const [openTagId, setOpenTagId] = useState<string | null>(null);
   const showIdentity = servers.length > 1;
+
+  // Hydrate the module-enabled map once on mount so WidgetRenderer can gate
+  // disabled-module widgets (MOD-01 D-14). Done here, not in Dashboard.tsx.
+  useEffect(() => {
+    useModuleStore.getState().loadModules();
+  }, []);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -155,7 +162,7 @@ export function WidgetGrid() {
               </div>
               <div className="p-3" style={{ height: "calc(100% - 33px)" }}>
                 <ErrorBoundary renderFallback={(err) => <WidgetErrorFallback error={err} />}>
-                  {renderWidget(item, contextServerId)}
+                  <WidgetRenderer layout={item} defaultServerId={contextServerId} />
                 </ErrorBoundary>
               </div>
             </div>
