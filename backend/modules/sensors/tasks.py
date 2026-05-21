@@ -123,18 +123,23 @@ async def sensor_polling_loop():
                 "SELECT id, host, username_enc, password_enc, poll_interval FROM servers"
             )
 
+            # Non-blocking cooldown filter — skip servers still on cooldown (LOW #11). No sleep.
             now_mono = time.monotonic()
             due = [s for s in servers if _next_retry.get(s["id"], 0.0) <= now_mono]
 
+            # Load the encryption key ONCE per cycle and reuse across all due servers.
             key = None
             if due:
                 from backend.main import auth
                 key = auth.get_encryption_key()
 
-            for server in due:
-                if not _running:
-                    break
-                await _poll_one_server(server, key)
+            # Poll all due servers concurrently — one server's timeout/error never blocks the
+            # others (PERF-01). return_exceptions=True so a failing coroutine never cancels the
+            # gather (per-server try/except already isolates failures in _poll_one_server).
+            await asyncio.gather(
+                *(_poll_one_server(s, key) for s in due),
+                return_exceptions=True,
+            )
 
         except asyncio.CancelledError:
             logger.info("Sensor polling loop cancelled")
