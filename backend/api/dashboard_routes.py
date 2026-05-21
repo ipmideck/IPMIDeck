@@ -63,9 +63,22 @@ async def set_context(body: ContextUpdate):
 
 @router.get("/widgets")
 async def get_available_widgets():
-    """Get all widget definitions from enabled modules."""
+    """Get all widget definitions from enabled modules (normalized for the catalog)."""
     from backend.main import module_loader
-    return {"widgets": module_loader.get_widgets_registry()}
+    out = []
+    for w in module_loader.get_widgets_registry():
+        size = str(w.get("default_size", "1x1"))
+        try:
+            dw, dh = (int(p) for p in size.lower().split("x", 1))
+        except (ValueError, AttributeError):
+            dw, dh = 1, 1
+        out.append({
+            **w,
+            "widget_id": w["id"],
+            "default_w": dw,
+            "default_h": dh,
+        })
+    return {"widgets": out}
 
 
 def _default_layout() -> list[dict]:
@@ -77,8 +90,7 @@ def _default_layout() -> list[dict]:
         {"i": "power-draw", "widget_id": "sensors-metric", "module_id": "sensors", "x": 4, "y": 0, "w": 1, "h": 1, "config": {"sensor": "Power"}},
         {"i": "power-status", "widget_id": "power-status", "module_id": "power", "x": 5, "y": 0, "w": 1, "h": 1},
         {"i": "temp-chart", "widget_id": "sensors-chart", "module_id": "sensors", "x": 0, "y": 1, "w": 4, "h": 2, "config": {"type": "temperature"}},
-        {"i": "fan-curve", "widget_id": "fanpilot-curve", "module_id": "fanpilot", "x": 4, "y": 1, "w": 2, "h": 2},
-        {"i": "fan-rpm", "widget_id": "sensors-chart", "module_id": "sensors", "x": 0, "y": 3, "w": 3, "h": 2, "config": {"type": "fan"}},
-        {"i": "power-ctrl", "widget_id": "power-controls", "module_id": "power", "x": 3, "y": 3, "w": 2, "h": 2},
-        {"i": "voltages", "widget_id": "sensors-voltages", "module_id": "sensors", "x": 5, "y": 3, "w": 1, "h": 2},
+        {"i": "fan-rpm", "widget_id": "sensors-chart", "module_id": "sensors", "x": 4, "y": 1, "w": 2, "h": 2, "config": {"type": "fan"}},
+        {"i": "power-ctrl", "widget_id": "power-controls", "module_id": "power", "x": 0, "y": 3, "w": 3, "h": 2},
+        {"i": "voltages", "widget_id": "sensors-voltages", "module_id": "sensors", "x": 3, "y": 3, "w": 3, "h": 2},
     ]

@@ -18,6 +18,7 @@ interface LayoutState {
   addWidget: (widget: WidgetLayout) => void;
   removeWidget: (id: string) => void;
   updateLayout: (layouts: Array<{ i: string; x: number; y: number; w: number; h: number }>) => void;
+  setWidgetServer: (id: string, serverId: string) => void;
 }
 
 export const useLayoutStore = create<LayoutState>((set) => ({
@@ -40,5 +41,10 @@ export const useLayoutStore = create<LayoutState>((set) => ({
         }
         return item;
       }),
+    })),
+
+  setWidgetServer: (id, serverId) =>
+    set((state) => ({
+      layout: state.layout.map((w) => (w.i === id ? { ...w, server_id: serverId } : w)),
     })),
 }));

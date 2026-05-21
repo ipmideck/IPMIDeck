@@ -46,6 +46,12 @@ const WIDGET_MAP: Record<string, (props: WidgetProps & { layout: WidgetLayout })
   ),
 };
 
+export const SUPPORTED_WIDGET_IDS = new Set(Object.keys(WIDGET_MAP));
+
+export function isWidgetSupported(widgetId: string): boolean {
+  return SUPPORTED_WIDGET_IDS.has(widgetId);
+}
+
 export function renderWidget(layout: WidgetLayout, defaultServerId: string): React.ReactNode {
   const renderer = WIDGET_MAP[layout.widget_id];
   if (!renderer) {
