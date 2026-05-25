@@ -158,19 +158,23 @@ async def auth_status():
 
 @router.post("/toggle")
 async def toggle_auth(request: Request):
-    """Toggle auth on/off.
+    """Disable auth (enabled:false). Enabling is REJECTED — use /configure.
 
-    Per D-08 (SEC-02): when auth is currently ENABLED, require a valid session.
-    When auth is DISABLED, anyone may re-enable it (bootstrap path; no users yet
-    means no one can authenticate).
+    REVIEWS #2: enabling auth always requires setting fresh credentials (D-09), so
+    /toggle {enabled:true} is refused here. This supersedes Phase 1 D-08's password-less
+    toggle-ON: stale stored credentials can no longer silently re-enable auth, and auth
+    can never be enabled with no user. For {enabled:false} we use the shared first-run-aware
+    helper: skip-at-setup (no user / auth off) works with no cookie (D-02); disabling an
+    active login (auth_enabled AND has_user) still requires a valid session (Phase 1 D-08).
     """
     from backend.main import auth
-    if await auth.is_auth_enabled():
-        token = request.cookies.get("session")
-        if not token or not auth.verify_session_token(token):
-            from fastapi import HTTPException
-            raise HTTPException(status_code=401, detail={"error": "unauthorized"})
     body = await request.json()
     enabled = body.get("enabled", True)
-    await auth.set_auth_enabled(enabled)
-    return {"success": True, "auth_enabled": enabled}
+    if enabled:
+        return {
+            "success": False,
+            "error": "Use /api/auth/configure to enable authentication",
+        }
+    await _require_session_if_active(request, auth)
+    await auth.set_auth_enabled(False)
+    return {"success": True, "auth_enabled": False}
