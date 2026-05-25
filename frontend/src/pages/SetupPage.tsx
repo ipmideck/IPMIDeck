@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { post, get } from "@/api/client";
 import { useServerStore } from "@/stores/server-store";
+import { useAuthStore } from "@/stores/auth-store";
 import { cn } from "@/lib/utils";
 import {
   MonitorCog,
@@ -10,7 +11,6 @@ import {
   CheckCircle2,
   ChevronRight,
   ChevronLeft,
-  SkipForward,
   Loader2,
 } from "lucide-react";
 
@@ -30,6 +30,7 @@ export default function SetupPage() {
   const [step, setStep] = useState(0);
 
   // Auth state
+  const [requireLogin, setRequireLogin] = useState(true); // default "Yes" (require login) — secure-by-default per REVIEWS LOW; operator may switch to "No" (open access)
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
@@ -47,18 +48,45 @@ export default function SetupPage() {
   const [testResult, setTestResult] = useState<"success" | "fail" | null>(null);
   const [testLoading, setTestLoading] = useState(false);
 
-  async function handleAuthSetup() {
-    if (!username.trim() || !password.trim()) {
-      setAuthError("Username and password are required.");
-      return;
-    }
+  // SAFETY-CRITICAL: the "No" branch MUST call POST /api/auth/toggle {enabled:false},
+  // otherwise the app locks out — auth_enabled defaults to "true", so a frontend-only
+  // skip would leave auth on with no user = permanent lockout. Do NOT reintroduce a
+  // frontend-only skip. The radio defaults to "Yes" for secure-by-default (REVIEWS LOW).
+  async function handleAuthStep() {
     setAuthLoading(true);
     setAuthError("");
     try {
-      await post("/api/auth/setup", { username, password });
+      if (requireLogin) {
+        // D-03: create user (issues a session cookie) -> continue authenticated.
+        if (!username.trim() || !password.trim()) {
+          setAuthError("Username and password are required.");
+          setAuthLoading(false);
+          return;
+        }
+        await post("/api/auth/setup", { username, password });
+        useAuthStore.setState({
+          authEnabled: true,
+          authenticated: true,
+          hasUser: true,
+          username,
+        });
+      } else {
+        // D-02: actually DISABLE auth on the backend (default is "true" -> skipping
+        // without this = permanent lockout). At first-run this no-session toggle-OFF
+        // succeeds ONLY because Plan 02.1-01 patched the backend /toggle handler to use
+        // the shared _require_session_if_active helper (no session required when no user
+        // exists / auth off).
+        await post("/api/auth/toggle", { enabled: false });
+        useAuthStore.setState({
+          authEnabled: false,
+          authenticated: true, // open access: treat as authenticated for routing
+          hasUser: false,
+          username: null,
+        });
+      }
       setStep(2);
     } catch (e: any) {
-      setAuthError(e.message || "Failed to set up authentication.");
+      setAuthError(e.message || "Failed to apply authentication setting.");
     } finally {
       setAuthLoading(false);
     }
@@ -179,27 +207,81 @@ export default function SetupPage() {
             <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
               <User className="h-8 w-8 text-primary" />
             </div>
-            <h1 className="text-xl font-bold">Set Up Authentication</h1>
+            <h1 className="text-xl font-bold">Require login?</h1>
             <p className="mt-2 max-w-sm text-sm text-muted-foreground">
-              Create a username and password to protect your dashboard, or skip
-              to leave it open.
+              "Yes" requires a username and password to access IPMILink. "No"
+              leaves the dashboard open to anyone on your LAN.
             </p>
 
-            <div className="mt-6 w-full max-w-xs space-y-3">
-              <input
-                type="text"
-                placeholder="Username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-              />
-              <input
-                type="password"
-                placeholder="Password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-              />
+            <div className="mt-6 w-full max-w-xs space-y-3 text-left">
+              <label
+                className={cn(
+                  "flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2.5 transition-colors",
+                  requireLogin
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:border-muted-foreground/40"
+                )}
+              >
+                <input
+                  type="radio"
+                  name="require-login"
+                  checked={requireLogin}
+                  onChange={() => setRequireLogin(true)}
+                  className="mt-0.5 h-4 w-4 accent-primary"
+                />
+                <span className="text-sm">
+                  <span className="font-medium text-foreground">
+                    Yes — require login
+                  </span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    Protect the dashboard with a username and password.
+                  </span>
+                </span>
+              </label>
+              <label
+                className={cn(
+                  "flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2.5 transition-colors",
+                  !requireLogin
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:border-muted-foreground/40"
+                )}
+              >
+                <input
+                  type="radio"
+                  name="require-login"
+                  checked={!requireLogin}
+                  onChange={() => setRequireLogin(false)}
+                  className="mt-0.5 h-4 w-4 accent-primary"
+                />
+                <span className="text-sm">
+                  <span className="font-medium text-foreground">
+                    No — open access
+                  </span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    Anyone on your LAN can use IPMILink without logging in.
+                  </span>
+                </span>
+              </label>
+
+              {requireLogin && (
+                <div className="space-y-3 pt-1">
+                  <input
+                    type="text"
+                    placeholder="Username"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  />
+                  <input
+                    type="password"
+                    placeholder="Password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  />
+                </div>
+              )}
+
               {authError && (
                 <p className="text-xs text-red-500">{authError}</p>
               )}
@@ -214,22 +296,12 @@ export default function SetupPage() {
                 Back
               </button>
               <button
-                onClick={() => {
-                  setAuthError("");
-                  setStep(2);
-                }}
-                className="inline-flex items-center gap-1 rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <SkipForward className="h-4 w-4" />
-                Skip
-              </button>
-              <button
-                onClick={handleAuthSetup}
+                onClick={handleAuthStep}
                 disabled={authLoading}
                 className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
               >
                 {authLoading && <Loader2 className="h-4 w-4 animate-spin" />}
-                Save & Continue
+                Continue
                 <ChevronRight className="h-4 w-4" />
               </button>
             </div>
