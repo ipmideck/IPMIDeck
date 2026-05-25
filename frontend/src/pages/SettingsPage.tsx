@@ -2,10 +2,11 @@ import { useEffect, useState } from "react";
 import { Header } from "@/components/layout/Header";
 import { useServerStore, type Server } from "@/stores/server-store";
 import { useThemeStore } from "@/stores/theme-store";
+import { useAuthStore } from "@/stores/auth-store";
 import { get, post, put, del } from "@/api/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { Plus, Trash2, TestTube, Pencil, ExternalLink, Heart, Code2, Moon, Sun, Monitor, Server as ServerIcon } from "lucide-react";
+import { Plus, Trash2, TestTube, Pencil, ExternalLink, Heart, Code2, Moon, Sun, Monitor, Server as ServerIcon, ShieldCheck, ShieldOff } from "lucide-react";
 import { EmptyState } from "@/components/common/EmptyState";
 
 export default function SettingsPage() {
@@ -16,6 +17,12 @@ export default function SettingsPage() {
   const [testing, setTesting] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({ name: "", description: "", host: "", username: "", password: "", vendor: "dell" });
+
+  // Security card (D-08..D-10): enable -> /configure (fresh creds), disable -> /toggle {enabled:false}.
+  const authEnabled = useAuthStore((s) => s.authEnabled);
+  const [secUsername, setSecUsername] = useState("");
+  const [secPassword, setSecPassword] = useState("");
+  const [secBusy, setSecBusy] = useState(false);
 
   const loadServers = async () => {
     try {
@@ -115,6 +122,43 @@ export default function SettingsPage() {
       await loadServers();
     } catch {
       toast.error("Failed to update server");
+    }
+  };
+
+  // ENABLE: /configure bootstrap case (auth is OFF, no prior session needed per REVIEWS #1).
+  // Always requires fresh creds (D-09); operator stays logged in via the cookie /configure issues.
+  // A session-expiry 401 here is handled by the global interceptor (REVIEWS #6).
+  const enableAuth = async () => {
+    if (!secUsername.trim() || !secPassword.trim()) {
+      toast.error("Username and password are required");
+      return;
+    }
+    setSecBusy(true);
+    try {
+      await post("/api/auth/configure", { username: secUsername, password: secPassword });
+      useAuthStore.setState({ authEnabled: true, authenticated: true, hasUser: true, username: secUsername });
+      setSecUsername("");
+      setSecPassword("");
+      toast.success("Authentication enabled");
+    } catch {
+      toast.error("Failed to enable authentication");
+    } finally {
+      setSecBusy(false);
+    }
+  };
+
+  // DISABLE: /toggle {enabled:false} only — the stored user row is KEPT (D-10, no credential wipe,
+  // no re-auth). The operator has a valid session, accepted by the backend's first-run-aware helper.
+  const disableAuth = async () => {
+    setSecBusy(true);
+    try {
+      await post("/api/auth/toggle", { enabled: false });
+      useAuthStore.setState({ authEnabled: false }); // user row KEPT (D-10); hasUser stays true
+      toast.success("Authentication disabled");
+    } catch {
+      toast.error("Failed to disable authentication");
+    } finally {
+      setSecBusy(false);
     }
   };
 
@@ -218,6 +262,62 @@ export default function SettingsPage() {
                     )}
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+
+          {/* Security */}
+          <div className="rounded-lg border border-border bg-card p-5">
+            <div className="mb-4 flex items-center gap-2">
+              {authEnabled ? (
+                <ShieldCheck className="h-4 w-4 text-emerald-500" />
+              ) : (
+                <ShieldOff className="h-4 w-4 text-muted-foreground" />
+              )}
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Security</h2>
+            </div>
+
+            {authEnabled ? (
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">Authentication is enabled.</p>
+                <button
+                  onClick={disableAuth}
+                  disabled={secBusy}
+                  className="rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
+                >
+                  Disable Authentication
+                </button>
+                <p className="text-xs text-muted-foreground">
+                  Enabling again will require setting a new username and password.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Authentication is disabled — the dashboard is open on your network.
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <input
+                    placeholder="Username"
+                    value={secUsername}
+                    onChange={(e) => setSecUsername(e.target.value)}
+                    className="rounded-md border border-border bg-background px-3 py-1.5 text-sm"
+                  />
+                  <input
+                    type="password"
+                    placeholder="Password"
+                    value={secPassword}
+                    onChange={(e) => setSecPassword(e.target.value)}
+                    className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-mono"
+                  />
+                </div>
+                <button
+                  onClick={enableAuth}
+                  disabled={secBusy}
+                  className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
+                >
+                  Enable Authentication
+                </button>
               </div>
             )}
           </div>
