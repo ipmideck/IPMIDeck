@@ -51,7 +51,11 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   // so serversLoaded stays false there — resolve to /login on authLoaded alone for
   // that case; otherwise wait for BOTH flags.
   if (!authLoaded) return <Loading />;
-  if (!hasUser) return <Navigate to="/setup" replace />;
+  // D-07 case 1: "no user -> setup" applies ONLY when auth is enabled. When auth is
+  // DISABLED (skipped/open access, D-02), no-user is a VALID configured state — fall
+  // through to the servers check and render the app. Guarding on authEnabled here is
+  // what breaks the AuthGate(/->/setup) <-> SetupGuard(/setup->/) infinite loop (GAP-AUTH-01).
+  if (!hasUser && authEnabled) return <Navigate to="/setup" replace />;
   if (hasUser && authEnabled && !authenticated) {
     return <Navigate to="/login" replace state={{ from: location }} />;
   }
