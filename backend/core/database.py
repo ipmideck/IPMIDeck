@@ -116,6 +116,9 @@ class Database:
     async def commit(self) -> None:
         await self.conn.commit()
 
+    async def rollback(self) -> None:
+        await self.conn.rollback()
+
     async def get_config(self, key: str, default: str | None = None) -> str | None:
         row = await self.fetchone("SELECT value FROM app_config WHERE key = ?", (key,))
         return row["value"] if row else default

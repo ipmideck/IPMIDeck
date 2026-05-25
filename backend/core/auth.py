@@ -77,6 +77,33 @@ class AuthManager:
         )
         await self.db.commit()
 
+    async def replace_user(self, username: str, password: str) -> None:
+        """Single-user create-or-replace: clear the users table and insert one row.
+
+        The users table is single-user (LAN). The new username may differ from any
+        existing row, so we DELETE-then-INSERT rather than UPDATE (which would miss
+        a renamed user) or INSERT (which could leave two rows / hit UNIQUE).
+
+        REVIEWS #8: validate trimmed credentials and apply DELETE+INSERT atomically —
+        on any failure we do NOT commit (rollback), so a failed INSERT never leaves a
+        committed empty users table.
+        """
+        username = username.strip()
+        if not username or not password.strip():
+            raise ValueError("Username and password are required")
+        pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+        try:
+            await self.db.execute("DELETE FROM users")
+            await self.db.execute(
+                "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+                (username, pw_hash),
+            )
+            await self.db.commit()
+        except Exception:
+            await self.db.rollback()
+            raise
+        logger.info("User credentials replaced: %s", username)
+
     # === SEC-03: Brute-force lockout (per-username, in-memory) ===
 
     async def check_lockout(self, username: str) -> bool:
@@ -187,5 +214,13 @@ async def require_auth(request: Request) -> str:
 
     username = _auth.verify_session_token(token)
     if not username:
+        raise HTTPException(status_code=401, detail={"error": "unauthorized"})
+
+    # REVIEWS #7: a signed token for an OLD username (pre credential-replace) must
+    # not stay valid. Confirm the token subject is the CURRENT single stored user.
+    row = await _auth.db.fetchone(
+        "SELECT 1 FROM users WHERE username = ? LIMIT 1", (username,)
+    )
+    if row is None:
         raise HTTPException(status_code=401, detail={"error": "unauthorized"})
     return username
