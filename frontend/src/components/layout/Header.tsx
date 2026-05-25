@@ -1,5 +1,9 @@
+import { useNavigate } from "react-router-dom";
+import { LogOut } from "lucide-react";
 import { useServerStore } from "@/stores/server-store";
+import { useAuthStore } from "@/stores/auth-store";
 import { useWebSocket, type WSStatus } from "@/hooks/useWebSocket";
+import { post } from "@/api/client";
 import { cn } from "@/lib/utils";
 
 interface HeaderProps {
@@ -36,8 +40,22 @@ export function Header({ title, children }: HeaderProps) {
     s.servers.find((srv) => srv.id === s.contextServerId)
   );
 
+  // Logout (D-11): rendered inside Header so it appears on EVERY page. Gated on
+  // authEnabled && authenticated — hidden in open-access mode (nothing to log out of).
+  const navigate = useNavigate();
+  const authEnabled = useAuthStore((s) => s.authEnabled);
+  const authenticated = useAuthStore((s) => s.authenticated);
+
+  async function handleLogout() {
+    // Best-effort: clearing client state + redirecting is correct even if the POST fails
+    // (cookie expires server-side regardless; a 401 here is handled by the interceptor, REVIEWS #6).
+    try { await post("/api/auth/logout"); } catch { /* best-effort */ }
+    useAuthStore.setState({ authenticated: false });
+    navigate("/login", { replace: true });
+  }
+
   return (
-    <header className="flex h-[52px] items-center justify-between border-b border-border bg-card px-6">
+    <header className="flex h-[52px] items-center justify-between border-b border-border bg-card px-6 shrink-0">
       <div className="flex items-center gap-2 text-[13px]">
         {contextServer && (
           <>
@@ -48,7 +66,19 @@ export function Header({ title, children }: HeaderProps) {
         <span className="font-medium">{title}</span>
         <ConnectionBadge status={status} />
       </div>
-      <div className="flex items-center gap-2">{children}</div>
+      <div className="flex items-center gap-2">
+        {children}
+        {authEnabled && authenticated && (
+          <button
+            onClick={handleLogout}
+            aria-label="Log out"
+            className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs font-medium hover:bg-muted"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+            Logout
+          </button>
+        )}
+      </div>
     </header>
   );
 }
