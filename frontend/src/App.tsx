@@ -1,5 +1,12 @@
 import { lazy, Suspense, useEffect } from "react";
-import { BrowserRouter, Route, Routes, Navigate, useLocation } from "react-router-dom";
+import {
+  BrowserRouter,
+  Route,
+  Routes,
+  Navigate,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
 import { Toaster } from "sonner";
 import { PageLayout } from "@/components/layout/PageLayout";
 import { CommandPalette } from "@/components/CommandPalette";
@@ -8,7 +15,7 @@ import { applyTheme, useThemeStore } from "@/stores/theme-store";
 import { useServerStore } from "@/stores/server-store";
 import { useAuthStore } from "@/stores/auth-store";
 import { bootstrapAppData } from "@/lib/bootstrap";
-import { get } from "@/api/client";
+import { get, setUnauthorizedHandler } from "@/api/client";
 
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const FanPilotPage = lazy(() => import("@/pages/FanPilotPage"));
@@ -100,6 +107,27 @@ function LoginGuard() {
 /** Inner shell that lives inside BrowserRouter so hooks like useNavigate work. */
 function AppShell() {
   useKeyboardShortcuts();
+
+  const navigate = useNavigate();
+  const location = useLocation();
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      // Mark unauthenticated so AuthGate routes correctly; preserve intended path (D-05, LOW).
+      useAuthStore.setState({ authenticated: false });
+      if (location.pathname !== "/login") {
+        navigate("/login", {
+          replace: true,
+          state: {
+            from: {
+              pathname: location.pathname,
+              search: location.search,
+              hash: location.hash,
+            },
+          },
+        });
+      }
+    });
+  }, [navigate, location]);
 
   return (
     <>
