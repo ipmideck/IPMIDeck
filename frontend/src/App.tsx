@@ -6,6 +6,8 @@ import { CommandPalette } from "@/components/CommandPalette";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { applyTheme, useThemeStore } from "@/stores/theme-store";
 import { useServerStore } from "@/stores/server-store";
+import { useAuthStore } from "@/stores/auth-store";
+import { bootstrapAppData } from "@/lib/bootstrap";
 import { get } from "@/api/client";
 
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
@@ -15,6 +17,7 @@ const FRUPage = lazy(() => import("@/pages/FRUPage"));
 const ModulesPage = lazy(() => import("@/pages/ModulesPage"));
 const SettingsPage = lazy(() => import("@/pages/SettingsPage"));
 const SetupPage = lazy(() => import("@/pages/SetupPage"));
+const LoginPage = lazy(() => import("@/pages/LoginPage"));
 
 function Loading() {
   return (
@@ -24,21 +27,74 @@ function Loading() {
   );
 }
 
-/** Redirects to /setup when no servers exist (first-run experience). */
-function SetupRedirect({ children }: { children: React.ReactNode }) {
+/**
+ * D-07 routing precedence for the APP routes (everything except /setup and /login,
+ * which have their own guards below). Replaces the buggy servers-only SetupRedirect.
+ */
+function AuthGate({ children }: { children: React.ReactNode }) {
+  const authLoaded = useAuthStore((s) => s.loaded);
+  const serversLoaded = useServerStore((s) => s.loaded);
+  const authEnabled = useAuthStore((s) => s.authEnabled);
+  const authenticated = useAuthStore((s) => s.authenticated);
+  const hasUser = useAuthStore((s) => s.hasUser);
   const servers = useServerStore((s) => s.servers);
-  const loaded = useServerStore((s) => s.loaded);
   const location = useLocation();
 
-  // Until the initial /api/servers fetch resolves, `servers` is [] regardless of
-  // whether servers actually exist. Show the spinner instead of deciding the
-  // redirect — otherwise a hard reload bounces an authenticated user to /setup.
-  if (!loaded) return <Loading />;
-
-  if (loaded && servers.length === 0 && location.pathname !== "/setup") {
+  // GAP-03: in the login-required state the server fetch is skipped (REVIEWS #4),
+  // so serversLoaded stays false there — resolve to /login on authLoaded alone for
+  // that case; otherwise wait for BOTH flags.
+  if (!authLoaded) return <Loading />;
+  if (!hasUser) return <Navigate to="/setup" replace />;
+  if (hasUser && authEnabled && !authenticated) {
+    return <Navigate to="/login" replace state={{ from: location }} />;
+  }
+  // From here we are authenticated or auth is off -> the server fetch ran; wait for it.
+  if (!serversLoaded) return <Loading />;
+  if ((authenticated || !authEnabled) && servers.length === 0) {
     return <Navigate to="/setup" replace />;
   }
   return <>{children}</>;
+}
+
+/** D-07 precedence guard for the top-level /setup route (REVIEWS #3). */
+function SetupGuard() {
+  const authLoaded = useAuthStore((s) => s.loaded);
+  const authEnabled = useAuthStore((s) => s.authEnabled);
+  const authenticated = useAuthStore((s) => s.authenticated);
+  const hasUser = useAuthStore((s) => s.hasUser);
+  const serversLoaded = useServerStore((s) => s.loaded);
+  const servers = useServerStore((s) => s.servers);
+  if (!authLoaded) return <Loading />;
+  // Logged-out user WITH an account must not see setup -> /login (REVIEWS #3).
+  if (hasUser && authEnabled && !authenticated) return <Navigate to="/login" replace />;
+  // Already usable (authenticated or open) AND servers exist -> app (REVIEWS #3).
+  if ((authenticated || !authEnabled) && serversLoaded && servers.length > 0) {
+    return <Navigate to="/" replace />;
+  }
+  return <SetupPage />;
+}
+
+/** D-07 precedence guard for the top-level /login route (REVIEWS #3). */
+function LoginGuard() {
+  const authLoaded = useAuthStore((s) => s.loaded);
+  const authEnabled = useAuthStore((s) => s.authEnabled);
+  const authenticated = useAuthStore((s) => s.authenticated);
+  const hasUser = useAuthStore((s) => s.hasUser);
+  const location = useLocation();
+  if (!authLoaded) return <Loading />;
+  // No account yet -> there is nothing to log into -> setup (REVIEWS #3).
+  if (!hasUser) return <Navigate to="/setup" replace />;
+  // Auth off or already authenticated -> go to intended path / home (REVIEWS #3, D-05).
+  if (!authEnabled || authenticated) {
+    const from = (
+      location.state as { from?: { pathname?: string; search?: string; hash?: string } } | null
+    )?.from;
+    const target = from
+      ? `${from.pathname ?? "/"}${from.search ?? ""}${from.hash ?? ""}`
+      : "/";
+    return <Navigate to={target} replace />;
+  }
+  return <LoginPage />;
 }
 
 /** Inner shell that lives inside BrowserRouter so hooks like useNavigate work. */
@@ -49,14 +105,12 @@ function AppShell() {
     <>
       <Suspense fallback={<Loading />}>
         <Routes>
-          <Route
-            path="/setup"
-            element={<SetupPage />}
-          />
+          <Route path="/setup" element={<SetupGuard />} />
+          <Route path="/login" element={<LoginGuard />} />
           <Route
             path="*"
             element={
-              <SetupRedirect>
+              <AuthGate>
                 <PageLayout>
                   <Suspense fallback={<Loading />}>
                     <Routes>
@@ -69,7 +123,7 @@ function AppShell() {
                     </Routes>
                   </Suspense>
                 </PageLayout>
-              </SetupRedirect>
+              </AuthGate>
             }
           />
         </Routes>
@@ -88,37 +142,50 @@ function AppShell() {
 
 export default function App() {
   const theme = useThemeStore((s) => s.theme);
-  const setServers = useServerStore((s) => s.setServers);
-  const setLoaded = useServerStore((s) => s.setLoaded);
-  const setContextServer = useServerStore((s) => s.setContextServer);
+  const setAuth = useAuthStore((s) => s.setAuth);
 
   // Apply theme on mount
   useEffect(() => {
     applyTheme(theme);
   }, [theme]);
 
-  // Load servers on mount
+  // Boot: fetch /api/auth/me FIRST, then load protected data only when usable.
   useEffect(() => {
     async function load() {
+      let authEnabled = true;
+      let authenticated = false;
       try {
-        const data = await get<{ servers: any[] }>("/api/servers");
-        setServers(data.servers);
-
-        // Load context server
-        const ctx = await get<{ server_id: string | null }>("/api/dashboard/context");
-        if (ctx.server_id) {
-          setContextServer(ctx.server_id);
-        }
+        const me = await get<{
+          authenticated: boolean;
+          username?: string;
+          auth_enabled: boolean;
+          has_user: boolean;
+        }>("/api/auth/me");
+        authEnabled = me.auth_enabled;
+        authenticated = me.authenticated;
+        setAuth({
+          authEnabled,
+          authenticated,
+          hasUser: me.has_user,
+          username: me.username ?? null,
+        });
       } catch {
-        // API not available yet (first run or backend not started), or a
-        // benign pre-auth 401. Flip loaded so the app doesn't hang on the
-        // spinner; SetupRedirect then evaluates (first run with no servers
-        // legitimately routes to /setup — the regression was the RACE).
-        setLoaded(true);
+        // Fail closed: assume auth required + not authenticated -> user sees /login.
+        authEnabled = true;
+        authenticated = false;
+        setAuth({ authEnabled: true, authenticated: false, hasUser: true, username: null });
+      }
+      // REVIEWS #4: only load protected resources when the app is actually usable.
+      // In the login-required state (authEnabled && !authenticated) SKIP the server fetch
+      // entirely — do NOT mark the server store loaded:[] (that would later imply
+      // "no servers -> setup" after login). AuthGate resolves the login-required state
+      // on authLoaded alone (see AuthGate above), so leaving serversLoaded:false is correct.
+      if (!authEnabled || authenticated) {
+        await bootstrapAppData();
       }
     }
     load();
-  }, [setServers, setLoaded, setContextServer]);
+  }, [setAuth]);
 
   return (
     <BrowserRouter>
