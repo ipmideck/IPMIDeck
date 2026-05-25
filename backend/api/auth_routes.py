@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Cookie, Depends, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from backend.core.auth import require_auth
@@ -20,20 +20,36 @@ class SetupRequest(BaseModel):
     password: str
 
 
-@router.get("/me", dependencies=[Depends(require_auth)])
+class ConfigureRequest(BaseModel):
+    username: str
+    password: str
+
+
+async def _require_session_if_active(request: Request, auth) -> None:
+    """REVIEWS #1: require a valid session ONLY when auth is active for a real account.
+
+    Bootstrap (auth disabled OR no user yet) is callable with no session — that is the
+    first-run / re-enable-from-disabled path. Once `auth_enabled AND has_user`, a valid
+    session cookie is mandatory (else 401). Shared by /configure and /toggle so both
+    endpoints enforce ONE consistent first-run-aware rule.
+    """
+    if await auth.is_auth_enabled() and await auth.has_user():
+        token = request.cookies.get("session")
+        if not token or not auth.verify_session_token(token):
+            raise HTTPException(status_code=401, detail={"error": "unauthorized"})
+
+
+@router.get("/me")
 async def get_me(request: Request):
     from backend.main import auth
+    has_user = await auth.has_user()
     if not await auth.is_auth_enabled():
-        return {"authenticated": True, "username": "local", "auth_enabled": False}
-
+        return {"authenticated": True, "username": "local", "auth_enabled": False, "has_user": has_user}
     token = request.cookies.get("session")
-    if not token:
-        return {"authenticated": False}
-
-    username = auth.verify_session_token(token)
+    username = auth.verify_session_token(token) if token else None
     if not username:
-        return {"authenticated": False}
-    return {"authenticated": True, "username": username, "auth_enabled": True}
+        return {"authenticated": False, "auth_enabled": True, "has_user": has_user}
+    return {"authenticated": True, "username": username, "auth_enabled": True, "has_user": has_user}
 
 
 @router.post("/login")
@@ -92,6 +108,34 @@ async def setup(body: SetupRequest, response: Response):
     if await auth.has_user():
         return {"success": False, "error": "User already exists"}
     await auth.create_user(body.username, body.password)
+    token = auth.create_session_token(body.username)
+    response.set_cookie(
+        key="session",
+        value=token,
+        httponly=True,
+        samesite="lax",
+        max_age=86400,
+    )
+    return {"success": True, "username": body.username}
+
+
+@router.post("/configure")
+async def configure_auth(body: ConfigureRequest, request: Request, response: Response):
+    """D-09/D-13: set fresh credentials AND enable auth atomically (overwrite-on-enable).
+
+    REVIEWS #1: callable without a session only at bootstrap (auth disabled OR no user
+    yet). Once auth is active for a real account, a valid session is required — this
+    endpoint is NOT an unauthenticated credential-takeover path. Issues a fresh session
+    cookie for the new username so the operator stays logged in (and the new cookie
+    passes the require_auth current-user check while any old-username cookie is rejected).
+    """
+    from backend.main import auth
+    await _require_session_if_active(request, auth)
+    try:
+        await auth.replace_user(body.username, body.password)
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+    await auth.set_auth_enabled(True)
     token = auth.create_session_token(body.username)
     response.set_cookie(
         key="session",
