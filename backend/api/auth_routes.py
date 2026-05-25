@@ -47,6 +47,13 @@ async def get_me(request: Request):
         return {"authenticated": True, "username": "local", "auth_enabled": False, "has_user": has_user}
     token = request.cookies.get("session")
     username = auth.verify_session_token(token) if token else None
+    # REVIEWS #7: mirror require_auth — a token whose subject is no longer the current
+    # stored user (e.g. after a credential replace) is NOT authenticated. Keeps /me
+    # consistent with protected routes so the frontend boot routing sees the same state.
+    if username and not await auth.db.fetchone(
+        "SELECT 1 FROM users WHERE username = ? LIMIT 1", (username,)
+    ):
+        username = None
     if not username:
         return {"authenticated": False, "auth_enabled": True, "has_user": has_user}
     return {"authenticated": True, "username": username, "auth_enabled": True, "has_user": has_user}
