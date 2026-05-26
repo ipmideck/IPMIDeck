@@ -1,18 +1,42 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Header } from "@/components/layout/Header";
 import { useServerStore } from "@/stores/server-store";
+import { useSensorStore } from "@/stores/sensor-store";
 import { get, post } from "@/api/client";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/common/EmptyState";
-import { RefreshCw, Copy, ServerOff, CircuitBoard } from "lucide-react";
+import { RefreshCw, Copy, ServerOff, CircuitBoard, Server, Cpu, Info } from "lucide-react";
 
 interface FRUData {
   sections: Record<string, { field: string; value: string }[]>;
   fetched_at: string | null;
 }
 
+/** Strip ipmitool's "FRU Device Description :" noise and give common devices a friendly label. */
+function cleanSection(raw: string): string {
+  const s = raw.replace(/^FRU Device Description\s*:?\s*/i, "").trim();
+  if (/builtin fru device/i.test(s)) return "System Board";
+  const ps = s.match(/^PS(\d+)/i);
+  if (ps) return `Power Supply ${ps[1]}`;
+  const bp = s.match(/^BP(\d+)/i);
+  if (bp) return `Backplane ${bp[1]}`;
+  if (/^PERC/i.test(s) || /storage cntlr/i.test(s)) return "Storage Controller";
+  if (/^NDC/i.test(s)) return "Network Daughter Card";
+  return s || raw;
+}
+
+/** Pick the first present value among candidate field names within a section. */
+function pick(fields: { field: string; value: string }[], names: string[]): string | undefined {
+  for (const n of names) {
+    const f = fields.find((x) => x.field.toLowerCase() === n.toLowerCase());
+    if (f?.value) return f.value;
+  }
+  return undefined;
+}
+
 export default function FRUPage() {
   const contextServerId = useServerStore((s) => s.contextServerId);
+  const readings = useSensorStore((s) => (contextServerId ? s.readings[contextServerId] : undefined));
   const [data, setData] = useState<FRUData | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -48,6 +72,33 @@ export default function FRUPage() {
   const sections = data?.sections || {};
   const hasSections = Object.keys(sections).length > 0;
 
+  // CPUs detected — inferred from per-CPU temperature sensors (IPMI FRU has no CPU inventory).
+  const cpuCount = useMemo(() => {
+    if (!readings) return 0;
+    return Object.entries(readings).filter(
+      ([name, r]) => r?.type === "temperature" && /^cpu\b/i.test(name)
+    ).length;
+  }, [readings]);
+
+  // Build a system summary from the system-board / product / chassis FRU devices, EXCLUDING
+  // peripheral devices (PSUs, backplanes, storage controllers, NIC) whose own "Board Product"
+  // would otherwise be mistaken for the system model. Works for both the real BMC naming
+  // ("Builtin FRU Device") and the demo/clean naming ("BOARD"/"PRODUCT"/"CHASSIS").
+  const summary = useMemo(() => {
+    const sysFields: { field: string; value: string }[] = [];
+    for (const [k, f] of Object.entries(sections)) {
+      if (/\bPS\d|power\s*sup|^bp\d|backplane|perc|storage cntlr|\bndc\b|\bdrive\b|network/i.test(k)) continue;
+      sysFields.push(...f);
+    }
+    if (sysFields.length === 0) return null;
+    const model = pick(sysFields, ["Product Name", "Board Product"]);
+    const vendor = pick(sysFields, ["Product Manufacturer", "Board Mfg"]);
+    const serviceTag = pick(sysFields, ["Product Serial", "Chassis Serial", "Board Serial"]);
+    const assetTag = pick(sysFields, ["Product Asset Tag", "Chassis Asset Tag"]);
+    if (!model && !vendor && !serviceTag) return null;
+    return { model, vendor, serviceTag, assetTag };
+  }, [sections]);
+
   return (
     <>
       <Header title="Hardware">
@@ -71,29 +122,81 @@ export default function FRUPage() {
             />
           )
         ) : (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {Object.entries(sections).map(([section, fields]) => (
-              <div key={section} className="rounded-lg border border-border bg-card p-5">
-                <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">{section}</h3>
-                <div className="space-y-2">
-                  {fields.map((f, i) => (
-                    <div key={i} className="flex items-center justify-between gap-4">
-                      <span className="text-xs text-muted-foreground truncate">{f.field}</span>
-                      <div className="flex items-center gap-1">
-                        <span className="font-mono text-xs font-medium truncate max-w-[180px]">{f.value}</span>
-                        {(f.field.toLowerCase().includes("serial") || f.field.toLowerCase().includes("part")) && (
-                          <button onClick={() => copyToClipboard(f.value)} className="rounded p-0.5 hover:bg-muted">
+          <div className="space-y-6">
+            {/* System overview — the headline specs, pulled from the system-board FRU device. */}
+            {summary && (summary.model || summary.vendor || summary.serviceTag) && (
+              <div className="rounded-lg border border-border bg-card p-5">
+                <div className="flex items-start gap-4">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10">
+                    <Server className="h-6 w-6 text-primary" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h2 className="text-lg font-bold leading-tight">{summary.model || "Unknown system"}</h2>
+                    <p className="text-sm text-muted-foreground">{summary.vendor}</p>
+                    <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-xs">
+                      {summary.serviceTag && (
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-muted-foreground">Service tag</span>
+                          <span className="font-mono font-medium">{summary.serviceTag}</span>
+                          <button onClick={() => copyToClipboard(summary.serviceTag!)} className="rounded p-0.5 hover:bg-muted">
                             <Copy className="h-3 w-3 text-muted-foreground" />
                           </button>
-                        )}
+                        </div>
+                      )}
+                      {summary.assetTag && (
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-muted-foreground">Asset tag</span>
+                          <span className="font-mono font-medium">{summary.assetTag}</span>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-1.5">
+                        <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span className="text-muted-foreground">CPUs detected</span>
+                        <span className="font-medium">{cpuCount > 0 ? cpuCount : "—"}</span>
                       </div>
                     </div>
-                  ))}
+                  </div>
                 </div>
               </div>
-            ))}
+            )}
+
+            {/* Honest capability note — IPMI/FRU does not expose CPU model or RAM. */}
+            <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
+              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <p>
+                CPU model and memory (RAM) details are not exposed over IPMI/FRU — the BMC reports
+                board, power, storage and network inventory only. Full CPU/DIMM specs require the
+                iDRAC Redfish API (not yet integrated). CPU count above is inferred from per-CPU
+                temperature sensors.
+              </p>
+            </div>
+
+            {/* All FRU devices, with cleaned/friendly section names. */}
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {Object.entries(sections).map(([section, fields]) => (
+                <div key={section} className="rounded-lg border border-border bg-card p-5">
+                  <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">{cleanSection(section)}</h3>
+                  <div className="space-y-2">
+                    {fields.map((f, i) => (
+                      <div key={i} className="flex items-center justify-between gap-4">
+                        <span className="text-xs text-muted-foreground truncate">{f.field}</span>
+                        <div className="flex items-center gap-1">
+                          <span className="font-mono text-xs font-medium truncate max-w-[180px]">{f.value}</span>
+                          {(f.field.toLowerCase().includes("serial") || f.field.toLowerCase().includes("part")) && (
+                            <button onClick={() => copyToClipboard(f.value)} className="rounded p-0.5 hover:bg-muted">
+                              <Copy className="h-3 w-3 text-muted-foreground" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
             {data?.fetched_at && (
-              <p className="col-span-full text-xs text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 Last updated: {new Date(data.fetched_at).toLocaleString()}
               </p>
             )}
