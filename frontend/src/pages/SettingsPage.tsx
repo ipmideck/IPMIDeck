@@ -364,7 +364,9 @@ export default function SettingsPage() {
                     <a href="https://github.com/dev-luigi" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground">
                       <Code2 className="h-3 w-3" /> dev-luigi <ExternalLink className="h-2.5 w-2.5" />
                     </a>
-                    <iframe src="https://github.com/sponsors/dev-luigi/button" title="Sponsor dev-luigi" height="32" width="114" style={{ border: 0, borderRadius: "6px" }} />
+                    <a href="https://github.com/sponsors/dev-luigi" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded-md border border-pink-500/30 bg-pink-500/10 px-2 py-0.5 text-[11px] font-medium text-pink-400 transition-colors hover:bg-pink-500/20">
+                      <Heart className="h-3 w-3 fill-current" /> Sponsor <ExternalLink className="h-2.5 w-2.5" />
+                    </a>
                   </div>
                 </div>
               </div>

@@ -12,6 +12,9 @@ import {
   ChevronRight,
   ChevronLeft,
   Loader2,
+  ShieldCheck,
+  Globe,
+  Lock,
 } from "lucide-react";
 
 const STEPS = ["Welcome", "Auth Setup", "Add Server", "Done"];
@@ -204,93 +207,141 @@ export default function SetupPage() {
         {/* Step 1: Auth Setup */}
         {step === 1 && (
           <div className="flex w-full flex-col items-center text-center">
-            <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
-              <User className="h-8 w-8 text-primary" />
+            <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 ring-1 ring-primary/20">
+              <ShieldCheck className="h-8 w-8 text-primary" />
             </div>
-            <h1 className="text-xl font-bold">Require login?</h1>
-            <p className="mt-2 max-w-sm text-sm text-muted-foreground">
-              "Yes" requires a username and password to access IPMILink. "No"
-              leaves the dashboard open to anyone on your LAN.
+            <h1 className="text-2xl font-bold tracking-tight">Require login?</h1>
+            <p className="mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">
+              Choose whether IPMILink is protected by a username and password, or
+              left open to anyone on your network. You can change this later in
+              Settings.
             </p>
 
-            <div className="mt-6 w-full max-w-xs space-y-3 text-left">
-              <label
+            <div className="mt-7 w-full max-w-md space-y-3 text-left">
+              {/* Option: require login */}
+              <button
+                type="button"
+                onClick={() => setRequireLogin(true)}
+                aria-pressed={requireLogin}
                 className={cn(
-                  "flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2.5 transition-colors",
+                  "group flex w-full items-center gap-4 rounded-xl border p-4 text-left transition-all duration-150",
                   requireLogin
-                    ? "border-primary bg-primary/5"
-                    : "border-border hover:border-muted-foreground/40"
+                    ? "border-primary bg-primary/5 shadow-sm ring-2 ring-primary/35"
+                    : "border-border hover:border-primary/40 hover:bg-muted/40"
                 )}
               >
-                <input
-                  type="radio"
-                  name="require-login"
-                  checked={requireLogin}
-                  onChange={() => setRequireLogin(true)}
-                  className="mt-0.5 h-4 w-4 accent-primary"
-                />
-                <span className="text-sm">
-                  <span className="font-medium text-foreground">
+                <span
+                  className={cn(
+                    "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-colors",
+                    requireLogin
+                      ? "bg-primary/15 text-primary"
+                      : "bg-muted text-muted-foreground group-hover:text-foreground"
+                  )}
+                >
+                  <ShieldCheck className="h-5 w-5" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold text-foreground">
                     Yes — require login
                   </span>
-                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                  <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
                     Protect the dashboard with a username and password.
                   </span>
                 </span>
-              </label>
-              <label
+                <span
+                  className={cn(
+                    "flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors",
+                    requireLogin ? "border-primary" : "border-muted-foreground/40"
+                  )}
+                >
+                  {requireLogin && (
+                    <span className="h-2.5 w-2.5 rounded-full bg-primary" />
+                  )}
+                </span>
+              </button>
+
+              {/* Option: open access */}
+              <button
+                type="button"
+                onClick={() => setRequireLogin(false)}
+                aria-pressed={!requireLogin}
                 className={cn(
-                  "flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2.5 transition-colors",
+                  "group flex w-full items-center gap-4 rounded-xl border p-4 text-left transition-all duration-150",
                   !requireLogin
-                    ? "border-primary bg-primary/5"
-                    : "border-border hover:border-muted-foreground/40"
+                    ? "border-primary bg-primary/5 shadow-sm ring-2 ring-primary/35"
+                    : "border-border hover:border-primary/40 hover:bg-muted/40"
                 )}
               >
-                <input
-                  type="radio"
-                  name="require-login"
-                  checked={!requireLogin}
-                  onChange={() => setRequireLogin(false)}
-                  className="mt-0.5 h-4 w-4 accent-primary"
-                />
-                <span className="text-sm">
-                  <span className="font-medium text-foreground">
+                <span
+                  className={cn(
+                    "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-colors",
+                    !requireLogin
+                      ? "bg-primary/15 text-primary"
+                      : "bg-muted text-muted-foreground group-hover:text-foreground"
+                  )}
+                >
+                  <Globe className="h-5 w-5" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold text-foreground">
                     No — open access
                   </span>
-                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                  <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
                     Anyone on your LAN can use IPMILink without logging in.
                   </span>
                 </span>
-              </label>
+                <span
+                  className={cn(
+                    "flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors",
+                    !requireLogin ? "border-primary" : "border-muted-foreground/40"
+                  )}
+                >
+                  {!requireLogin && (
+                    <span className="h-2.5 w-2.5 rounded-full bg-primary" />
+                  )}
+                </span>
+              </button>
 
+              {/* Credentials — revealed only when "Yes" is selected */}
               {requireLogin && (
-                <div className="space-y-3 pt-1">
-                  <input
-                    type="text"
-                    placeholder="Username"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-                  />
-                  <input
-                    type="password"
-                    placeholder="Password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-                  />
+                <div className="space-y-3 rounded-xl border border-border/60 bg-muted/30 p-4">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Your credentials
+                  </p>
+                  <div className="relative">
+                    <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <input
+                      type="text"
+                      placeholder="Username"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      className="w-full rounded-lg border border-border bg-card py-2 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    />
+                  </div>
+                  <div className="relative">
+                    <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <input
+                      type="password"
+                      placeholder="Password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full rounded-lg border border-border bg-card py-2 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    />
+                  </div>
                 </div>
               )}
 
               {authError && (
-                <p className="text-xs text-red-500">{authError}</p>
+                <p className="flex items-center gap-1.5 text-xs text-red-500">
+                  {authError}
+                </p>
               )}
             </div>
 
-            <div className="mt-6 flex items-center gap-3">
+            <div className="mt-7 flex w-full max-w-md items-center gap-3">
               <button
                 onClick={() => setStep(0)}
-                className="inline-flex items-center gap-1 rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+                className="inline-flex items-center gap-1 rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
               >
                 <ChevronLeft className="h-4 w-4" />
                 Back
@@ -298,7 +349,7 @@ export default function SetupPage() {
               <button
                 onClick={handleAuthStep}
                 disabled={authLoading}
-                className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+                className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-50"
               >
                 {authLoading && <Loader2 className="h-4 w-4 animate-spin" />}
                 Continue
