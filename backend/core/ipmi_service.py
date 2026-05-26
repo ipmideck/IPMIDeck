@@ -138,6 +138,13 @@ class LocalIPMIService(IPMIService):
 # === Parsers ===
 
 
+# IPMI Entity ID 0x03 = "Processor" (standard, vendor-agnostic — IPMI spec Table 43-13).
+# Temperature sensors on a processor entity are CPU temps; we name them "CPU {instance}"
+# using the entity instance (3.1 -> CPU 1, 3.2 -> CPU 2). This is more meaningful than the
+# generic dedup ("Temp" / "Temp (2)") and is the same regardless of BMC vendor.
+_PROCESSOR_ENTITY_ID = "3"
+
+
 def _parse_sdr_elist(output: str) -> list[dict]:
     """Parse `ipmitool sdr elist` output into structured sensor data.
 
@@ -145,10 +152,16 @@ def _parse_sdr_elist(output: str) -> list[dict]:
     which is standardized across vendors even though sensor NAMES are not. The UI is driven
     by `type` + the real name, so no vendor-specific name mapping is needed here.
 
-    Duplicate names are disambiguated GENERICALLY (any vendor): when the same name appears
-    more than once in a single dump (e.g. two CPUs both reported as "Temp"), the second and
-    later occurrences get a numeric suffix — "Temp", "Temp (2)", "Temp (3)" — so every sensor
-    survives as a distinct key downstream (WebSocket payload, history DB, frontend store).
+    Sensor NAMING:
+    - Temperature sensors on the PROCESSOR entity (IPMI Entity ID 0x03, standard across all
+      vendors) are named "CPU {instance}" from the entity instance (3.1 -> "CPU 1",
+      3.2 -> "CPU 2"). On many BMCs (e.g. Dell R720) both CPU temps are reported with the
+      generic name "Temp", so this gives them stable, meaningful, distinct names.
+    - All OTHER duplicate names are disambiguated GENERICALLY (any vendor): when the same name
+      appears more than once in a single dump, the second and later occurrences get a numeric
+      suffix — "Voltage", "Voltage (2)", "Voltage (3)" — so every sensor survives as a distinct
+      key downstream (WebSocket payload, history DB, frontend store).
+
     The raw id/entity from the dump are preserved as non-breaking extra fields for callers
     that want richer disambiguation.
     """
@@ -193,10 +206,20 @@ def _parse_sdr_elist(output: str) -> list[dict]:
         else:
             sensor_type = "status"
 
-        # Generic duplicate-name disambiguation — vendor agnostic.
-        count = name_counts.get(raw_name, 0) + 1
-        name_counts[raw_name] = count
-        name = raw_name if count == 1 else f"{raw_name} ({count})"
+        # Entity-based naming for processor temperature sensors (vendor agnostic).
+        # entity is "id.instance" (e.g. "3.1"); processor entity id is 3.
+        entity_id, _, entity_instance = entity.partition(".")
+        if sensor_type == "temperature" and entity_id == _PROCESSOR_ENTITY_ID and entity_instance:
+            name = f"CPU {entity_instance}"
+            # Track so any later collision on this derived name still dedups generically.
+            name_counts[name] = name_counts.get(name, 0) + 1
+            if name_counts[name] > 1:
+                name = f"{name} ({name_counts[name]})"
+        else:
+            # Generic duplicate-name disambiguation — vendor agnostic.
+            count = name_counts.get(raw_name, 0) + 1
+            name_counts[raw_name] = count
+            name = raw_name if count == 1 else f"{raw_name} ({count})"
 
         sensors.append({
             "name": name,

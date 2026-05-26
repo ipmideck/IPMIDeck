@@ -44,21 +44,47 @@ def test_six_fans_parsed():
     assert {f["value"] for f in fans} == {3480.0, 3360.0, 3120.0}
 
 
-def test_duplicate_temp_names_both_survive():
-    """Both CPU "Temp" sensors must survive — no overwrite. The collision bug dropped one CPU."""
+def test_processor_temps_named_cpu_by_entity_instance():
+    """Both CPU temps must survive AND be named "CPU 1" / "CPU 2" from entity 3.1 / 3.2.
+
+    On the R720 both processor temps are reported with the generic name "Temp"; the collision
+    bug dropped one. Entity ID 0x03 = Processor (standard), so we name them by entity instance.
+    """
     sensors = _parse_sdr_elist(R720_FIXTURE)
     temps = _by_type(sensors, "temperature")
-    # Inlet Temp, Exhaust Temp, and TWO disambiguated "Temp" sensors = 4 total
+    # Inlet Temp, Exhaust Temp, and TWO CPU temps = 4 total
     assert len(temps) == 4
     values = {t["value"] for t in temps}
-    assert 33.0 in values, "CPU1 temp (33C) lost — duplicate name collision regression"
-    assert 34.0 in values, "CPU2 temp (34C) lost — duplicate name collision regression"
+    assert 33.0 in values, "CPU 1 temp (33C) lost — duplicate name collision regression"
+    assert 34.0 in values, "CPU 2 temp (34C) lost — duplicate name collision regression"
     # Names must be unique so downstream keying (WS / store / history DB) keeps both
     names = [t["name"] for t in temps]
     assert len(names) == len(set(names)), "temperature sensor names must be unique"
-    # Generic suffix scheme: "Temp" + "Temp (2)"
-    temp_named = sorted(n for n in names if n.startswith("Temp"))
-    assert temp_named == ["Temp", "Temp (2)"]
+    # Processor entity (3.x) temps become "CPU {instance}", not generic "Temp"/"Temp (2)"
+    by_name = {t["name"]: t for t in temps}
+    assert "CPU 1" in by_name, "entity 3.1 temp should be named 'CPU 1'"
+    assert "CPU 2" in by_name, "entity 3.2 temp should be named 'CPU 2'"
+    assert by_name["CPU 1"]["value"] == 33.0
+    assert by_name["CPU 2"]["value"] == 34.0
+    # No leftover generic "Temp" names — processor temps were renamed
+    assert not any(n == "Temp" or n.startswith("Temp (") for n in names)
+
+
+def test_non_processor_duplicate_names_still_dedup_generically():
+    """Generic dedup must remain for any NON-processor collision (any vendor)."""
+    fixture = """\
+Voltage          | 6Ch | ok  | 10.1 | 222 Volts
+Voltage          | 6Dh | ok  | 10.2 | 220 Volts
+Inlet Temp       | 04h | ok  |  7.1 | 21 degrees C
+Inlet Temp       | 05h | ok  |  7.2 | 22 degrees C
+"""
+    sensors = _parse_sdr_elist(fixture)
+    names = [s["name"] for s in sensors]
+    # entity 10.x and 7.x are NOT processor -> generic suffix scheme
+    assert names.count("Voltage") == 1
+    assert "Voltage (2)" in names
+    assert names.count("Inlet Temp") == 1
+    assert "Inlet Temp (2)" in names
 
 
 def test_voltage_current_power_present_with_correct_types():
@@ -99,7 +125,7 @@ def test_extra_disambiguation_fields_preserved():
     """Non-breaking extras: raw id/entity preserved for callers wanting richer disambiguation."""
     sensors = _parse_sdr_elist(R720_FIXTURE)
     temps = sorted(_by_type(sensors, "temperature"), key=lambda s: s["name"])
-    cpu_temps = [t for t in temps if t["name"].startswith("Temp")]
+    cpu_temps = [t for t in temps if t["name"].startswith("CPU ")]
     entities = {t["entity"] for t in cpu_temps}
     # The two CPUs live on different entities (3.1 / 3.2) in the raw dump
     assert entities == {"3.1", "3.2"}
