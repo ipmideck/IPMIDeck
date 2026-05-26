@@ -34,7 +34,7 @@ class AuthConfig:
 class IPMIConfig:
     poll_interval: int = 30
     power_poll_interval: int = 30
-    command_timeout: int = 15
+    command_timeout: int = 30  # real Dell BMCs: `sdr elist` can take ~16s; 15 was too tight
     backend: str = "ipmitool"
 
 
@@ -141,7 +141,7 @@ def save_default_config(config_path: str | Path) -> None:
     default = {
         "server": {"host": "0.0.0.0", "port": 3000, "https": False},
         "auth": {"enabled": True, "session_expiry": "24h", "max_login_attempts": 5},
-        "ipmi": {"poll_interval": 30, "power_poll_interval": 30, "command_timeout": 15},
+        "ipmi": {"poll_interval": 30, "power_poll_interval": 30, "command_timeout": 30},
         "data": {"retention_days": 365, "cleanup_interval": "24h"},
         "logging": {"level": "info"},
         "modules": {
