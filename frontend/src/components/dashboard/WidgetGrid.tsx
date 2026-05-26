@@ -50,6 +50,10 @@ export function WidgetGrid() {
   }, [layout, updateWidgetConfig]);
 
   const handleLayoutChange = useCallback((newLayout: readonly any[]) => {
+    // Only the canonical desktop (lg) layout is persisted. Below the lg breakpoint the grid
+    // shows a generated single-column stack (view-only); persisting that would overwrite the
+    // user's saved arrangement, which is exactly the "resize scrambles everything" bug.
+    if (width < 1024) return;
     const updates = newLayout.map((l: any) => ({
       i: l.i,
       x: l.x,
@@ -63,7 +67,7 @@ export function WidgetGrid() {
       return u ? { ...item, ...u } : item;
     });
     put("/api/dashboard/layout", { layout: merged }).catch(() => {});
-  }, [layout, updateLayout]);
+  }, [layout, updateLayout, width]);
 
   if (!contextServerId) {
     return (
@@ -83,14 +87,26 @@ export function WidgetGrid() {
     minH: 1,
   }));
 
+  // Narrow-screen layout: a predictable single-column stack in reading order (top-to-bottom,
+  // then left-to-right), heights preserved. Avoids react-grid-layout's auto-generated reflow,
+  // which left gaps/overlaps ("sminchiato"). View-only — never persisted (see handleLayoutChange).
+  let stackY = 0;
+  const stackedLayout = [...layout]
+    .sort((a, b) => a.y - b.y || a.x - b.x)
+    .map((item) => {
+      const l = { i: item.i, x: 0, y: stackY, w: 1, h: item.h, minW: 1, minH: 1 };
+      stackY += item.h;
+      return l;
+    });
+
   return (
     <div ref={containerRef}>
       <ResponsiveGridLayout
         className="react-grid-layout"
         width={width}
-        layouts={{ lg: gridLayout }}
-        breakpoints={{ lg: 1280, md: 768, sm: 0 }}
-        cols={{ lg: 6, md: 4, sm: 2 }}
+        layouts={{ lg: gridLayout, sm: stackedLayout }}
+        breakpoints={{ lg: 1024, sm: 0 }}
+        cols={{ lg: 6, sm: 1 }}
         rowHeight={120}
         margin={[16, 16] as const}
         containerPadding={[0, 0] as const}
