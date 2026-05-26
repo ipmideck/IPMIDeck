@@ -16,16 +16,21 @@ import { PowerOff } from "lucide-react";
 interface WidgetProps {
   serverId: string;
   config?: Record<string, unknown>;
+  /** Persist a widget-config change (e.g. MetricWidget sensor selection). Wired by WidgetGrid. */
+  onConfigChange?: (config: Record<string, unknown>) => void;
 }
 
 type WidgetComponent = React.ComponentType<WidgetProps>;
 
 const WIDGET_MAP: Record<string, (props: WidgetProps & { layout: WidgetLayout }) => React.ReactNode> = {
-  "sensors-metric": ({ serverId, config }) => (
+  "sensors-metric": ({ serverId, config, onConfigChange }) => (
     <MetricWidget
       serverId={serverId}
-      sensorName={(config?.sensor as string) || "CPU Temp"}
+      sensorName={(config?.sensor as string) || undefined}
       label={(config?.label as string) || undefined}
+      onSelectSensor={
+        onConfigChange ? (name) => onConfigChange({ sensor: name }) : undefined
+      }
     />
   ),
   "sensors-chart": ({ serverId, config }) => (
@@ -54,13 +59,17 @@ export function isWidgetSupported(widgetId: string): boolean {
   return SUPPORTED_WIDGET_IDS.has(widgetId);
 }
 
-export function renderWidget(layout: WidgetLayout, defaultServerId: string): React.ReactNode {
+export function renderWidget(
+  layout: WidgetLayout,
+  defaultServerId: string,
+  onConfigChange?: (config: Record<string, unknown>) => void
+): React.ReactNode {
   const renderer = WIDGET_MAP[layout.widget_id];
   if (!renderer) {
     return <div className="flex h-full items-center justify-center text-xs text-muted-foreground">Unknown widget: {layout.widget_id}</div>;
   }
   const serverId = layout.server_id || defaultServerId;
-  return renderer({ serverId, config: layout.config, layout });
+  return renderer({ serverId, config: layout.config, layout, onConfigChange });
 }
 
 /**
@@ -73,9 +82,11 @@ export function renderWidget(layout: WidgetLayout, defaultServerId: string): Rea
 export function WidgetRenderer({
   layout,
   defaultServerId,
+  onConfigChange,
 }: {
   layout: WidgetLayout;
   defaultServerId: string;
+  onConfigChange?: (config: Record<string, unknown>) => void;
 }): React.ReactNode {
   // real hook subscription -> re-renders when the module's enabled state changes
   const enabled = useModuleStore((s) => s.isEnabled(layout.module_id));
@@ -90,7 +101,7 @@ export function WidgetRenderer({
       </div>
     );
   }
-  return renderWidget(layout, defaultServerId);
+  return renderWidget(layout, defaultServerId, onConfigChange);
 }
 
 export function getWidgetTitle(layout: WidgetLayout): string {

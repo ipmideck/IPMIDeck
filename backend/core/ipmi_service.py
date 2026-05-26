@@ -6,7 +6,6 @@ import asyncio
 import logging
 import re
 from abc import ABC, abstractmethod
-from typing import Any
 
 logger = logging.getLogger("ipmilink.ipmi")
 
@@ -140,13 +139,28 @@ class LocalIPMIService(IPMIService):
 
 
 def _parse_sdr_elist(output: str) -> list[dict]:
-    """Parse `ipmitool sdr elist` output into structured sensor data."""
+    """Parse `ipmitool sdr elist` output into structured sensor data.
+
+    Sensor TYPE is derived from the IPMI UNIT (degrees C / RPM / Volts / Watts / Amps),
+    which is standardized across vendors even though sensor NAMES are not. The UI is driven
+    by `type` + the real name, so no vendor-specific name mapping is needed here.
+
+    Duplicate names are disambiguated GENERICALLY (any vendor): when the same name appears
+    more than once in a single dump (e.g. two CPUs both reported as "Temp"), the second and
+    later occurrences get a numeric suffix — "Temp", "Temp (2)", "Temp (3)" — so every sensor
+    survives as a distinct key downstream (WebSocket payload, history DB, frontend store).
+    The raw id/entity from the dump are preserved as non-breaking extra fields for callers
+    that want richer disambiguation.
+    """
     sensors = []
+    name_counts: dict[str, int] = {}
     for line in output.strip().splitlines():
         parts = [p.strip() for p in line.split("|")]
         if len(parts) < 5:
             continue
-        name = parts[0]
+        raw_name = parts[0]
+        sensor_id = parts[1]
+        entity = parts[3]
         status = parts[2].lower()
         value_str = parts[4]
 
@@ -179,12 +193,19 @@ def _parse_sdr_elist(output: str) -> list[dict]:
         else:
             sensor_type = "status"
 
+        # Generic duplicate-name disambiguation — vendor agnostic.
+        count = name_counts.get(raw_name, 0) + 1
+        name_counts[raw_name] = count
+        name = raw_name if count == 1 else f"{raw_name} ({count})"
+
         sensors.append({
             "name": name,
             "type": sensor_type,
             "value": value,
             "unit": unit,
             "status": "ok" if status == "ok" else ("warning" if "warn" in status else ("critical" if "crit" in status else status)),
+            "sensor_id": sensor_id,
+            "entity": entity,
         })
     return sensors
 

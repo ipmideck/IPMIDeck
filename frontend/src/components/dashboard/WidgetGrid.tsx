@@ -10,7 +10,7 @@ import { X, ChevronDown } from "lucide-react";
 import { put } from "@/api/client";
 
 export function WidgetGrid() {
-  const { layout, removeWidget, updateLayout, setWidgetServer } = useLayoutStore();
+  const { layout, removeWidget, updateLayout, setWidgetServer, updateWidgetConfig } = useLayoutStore();
   const contextServerId = useServerStore((s) => s.contextServerId);
   const servers = useServerStore((s) => s.servers);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -40,6 +40,14 @@ export function WidgetGrid() {
     const newLayout = layout.filter((w) => w.i !== id);
     put("/api/dashboard/layout", { layout: newLayout }).catch(() => {});
   }, [layout, removeWidget]);
+
+  const handleConfigChange = useCallback((id: string, config: Record<string, unknown>) => {
+    updateWidgetConfig(id, config);
+    const merged = layout.map((w) =>
+      w.i === id ? { ...w, config: { ...(w.config ?? {}), ...config } } : w
+    );
+    put("/api/dashboard/layout", { layout: merged }).catch(() => {});
+  }, [layout, updateWidgetConfig]);
 
   const handleLayoutChange = useCallback((newLayout: readonly any[]) => {
     const updates = newLayout.map((l: any) => ({
@@ -162,7 +170,11 @@ export function WidgetGrid() {
               </div>
               <div className="p-3" style={{ height: "calc(100% - 33px)" }}>
                 <ErrorBoundary renderFallback={(err) => <WidgetErrorFallback error={err} />}>
-                  <WidgetRenderer layout={item} defaultServerId={contextServerId} />
+                  <WidgetRenderer
+                    layout={item}
+                    defaultServerId={contextServerId}
+                    onConfigChange={(config) => handleConfigChange(item.i, config)}
+                  />
                 </ErrorBoundary>
               </div>
             </div>

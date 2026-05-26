@@ -61,9 +61,17 @@ async def _poll_one_server(server: dict, key) -> None:
         )
         await ctx.db.commit()
 
-        # Broadcast via WebSocket
+        # Broadcast via WebSocket. Include the unit-derived `type` so the frontend can
+        # drive widgets/charts by type + real name (vendor-agnostic) instead of hardcoded
+        # demo names. Names are already disambiguated by the parser, so duplicates (e.g. two
+        # CPU "Temp" sensors) survive as distinct keys here.
         sensors_dict = {
-            r["name"]: {"value": r["value"], "unit": r["unit"], "status": r["status"]}
+            r["name"]: {
+                "value": r["value"],
+                "unit": r["unit"],
+                "status": r["status"],
+                "type": r["type"],
+            }
             for r in readings
         }
         await ctx.ws.broadcast_sensor_update(server_id, sensors_dict, now)

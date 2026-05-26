@@ -4,6 +4,9 @@ export interface SensorReading {
   value: number | null;
   unit: string;
   status: string;
+  /** Unit-derived sensor type from the backend (temperature/fan/voltage/power/current/discrete/status).
+   *  Optional for backward-compat with payloads that predate type propagation. */
+  type?: string;
 }
 
 interface SensorState {
