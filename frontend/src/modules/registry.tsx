@@ -33,14 +33,24 @@ const WIDGET_MAP: Record<string, (props: WidgetProps & { layout: WidgetLayout })
       }
     />
   ),
-  "sensors-chart": ({ serverId, config }) => (
+  "sensors-chart": ({ serverId, config, onConfigChange }) => (
     <SensorChart
       serverId={serverId}
       chartType={(config?.type as "temperature" | "fan" | "power") || "temperature"}
+      hiddenSensors={(config?.hiddenSensors as string[]) || undefined}
+      onHiddenChange={
+        onConfigChange ? (hidden) => onConfigChange({ hiddenSensors: hidden }) : undefined
+      }
     />
   ),
-  "sensors-voltages": ({ serverId }) => (
-    <VoltagesWidget serverId={serverId} />
+  "sensors-voltages": ({ serverId, config, onConfigChange }) => (
+    <VoltagesWidget
+      serverId={serverId}
+      hiddenSensors={(config?.hiddenSensors as string[]) || undefined}
+      onHiddenChange={
+        onConfigChange ? (hidden) => onConfigChange({ hiddenSensors: hidden }) : undefined
+      }
+    />
   ),
   "power-status": ({ serverId }) => (
     <PowerStatusWidget serverId={serverId} />
