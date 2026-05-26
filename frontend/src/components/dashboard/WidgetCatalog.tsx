@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
-import { get, put } from "@/api/client";
-import { useLayoutStore } from "@/stores/layout-store";
+import { get, put, del } from "@/api/client";
+import { useLayoutStore, type WidgetLayout } from "@/stores/layout-store";
 import { useServerStore } from "@/stores/server-store";
 import { SUPPORTED_WIDGET_IDS } from "@/modules/registry";
 import { cn } from "@/lib/utils";
-import { X, LayoutGrid } from "lucide-react";
+import { X, LayoutGrid, RotateCcw, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 
 interface CatalogWidget {
@@ -27,13 +27,19 @@ export function WidgetCatalog({ open, onClose }: WidgetCatalogProps) {
   const [widgets, setWidgets] = useState<CatalogWidget[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedServer, setSelectedServer] = useState<string>("");
+  const [confirmingReset, setConfirmingReset] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const addWidget = useLayoutStore((s) => s.addWidget);
+  const setLayout = useLayoutStore((s) => s.setLayout);
   const layout = useLayoutStore((s) => s.layout);
   const servers = useServerStore((s) => s.servers);
   const contextServerId = useServerStore((s) => s.contextServerId);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setConfirmingReset(false); // never reopen mid-confirmation
+      return;
+    }
     setLoading(true);
     setSelectedServer(contextServerId || "");
     get<{ widgets: CatalogWidget[] }>("/api/dashboard/widgets")
@@ -66,6 +72,22 @@ export function WidgetCatalog({ open, onClose }: WidgetCatalogProps) {
 
     toast.success("Widget added");
     onClose();
+  }
+
+  async function handleReset() {
+    setResetting(true);
+    try {
+      // Backend DELETE clears the saved layout and returns the default set.
+      const res = await del<{ success: boolean; layout: WidgetLayout[] }>("/api/dashboard/layout");
+      setLayout(res.layout || []);
+      toast.success("Dashboard layout reset to default");
+      setConfirmingReset(false);
+      onClose();
+    } catch {
+      toast.error("Failed to reset layout");
+    } finally {
+      setResetting(false);
+    }
   }
 
   // Group by module
@@ -107,6 +129,44 @@ export function WidgetCatalog({ open, onClose }: WidgetCatalogProps) {
               <X className="h-4 w-4 text-muted-foreground" />
             </button>
           </div>
+
+          {/* Reset layout — at the top of the menu, with a confirm CTA before destroying the layout */}
+          {!confirmingReset ? (
+            <button
+              onClick={() => setConfirmingReset(true)}
+              className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              Reset layout
+            </button>
+          ) : (
+            <div className="mt-3 rounded-md border border-red-500/30 bg-red-500/5 p-3">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-500" />
+                <p className="text-xs text-muted-foreground">
+                  Reset the dashboard to the default layout? This removes all your widgets and
+                  customizations (selected sensors, hidden series, positions).
+                </p>
+              </div>
+              <div className="mt-3 flex gap-2">
+                <button
+                  onClick={() => setConfirmingReset(false)}
+                  disabled={resetting}
+                  className="flex-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleReset}
+                  disabled={resetting}
+                  className="flex-1 rounded-md bg-red-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-600 transition-colors disabled:opacity-50"
+                >
+                  {resetting ? "Resetting…" : "Reset"}
+                </button>
+              </div>
+            </div>
+          )}
+
           {servers.length > 1 && (
             <select
               aria-label="Assign widget to server"
