@@ -18,6 +18,17 @@ _running = True
 _next_retry: dict[str, float] = {}
 _COOLDOWN_SECONDS = 60.0  # non-blocking cooldown for a failing server
 
+# Wake signal — callers (e.g. fanpilot routes that just changed fan state) can call
+# wake_loop() to make the sensor loop run its next poll immediately instead of waiting
+# up to poll_interval seconds. Initialized lazily inside the loop's event loop.
+_wake_event: asyncio.Event | None = None
+
+
+def wake_loop() -> None:
+    """Signal the sensor loop to start its next poll immediately."""
+    if _wake_event is not None:
+        _wake_event.set()
+
 
 async def _poll_one_server(server: dict, key) -> None:
     """Poll a single server's sensors with isolated error handling (PERF-01).
@@ -121,8 +132,11 @@ async def sensor_polling_loop():
     """Main polling loop — runs until cancelled."""
     import backend.modules as ctx
 
-    global _running
+    global _running, _wake_event
     _running = True
+    # Init the wake signal inside this loop's event loop. A wake_loop() call before
+    # this point is a no-op (best-effort, not load-bearing).
+    _wake_event = asyncio.Event()
     logger.info("Sensor polling loop started")
 
     while _running:
@@ -152,11 +166,20 @@ async def sensor_polling_loop():
         except asyncio.CancelledError:
             logger.info("Sensor polling loop cancelled")
             _running = False
+            _wake_event = None
             return
         except Exception:
             logger.exception("Error in sensor polling loop")
 
-        await asyncio.sleep(ctx.config.ipmi.poll_interval)
+        # Sleep until the next interval OR until a user action calls wake_loop()
+        # (e.g. fanpilot set_mode). The wake_for/timeout pattern matches fanpilot.
+        try:
+            await asyncio.wait_for(
+                _wake_event.wait(), timeout=ctx.config.ipmi.poll_interval
+            )
+        except asyncio.TimeoutError:
+            pass
+        _wake_event.clear()
 
 
 async def retention_cleanup_loop():

@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from backend.modules.fanpilot.tasks import get_last_state, set_last_state, wake_loop
+from backend.modules.sensors.tasks import wake_loop as wake_sensor_loop
 
 router = APIRouter()
 
@@ -31,9 +34,14 @@ class ProfileUpdate(BaseModel):
 
 
 class FanMode(BaseModel):
+    """Mode change request. ``manual_speed`` is also accepted as ``speed`` (the JS
+    client sends the latter) — see ``populate_by_name`` + ``Field(alias=...)``."""
+
+    model_config = {"populate_by_name": True}
+
     mode: str  # auto, manual, fanpilot
     profile_id: int | None = None
-    manual_speed: int | None = None
+    manual_speed: int | None = Field(default=None, alias="speed")
 
 
 # === Profiles ===
@@ -97,6 +105,12 @@ async def update_profile(profile_id: int, body: ProfileUpdate):
     params.append(profile_id)
     await ctx.db.execute(f"UPDATE fan_profiles SET {', '.join(updates)} WHERE id = ?", tuple(params))
     await ctx.db.commit()
+    # Wake the loop so any server currently running this profile applies the new
+    # curve/hysteresis/safety within ~1s instead of waiting up to 30s. Also wake the
+    # sensor loop so the resulting RPM change reaches the UI within ~5s instead of
+    # up to one poll interval.
+    wake_loop()
+    wake_sensor_loop()
     return {"success": True}
 
 
@@ -130,10 +144,20 @@ async def get_fanpilot_status(server_id: str):
             "SELECT id, name FROM fan_profiles WHERE id = ?", (server["fanpilot_profile_id"],)
         )
 
+    # In-memory state: written by the loop, the recovery path, and the mode-change
+    # route. Cold-start fallback: if the cache is at its default but the DB says
+    # FanPilot is enabled, trust the DB (the loop will refresh `speed_pct` shortly).
+    cached = get_last_state(server_id)
+    mode = cached["mode"]
+    if mode == "auto" and server["fanpilot_enabled"]:
+        mode = "fanpilot"
+
     return {
         "server_id": server_id,
         "enabled": bool(server["fanpilot_enabled"]),
         "profile": profile,
+        "mode": mode,
+        "current_speed_pct": cached["speed_pct"],
     }
 
 
@@ -159,13 +183,15 @@ async def set_fanpilot_mode(server_id: str, body: FanMode):
         await ctx.db.execute(
             "UPDATE servers SET fanpilot_enabled = 0 WHERE id = ?", (server_id,)
         )
+        set_last_state(server_id, "auto")
     elif body.mode == "manual":
-        speed = body.manual_speed or 50
+        speed = body.manual_speed if body.manual_speed is not None else 50
         await ctx.ipmi.set_fan_mode(host, user, pwd, manual=True)
         await ctx.ipmi.set_fan_speed(host, user, pwd, speed)
         await ctx.db.execute(
             "UPDATE servers SET fanpilot_enabled = 0 WHERE id = ?", (server_id,)
         )
+        set_last_state(server_id, "manual", speed)
     elif body.mode == "fanpilot":
         profile_id = body.profile_id
         if not profile_id:
@@ -174,10 +200,19 @@ async def set_fanpilot_mode(server_id: str, body: FanMode):
             "UPDATE servers SET fanpilot_enabled = 1, fanpilot_profile_id = ? WHERE id = ?",
             (profile_id, server_id),
         )
+        # The loop will overwrite `speed_pct` on its first tick; until then the UI
+        # shows '--' which is honest (we don't know yet).
+        set_last_state(server_id, "fanpilot")
+        # Wake the loop so the first tick happens within ~1s instead of up to 30s.
+        wake_loop()
     else:
         return {"success": False, "error": f"Invalid mode: {body.mode}"}
 
     await ctx.db.commit()
+    # All three valid modes (auto/manual/fanpilot) change fan state on the BMC,
+    # so wake the sensor loop to read back the new RPMs within ~5s instead of
+    # waiting up to one poll interval.
+    wake_sensor_loop()
 
     # Log
     await ctx.db.execute(
