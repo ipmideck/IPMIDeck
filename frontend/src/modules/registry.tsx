@@ -18,7 +18,7 @@ import { FanPilotStatusWidget } from "@/modules/fanpilot/widgets/FanPilotStatusW
 import type { WidgetLayout } from "@/stores/layout-store";
 import { useModuleStore } from "@/stores/module-store";
 import type { LucideIcon } from "lucide-react";
-import { PowerOff, LayoutGrid as LayoutGridIcon, LineChart as LineChartIcon } from "lucide-react";
+import { PowerOff, LayoutGrid as LayoutGridIcon, LineChart as LineChartIcon, Thermometer, Fan, Zap } from "lucide-react";
 
 interface WidgetProps {
   serverId: string;
@@ -206,10 +206,18 @@ export function getWidgetTitle(layout: WidgetLayout): string {
 /* ------------------------------------------------------------------ */
 
 export interface ViewOption {
+  /** Used as React key. Also used as a single-field config patch (`{view: value}`)
+   *  when `config` is omitted — preserves backward compatibility with widgets that
+   *  only differ on a single `view` axis (e.g. power-controls compact vs chart). */
   value: string;
   label: string;
   description: string;
   icon?: LucideIcon;
+  /** Optional explicit config patch merged into the new widget's config. When set,
+   *  replaces the implicit `{view: value}` mapping — used by widgets that need to
+   *  pick more than one config field at add time (e.g. sensors-chart needs both
+   *  `type` and `view`). */
+  config?: Record<string, unknown>;
 }
 
 /**
@@ -232,18 +240,40 @@ export const WIDGET_VIEWS: Record<string, ViewOption[]> = {
       icon: LineChartIcon,
     },
   ],
+  // Sensor Chart has TWO axes:
+  //   - type: temperature | fan | power (what the chart shows)
+  //   - view: chart | cards   (how it's rendered — cards are fan-only animation)
+  // We expose the meaningful combinations as four picker options so the user
+  // can add a fan chart directly from the catalog (previously the catalog only
+  // wrote type=temperature, leaving fan/power charts un-addable from the UI).
   "sensors-chart": [
     {
-      value: "chart",
-      label: "Chart",
-      description: "Time-series line graph of selected sensors",
-      icon: LineChartIcon,
+      value: "temperature",
+      label: "Temperature",
+      description: "Time-series line chart for all temperature sensors",
+      icon: Thermometer,
+      config: { type: "temperature", view: "chart" },
     },
     {
-      value: "cards",
-      label: "Cards",
-      description: "Animated fan cards (fan sensors only)",
-      icon: LayoutGridIcon,
+      value: "fan-chart",
+      label: "Fans (chart)",
+      description: "Time-series line chart for all fan RPM sensors",
+      icon: LineChartIcon,
+      config: { type: "fan", view: "chart" },
+    },
+    {
+      value: "fan-cards",
+      label: "Fans (cards)",
+      description: "Animated fan cards with color-coded RPM",
+      icon: Fan,
+      config: { type: "fan", view: "cards" },
+    },
+    {
+      value: "power",
+      label: "Power",
+      description: "Time-series line chart for power draw sensors",
+      icon: Zap,
+      config: { type: "power", view: "chart" },
     },
   ],
 };

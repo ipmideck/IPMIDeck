@@ -59,7 +59,7 @@ export function WidgetCatalog({ open, onClose }: WidgetCatalogProps) {
       .finally(() => setLoading(false));
   }, [open, contextServerId]);
 
-  function handleAddWithView(widget: CatalogWidget, view?: string) {
+  function handleAddWithView(widget: CatalogWidget, configPatch?: Record<string, unknown>) {
     const id = `${widget.widget_id}-${Date.now()}`;
     const newWidget: WidgetLayout = {
       i: id,
@@ -70,7 +70,7 @@ export function WidgetCatalog({ open, onClose }: WidgetCatalogProps) {
       y: Infinity,
       w: widget.default_w,
       h: widget.default_h,
-      config: view ? { view } : undefined,
+      config: configPatch && Object.keys(configPatch).length > 0 ? configPatch : undefined,
     };
     addWidget(newWidget);
 
@@ -272,7 +272,9 @@ export function WidgetCatalog({ open, onClose }: WidgetCatalogProps) {
                                 return (
                                   <button
                                     key={opt.value}
-                                    onClick={() => handleAddWithView(w, opt.value)}
+                                    onClick={() =>
+                                      handleAddWithView(w, opt.config ?? { view: opt.value })
+                                    }
                                     className="flex flex-col items-start gap-1 rounded-md border border-border bg-card p-2 text-left hover:bg-muted/50 transition-colors"
                                   >
                                     <div className="flex items-center gap-1.5">
