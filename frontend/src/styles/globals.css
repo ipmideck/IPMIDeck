@@ -7,7 +7,7 @@
   --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
 
-  /* Professional dark palette — zinc-based */
+  /* PRD dark palette — zinc-based */
   --color-background: #09090b;
   --color-foreground: #fafafa;
   --color-card: #0a0a0c;
@@ -83,3 +83,74 @@ body {
 * {
   border-color: var(--color-border);
 }
+
+/* Cursor affordance: HTML5 dropped the default `cursor: pointer` on <button>
+ * elements (legacy of <a> only), so without this rule every button across the
+ * app renders the default arrow cursor — confusing because the rest of the UI
+ * looks clickable. Apply to:
+ *   - native <button>
+ *   - input types that act as buttons (submit/reset/button)
+ *   - any element role="button" (e.g. the dashboard widget cards)
+ * Skip disabled elements so they don't claim to be interactive when they
+ * aren't. Components that need a different cursor (e.g. cursor-grab on the
+ * draggable widget header, cursor-not-allowed when disabled) keep working
+ * because the inline class wins over this rule. */
+button:not(:disabled),
+[role="button"]:not(:disabled),
+[type="button"]:not(:disabled),
+[type="submit"]:not(:disabled),
+[type="reset"]:not(:disabled) {
+  cursor: pointer;
+}
+
+/* react-grid-layout */
+.react-grid-layout {
+  position: relative;
+}
+.react-grid-item {
+  transition: all 200ms ease;
+}
+.react-grid-item.react-draggable-dragging {
+  z-index: 100;
+  opacity: 0.9;
+}
+.react-grid-placeholder {
+  background: var(--color-accent) !important;
+  border: 1px dashed var(--color-border) !important;
+  border-radius: var(--radius);
+  opacity: 0.3;
+}
+.react-resizable-handle {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  bottom: 0;
+  right: 0;
+  cursor: se-resize;
+  opacity: 0;
+  transition: opacity 150ms;
+}
+.react-grid-item:hover .react-resizable-handle {
+  opacity: 0.5;
+}
+.react-resizable-handle::after {
+  content: '';
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--color-muted-foreground);
+  border-bottom: 2px solid var(--color-muted-foreground);
+}
+
+/* Fan card view — slow calming rotation + alarm blink when stopped */
+@keyframes fan-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+@keyframes fan-alarm {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0.25; }
+}
+.animate-fan-alarm { animation: fan-alarm 0.45s steps(1) infinite; }

@@ -1,11 +1,13 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useId, useMemo, useRef } from "react";
 import { Header } from "@/components/layout/Header";
 import { useServerStore } from "@/stores/server-store";
 import { useSensorStore } from "@/stores/sensor-store";
+import { useBackendOnline } from "@/stores/connection-store";
 import type { SensorReading } from "@/stores/sensor-store";
 import { get, post, put, del } from "@/api/client";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/common/EmptyState";
+import { sensorNamesForType } from "@/modules/sensors/sensorUtils";
 import { toast } from "sonner";
 import {
   Fan,
@@ -20,6 +22,8 @@ import {
   AlertTriangle,
   Thermometer,
   SlidersHorizontal,
+  Cpu,
+  RotateCcw,
 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
@@ -45,11 +49,20 @@ interface FanProfile {
 interface FanStatus {
   enabled: boolean;
   mode: "auto" | "manual" | "fanpilot";
-  profile: string | null;
-  current_speed_pct: number;
+  /** Backend returns the active profile as a row `{id, name}` (or null), not a string. */
+  profile: { id: number; name: string } | null;
+  current_speed_pct: number | null;
 }
 
 type FanMode = "auto" | "manual" | "fanpilot";
+
+// Fan-mode metadata used by the bottom bar (icon + short description). The description
+// drives the button tooltip so the user understands what each mode does at a glance.
+const MODE_OPTIONS: { mode: FanMode; label: string; description: string; icon: typeof Cpu }[] = [
+  { mode: "auto", label: "BMC Auto", description: "The BMC (iDRAC) controls fan speed using its built-in thermal algorithm.", icon: Cpu },
+  { mode: "manual", label: "Manual", description: "Fixed speed of your choice. Does not react to temperature.", icon: SlidersHorizontal },
+  { mode: "fanpilot", label: "FanPilot", description: "This app drives the fans following the selected profile's curve.", icon: Fan },
+];
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
@@ -65,10 +78,12 @@ const SPEED_MAX = 100;
 // re-render → React #185 on cold load of /fanpilot). See GAP-04.
 const EMPTY_READINGS: Record<string, SensorReading> = {};
 
-// SVG viewport dimensions for the curve editor
+// SVG viewport dimensions for the curve editor.
+// SVG_PAD_TOP intentionally generous so the live-temp / drag tooltips have room
+// to render at a readable size above the plot area without being clipped.
 const SVG_PAD_LEFT = 48;
 const SVG_PAD_RIGHT = 16;
-const SVG_PAD_TOP = 16;
+const SVG_PAD_TOP = 28;
 const SVG_PAD_BOTTOM = 36;
 const SVG_WIDTH = 640;
 const SVG_HEIGHT = 360;
@@ -82,14 +97,66 @@ const PRESET_ICONS: Record<string, React.ReactNode> = {
   "Full Speed": <Wind className="h-4 w-4" />,
 };
 
-const SENSOR_OPTIONS = [
-  "CPU Temp",
-  "Inlet Temp",
-  "Exhaust Temp",
-  "System Temp",
-  "GPU Temp",
-  "PCH Temp",
-];
+/* ------------------------------------------------------------------ */
+/*  Temperature colors — fixed bands shared across editor + chips      */
+/* ------------------------------------------------------------------ */
+
+// Fixed bands: <50 green, <65 yellow, <80 orange, >=80 red. Used by the curve gradient,
+// the live-temp indicator, the draggable points, and the top temperature chips.
+const TEMP_BANDS = [
+  { upTo: 50, base: "#22c55e", dark: "#16a34a", chip: "bg-emerald-500/15 text-emerald-500 border-emerald-500/30" },
+  { upTo: 65, base: "#eab308", dark: "#ca8a04", chip: "bg-yellow-500/15 text-yellow-500 border-yellow-500/30" },
+  { upTo: 80, base: "#f97316", dark: "#ea580c", chip: "bg-orange-500/15 text-orange-500 border-orange-500/30" },
+  { upTo: Infinity, base: "#ef4444", dark: "#dc2626", chip: "bg-red-500/15 text-red-500 border-red-500/30" },
+] as const;
+
+function tempBand(t: number) {
+  for (const b of TEMP_BANDS) if (t < b.upTo) return b;
+  return TEMP_BANDS[TEMP_BANDS.length - 1];
+}
+
+function tempColor(t: number): string {
+  return tempBand(t).base;
+}
+
+function tempChipClass(t: number): string {
+  return tempBand(t).chip;
+}
+
+// Default values for the preset profiles — sourced from migration 001_initial.sql.
+// Used by the "Reset to default" button (preset profiles only).
+const PRESET_DEFAULTS: Record<
+  string,
+  { curve_points: CurvePoint[]; hysteresis: number; safety_threshold: number }
+> = {
+  Silent: {
+    curve_points: [
+      { temp: 30, speed: 20 }, { temp: 50, speed: 30 },
+      { temp: 70, speed: 60 }, { temp: 85, speed: 100 },
+    ],
+    hysteresis: 3, safety_threshold: 85,
+  },
+  Balanced: {
+    curve_points: [
+      { temp: 30, speed: 30 }, { temp: 50, speed: 50 },
+      { temp: 70, speed: 80 }, { temp: 80, speed: 100 },
+    ],
+    hysteresis: 3, safety_threshold: 85,
+  },
+  Performance: {
+    curve_points: [
+      { temp: 30, speed: 50 }, { temp: 50, speed: 70 },
+      { temp: 70, speed: 90 }, { temp: 75, speed: 100 },
+    ],
+    hysteresis: 3, safety_threshold: 85,
+  },
+  "Full Speed": {
+    curve_points: [
+      { temp: 20, speed: 100 }, { temp: 100, speed: 100 },
+    ],
+    hysteresis: 3, safety_threshold: 85,
+  },
+};
 
 /* ------------------------------------------------------------------ */
 /*  Coordinate helpers                                                 */
@@ -127,6 +194,8 @@ interface CurveEditorProps {
 function CurveEditor({ points, onChange, currentTemp, readonly }: CurveEditorProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [dragging, setDragging] = useState<number | null>(null);
+  // Unique gradient id per editor instance — avoids cross-component <defs> collisions.
+  const gradientId = `tempGradient-${useId()}`;
 
   const sorted = [...points].sort((a, b) => a.temp - b.temp);
 
@@ -334,64 +403,106 @@ function CurveEditor({ points, onChange, currentTemp, readonly }: CurveEditorPro
         Fan Speed
       </text>
 
-      {/* Filled area under curve */}
+      {/* Temperature gradient — green<50 / yellow<65 / orange<80 / red≥80.
+          gradientUnits="userSpaceOnUse" so the stops align with the plot's X range. */}
+      <defs>
+        <linearGradient
+          id={gradientId}
+          x1={SVG_PAD_LEFT}
+          x2={SVG_PAD_LEFT + PLOT_W}
+          y1="0"
+          y2="0"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop offset="0%" stopColor="#22c55e" />
+          {/* 50°C = (50-20)/80 = 37.5% */}
+          <stop offset="37.5%" stopColor="#22c55e" />
+          {/* 65°C = 56.25% */}
+          <stop offset="56.25%" stopColor="#eab308" />
+          {/* 80°C = 75% */}
+          <stop offset="75%" stopColor="#f97316" />
+          <stop offset="100%" stopColor="#ef4444" />
+        </linearGradient>
+      </defs>
+
+      {/* Filled area under curve — same temp gradient, fainter */}
       {sorted.length > 0 && (
-        <path d={areaPath} fill="#2563eb" opacity={0.08} />
+        <path d={areaPath} fill={`url(#${gradientId})`} opacity={0.18} />
       )}
 
-      {/* Curve line */}
+      {/* Curve line — colored by temperature along its length */}
       {sorted.length > 0 && (
-        <path d={linePath} fill="none" stroke="#2563eb" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+        <path
+          d={linePath}
+          fill="none"
+          stroke={`url(#${gradientId})`}
+          strokeWidth={2.5}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
       )}
 
-      {/* Current temperature indicator */}
+      {/* Current temperature indicator — color tracks the temperature band */}
       {currentTemp !== null &&
         currentTemp >= TEMP_MIN &&
-        currentTemp <= TEMP_MAX && (
-          <>
-            <line
-              x1={tempToX(currentTemp)}
-              y1={SVG_PAD_TOP}
-              x2={tempToX(currentTemp)}
-              y2={SVG_PAD_TOP + PLOT_H}
-              stroke="#ef4444"
-              strokeWidth={1.5}
-              strokeDasharray="4,3"
-              opacity={0.8}
-            />
-            {/* Temp label */}
-            <rect
-              x={tempToX(currentTemp) - 20}
-              y={SVG_PAD_TOP - 14}
-              width={40}
-              height={16}
-              rx={4}
-              fill="#ef4444"
-              opacity={0.9}
-            />
-            <text
-              x={tempToX(currentTemp)}
-              y={SVG_PAD_TOP - 3}
-              textAnchor="middle"
-              fill="white"
-              fontSize={9}
-              fontWeight={600}
-            >
-              {currentTemp}°C
-            </text>
-            {/* Dot on curve at current temp */}
-            {currentSpeed !== null && (
-              <circle
-                cx={tempToX(currentTemp)}
-                cy={speedToY(currentSpeed)}
-                r={4}
-                fill="#ef4444"
-                stroke="white"
+        currentTemp <= TEMP_MAX && (() => {
+          const band = tempBand(currentTemp);
+          return (
+            <>
+              <line
+                x1={tempToX(currentTemp)}
+                y1={SVG_PAD_TOP}
+                x2={tempToX(currentTemp)}
+                y2={SVG_PAD_TOP + PLOT_H}
+                stroke={band.base}
                 strokeWidth={1.5}
+                strokeDasharray="4,3"
+                opacity={0.85}
               />
-            )}
-          </>
-        )}
+              {/* Temp label — bigger + darker band shade for solid contrast vs white text */}
+              <rect
+                x={tempToX(currentTemp) - 26}
+                y={SVG_PAD_TOP - 23}
+                width={52}
+                height={20}
+                rx={5}
+                fill={band.dark}
+                opacity={0.95}
+              />
+              <text
+                x={tempToX(currentTemp)}
+                y={SVG_PAD_TOP - 9}
+                textAnchor="middle"
+                fill="white"
+                fontSize={11}
+                fontWeight={700}
+              >
+                {currentTemp}°C
+              </text>
+              {/* Dot on curve at current temp — halo + bigger main dot makes it visually
+                  distinct from regular control points that share the same band color. */}
+              {currentSpeed !== null && (
+                <>
+                  <circle
+                    cx={tempToX(currentTemp)}
+                    cy={speedToY(currentSpeed)}
+                    r={10}
+                    fill={band.base}
+                    opacity={0.22}
+                  />
+                  <circle
+                    cx={tempToX(currentTemp)}
+                    cy={speedToY(currentSpeed)}
+                    r={5.5}
+                    fill={band.base}
+                    stroke="white"
+                    strokeWidth={2}
+                  />
+                </>
+              )}
+            </>
+          );
+        })()}
 
       {/* Draggable control points */}
       {sorted.map((p, i) => {
@@ -415,12 +526,12 @@ function CurveEditor({ points, onChange, currentTemp, readonly }: CurveEditorPro
               }}
               onContextMenu={(e) => handleContextMenu(e, origIdx)}
             />
-            {/* Visible point */}
+            {/* Visible point — colored by its temperature band */}
             <circle
               cx={tempToX(p.temp)}
               cy={speedToY(p.speed)}
               r={5}
-              fill="#2563eb"
+              fill={tempColor(p.temp)}
               stroke="white"
               strokeWidth={2}
               className={cn(
@@ -430,25 +541,26 @@ function CurveEditor({ points, onChange, currentTemp, readonly }: CurveEditorPro
               )}
               style={{ pointerEvents: "none" }}
             />
-            {/* Tooltip label */}
+            {/* Tooltip while dragging — bigger and offset higher so it doesn't sit
+                directly on top of the point being moved. */}
             {dragging === origIdx && (
               <>
                 <rect
-                  x={tempToX(p.temp) - 28}
-                  y={speedToY(p.speed) - 24}
-                  width={56}
-                  height={18}
-                  rx={4}
+                  x={tempToX(p.temp) - 36}
+                  y={speedToY(p.speed) - 32}
+                  width={72}
+                  height={22}
+                  rx={5}
                   fill="#18181b"
-                  opacity={0.9}
+                  opacity={0.92}
                 />
                 <text
                   x={tempToX(p.temp)}
-                  y={speedToY(p.speed) - 12}
+                  y={speedToY(p.speed) - 17}
                   textAnchor="middle"
                   fill="white"
-                  fontSize={9}
-                  fontWeight={500}
+                  fontSize={11}
+                  fontWeight={700}
                 >
                   {p.temp}°C / {p.speed}%
                 </text>
@@ -470,6 +582,7 @@ export default function FanPilotPage() {
   const sensorReadings = useSensorStore((s) =>
     (contextServerId ? s.readings[contextServerId] : undefined) ?? EMPTY_READINGS
   );
+  const online = useBackendOnline();
 
   // Profiles
   const [profiles, setProfiles] = useState<FanProfile[]>([]);
@@ -480,6 +593,16 @@ export default function FanPilotPage() {
   const [status, setStatus] = useState<FanStatus | null>(null);
   const [manualSpeed, setManualSpeed] = useState(50);
   const [modeLoading, setModeLoading] = useState(false);
+  // Apply-in-flight guard: prevents the user from spamming Apply (which fired
+  // multiple parallel POSTs and toasts) while a request is pending.
+  const [applyingSpeed, setApplyingSpeed] = useState(false);
+  // `manualSpeed` should reflect the operator's INTENT, not the polled fan state.
+  // We seed it ONCE from the first status fetch so the slider starts where the BMC
+  // actually is, then stop overwriting it from polling — otherwise the 5s status
+  // poll would snap the slider back mid-edit (and the post-apply fetchStatus would
+  // do the same before the BMC had reported the new value, making the user think
+  // the click silently failed).
+  const manualSpeedSeededRef = useRef(false);
 
   // Loading
   const [loading, setLoading] = useState(true);
@@ -488,9 +611,46 @@ export default function FanPilotPage() {
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
 
-  // Derive current CPU temp from sensor store
-  const cpuTempReading = sensorReadings["CPU Temp"] ?? sensorReadings["CPU Temperature"] ?? null;
-  const currentTemp = cpuTempReading?.value ?? null;
+  // Top temp chips — expand state for "+N more"
+  const [expandedTemps, setExpandedTemps] = useState(false);
+
+  // Reset-to-default confirm state (preset profiles only)
+  const [confirmingReset, setConfirmingReset] = useState(false);
+  // Save-and-Activate loading state (disables both Save buttons during the 2-step call)
+  const [activating, setActivating] = useState(false);
+
+  // Locally-controlled string state for the numeric inputs so the user can clear the
+  // field (it won't snap back to "0" while typing) and so we don't render the native
+  // number-input stepper. Synced FROM editedProfile on profile switch + on Reset.
+  const [hysteresisStr, setHysteresisStr] = useState("");
+  const [safetyStr, setSafetyStr] = useState("");
+
+  // Real temperature sensors on this server — vendor-agnostic, driven by the backend's
+  // unit-derived `type` field. Replaces the hardcoded demo names ("CPU Temp", "Inlet Temp"...)
+  // that don't exist on most BMCs (e.g. the R720 reports "CPU 1"/"CPU 2"/"Inlet Temp").
+  const temperatureSensors = useMemo(
+    () => sensorNamesForType(sensorReadings, "temperature"),
+    [sensorReadings]
+  );
+
+  // Live temp comes from the EDITED profile's source sensor — whichever sensor the user
+  // chose drives the indicator line on the curve and the background fanpilot loop.
+  const sourceSensor = editedProfile?.source_sensor;
+  const sourceReading = sourceSensor ? sensorReadings[sourceSensor] : undefined;
+  const currentTemp = sourceReading?.value ?? null;
+
+  // All temperature sensors with a numeric value, sorted by value desc (hottest first)
+  // so the top-area chip strip surfaces the most relevant ones when capped.
+  const allTempChips = useMemo(() => {
+    const out: { name: string; value: number }[] = [];
+    for (const name of temperatureSensors) {
+      const r = sensorReadings[name];
+      if (r?.value != null && typeof r.value === "number") {
+        out.push({ name, value: r.value });
+      }
+    }
+    return out.sort((a, b) => b.value - a.value);
+  }, [temperatureSensors, sensorReadings]);
 
   /* ---------- Fetch profiles ---------- */
   const fetchProfiles = useCallback(async () => {
@@ -522,16 +682,33 @@ export default function FanPilotPage() {
         `/api/modules/fanpilot/${contextServerId}/status`
       );
       setStatus(data);
-      if (data.current_speed_pct) setManualSpeed(data.current_speed_pct);
+      // Seed the slider from the BMC ONCE (first successful status fetch). After
+      // that, `manualSpeed` is purely operator-controlled — see manualSpeedSeededRef.
+      if (data.current_speed_pct != null && !manualSpeedSeededRef.current) {
+        setManualSpeed(data.current_speed_pct);
+        manualSpeedSeededRef.current = true;
+      }
     } catch {
       // Server may not support it yet
     }
   }, [contextServerId]);
 
   useEffect(() => {
+    // New server context = re-seed the slider from that server's BMC. Without
+    // resetting the ref the slider would keep showing the previous server's
+    // last-set value when the operator switches servers.
+    manualSpeedSeededRef.current = false;
     setLoading(true);
     Promise.all([fetchProfiles(), fetchStatus()]).finally(() => setLoading(false));
   }, [fetchProfiles, fetchStatus]);
+
+  // Live status polling — keeps the Fan Mode highlight and the speed readout fresh
+  // without requiring a page refresh after a mode change or a FanPilot tick.
+  useEffect(() => {
+    if (!contextServerId) return;
+    const interval = setInterval(fetchStatus, 5000);
+    return () => clearInterval(interval);
+  }, [contextServerId, fetchStatus]);
 
   /* ---------- Sync editedProfile when selection changes ---------- */
   useEffect(() => {
@@ -548,6 +725,39 @@ export default function FanPilotPage() {
     }
   }, [selectedId, profiles]);
 
+  /* ---------- Auto-fix invalid source_sensor ----------
+   * If the profile's stored source_sensor doesn't exist on this server (a default
+   * "CPU Temp" left over from demo, or a profile saved against another BMC), swap
+   * it to the first real temperature sensor so the curve has live data. Local edit
+   * only — requires Save to persist. */
+  useEffect(() => {
+    if (!editedProfile) return;
+    if (temperatureSensors.length === 0) return;
+    if (temperatureSensors.includes(editedProfile.source_sensor)) return;
+    setEditedProfile((p) => (p ? { ...p, source_sensor: temperatureSensors[0] } : p));
+  }, [editedProfile, temperatureSensors]);
+
+  // Reset transient UI state when navigating to a different profile, and seed the
+  // numeric-input strings from the loaded profile.
+  useEffect(() => {
+    setConfirmingReset(false);
+    setExpandedTemps(false);
+  }, [selectedId]);
+
+  useEffect(() => {
+    setHysteresisStr(editedProfile ? String(editedProfile.hysteresis) : "");
+    setSafetyStr(editedProfile ? String(editedProfile.safety_threshold) : "");
+  }, [editedProfile?.id]);
+
+  // True when the profile in the editor IS the one currently driving the fans.
+  // Drives the visibility of "Save and Activate" and keeps "Save" semantically
+  // identical to "save the active profile and apply live".
+  const isActiveProfile =
+    !!editedProfile &&
+    status?.mode === "fanpilot" &&
+    status.profile != null &&
+    String(status.profile.id) === String(editedProfile.id);
+
   /* ---------- Handlers ---------- */
 
   const handleSave = async () => {
@@ -561,11 +771,66 @@ export default function FanPilotPage() {
         safety_threshold: editedProfile.safety_threshold,
         source_sensor: editedProfile.source_sensor,
       });
-      toast.success("Profile saved");
+      // If this profile is currently active, the backend wakes the loop on PUT so
+      // the change reaches the fans within ~1s.
+      toast.success(isActiveProfile ? "Saved — applying live" : "Profile saved");
       fetchProfiles();
     } catch (e: any) {
       toast.error(e.message || "Failed to save profile");
     }
+  };
+
+  // Save the profile and activate it on the current server (switches the server to
+  // FanPilot mode if it isn't already). Only shown for non-active profiles.
+  const handleSaveAndActivate = async () => {
+    if (!editedProfile || !contextServerId) return;
+    setActivating(true);
+    try {
+      await put(`/api/modules/fanpilot/profiles/${editedProfile.id}`, {
+        name: editedProfile.name,
+        description: editedProfile.description,
+        curve_points: editedProfile.curve_points,
+        hysteresis: editedProfile.hysteresis,
+        safety_threshold: editedProfile.safety_threshold,
+        source_sensor: editedProfile.source_sensor,
+      });
+      await post(`/api/modules/fanpilot/${contextServerId}/mode`, {
+        mode: "fanpilot",
+        profile_id: editedProfile.id,
+      });
+      toast.success(`Saved and activated — ${editedProfile.name}`);
+      fetchProfiles();
+      fetchStatus();
+    } catch (e: any) {
+      toast.error(e.message || "Failed to save and activate");
+    } finally {
+      setActivating(false);
+    }
+  };
+
+  // Reset a preset profile to its migration defaults — local edit only, user clicks
+  // Save (or Save and Activate) to persist. source_sensor is intentionally NOT reset
+  // because the migration default ("CPU Temp") is the demo bug we already fixed; the
+  // auto-fix effect handles invalid sensors transparently.
+  const handleReset = () => {
+    if (!editedProfile || !editedProfile.is_preset) return;
+    const defaults = PRESET_DEFAULTS[editedProfile.name];
+    if (!defaults) {
+      toast.error("No default known for this preset");
+      return;
+    }
+    setEditedProfile({
+      ...editedProfile,
+      curve_points: defaults.curve_points,
+      hysteresis: defaults.hysteresis,
+      safety_threshold: defaults.safety_threshold,
+    });
+    // Keep the local numeric-input strings in sync (their effect is keyed on profile id,
+    // which doesn't change on reset, so we have to bump them explicitly).
+    setHysteresisStr(String(defaults.hysteresis));
+    setSafetyStr(String(defaults.safety_threshold));
+    setConfirmingReset(false);
+    toast.success("Reset — click Save to persist");
   };
 
   const handleCreate = async () => {
@@ -633,16 +898,22 @@ export default function FanPilotPage() {
   };
 
   const handleManualSpeedApply = async () => {
-    if (!contextServerId) return;
+    if (!contextServerId || applyingSpeed) return; // re-entrancy guard
+    setApplyingSpeed(true);
+    const speedToApply = manualSpeed;
     try {
       await post(`/api/modules/fanpilot/${contextServerId}/mode`, {
         mode: "manual",
-        speed: manualSpeed,
+        speed: speedToApply,
       });
-      toast.success(`Manual speed set to ${manualSpeed}%`);
-      fetchStatus();
+      toast.success(`Manual speed set to ${speedToApply}%`);
+      // Skip fetchStatus() here: the BMC reads back through the next sensor poll
+      // (~5-10s after the wake_sensor_loop hook); calling /status now would just
+      // return the stale pre-apply value and look like the change didn't take.
     } catch (e: any) {
       toast.error(e.message || "Failed to set speed");
+    } finally {
+      setApplyingSpeed(false);
     }
   };
 
@@ -666,7 +937,7 @@ export default function FanPilotPage() {
   return (
     <>
       <Header title="FanPilot">
-        {status && (
+        {online && status && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Fan className="h-3.5 w-3.5" />
             <span>
@@ -685,41 +956,57 @@ export default function FanPilotPage() {
             </span>
             <button
               onClick={() => setCreating(true)}
-              className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-              title="Create profile"
+              disabled={!online}
+              className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+              title={online ? "Create profile" : "Backend disconnected"}
             >
               <Plus className="h-3.5 w-3.5" />
             </button>
           </div>
 
           <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
-            {profiles.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => setSelectedId(p.id)}
-                className={cn(
-                  "flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors",
-                  selectedId === p.id
-                    ? "bg-muted text-foreground"
-                    : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                )}
-              >
-                <span className="shrink-0">
-                  {PRESET_ICONS[p.name] ?? <SlidersHorizontal className="h-4 w-4" />}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate font-medium text-[13px]">{p.name}</div>
-                  {p.description && (
-                    <div className="truncate text-[11px] text-muted-foreground">
-                      {p.description}
-                    </div>
+            {profiles.map((p) => {
+              // The profile currently driving the fans (FanPilot mode + this profile id).
+              const isActive =
+                status?.mode === "fanpilot" &&
+                status.profile != null &&
+                String(status.profile.id) === String(p.id);
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => setSelectedId(p.id)}
+                  className={cn(
+                    "flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors",
+                    selectedId === p.id
+                      ? "bg-muted text-foreground"
+                      : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                   )}
-                </div>
-                {selectedId === p.id && (
-                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                )}
-              </button>
-            ))}
+                >
+                  <span className="shrink-0">
+                    {PRESET_ICONS[p.name] ?? <SlidersHorizontal className="h-4 w-4" />}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <span className="truncate font-medium text-[13px]">{p.name}</span>
+                      {isActive && (
+                        <span className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-500">
+                          <span className="h-1 w-1 rounded-full bg-emerald-500" />
+                          Active
+                        </span>
+                      )}
+                    </div>
+                    {p.description && (
+                      <div className="truncate text-[11px] text-muted-foreground">
+                        {p.description}
+                      </div>
+                    )}
+                  </div>
+                  {selectedId === p.id && (
+                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  )}
+                </button>
+              );
+            })}
 
             {/* Inline create form */}
             {creating && (
@@ -741,7 +1028,9 @@ export default function FanPilotPage() {
                 <div className="mt-1.5 flex gap-1">
                   <button
                     onClick={handleCreate}
-                    className="flex-1 rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+                    disabled={!online}
+                    title={!online ? "Backend disconnected" : undefined}
+                    className="flex-1 rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Create
                   </button>
@@ -773,17 +1062,53 @@ export default function FanPilotPage() {
               <div className="flex gap-6 h-full">
                 {/* Curve editor */}
                 <div className="flex-1 flex flex-col min-w-0">
-                  <div className="mb-3 flex items-center justify-between">
-                    <div>
+                  <div className="mb-3 flex items-start justify-between gap-3">
+                    <div className="min-w-0">
                       <h2 className="text-sm font-semibold">{editedProfile.name}</h2>
                       <p className="text-xs text-muted-foreground">
                         Click to add points. Drag to move. Right-click to remove.
                       </p>
                     </div>
-                    {currentTemp !== null && (
-                      <div className="flex items-center gap-1.5 rounded-full bg-red-500/10 px-2.5 py-1 text-xs font-medium text-red-500">
-                        <Thermometer className="h-3 w-3" />
-                        {currentTemp}°C
+                    {/* Color-coded temperature strip — all temperature sensors on this server,
+                        hottest first. Capped to 4 chips with a "+N more" toggle. Dimmed when
+                        offline because the values shown are the LAST known ones, not live. */}
+                    {allTempChips.length > 0 && (
+                      <div
+                        className={cn(
+                          "flex max-w-[60%] flex-wrap items-center justify-end gap-1.5 transition-[filter,opacity]",
+                          !online && "opacity-50 grayscale"
+                        )}
+                      >
+                        <Thermometer className="h-3 w-3 shrink-0 text-muted-foreground" />
+                        {(expandedTemps ? allTempChips : allTempChips.slice(0, 4)).map((t) => (
+                          <span
+                            key={t.name}
+                            className={cn(
+                              "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]",
+                              tempChipClass(t.value)
+                            )}
+                            title={`${t.name}: ${t.value}°C`}
+                          >
+                            <span className="opacity-80">{t.name}</span>
+                            <span className="font-mono font-semibold">{t.value}°C</span>
+                          </span>
+                        ))}
+                        {!expandedTemps && allTempChips.length > 4 && (
+                          <button
+                            onClick={() => setExpandedTemps(true)}
+                            className="rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted"
+                          >
+                            + {allTempChips.length - 4} more
+                          </button>
+                        )}
+                        {expandedTemps && allTempChips.length > 4 && (
+                          <button
+                            onClick={() => setExpandedTemps(false)}
+                            className="rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted"
+                          >
+                            Collapse
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -793,7 +1118,10 @@ export default function FanPilotPage() {
                       onChange={(pts) =>
                         setEditedProfile({ ...editedProfile, curve_points: pts })
                       }
-                      currentTemp={currentTemp}
+                      // Hide the live temp indicator when the backend is offline —
+                      // continuing to draw a position based on the last known temp
+                      // would imply a fresh reading we don't actually have.
+                      currentTemp={online ? currentTemp : null}
                     />
                   </div>
 
@@ -819,45 +1147,88 @@ export default function FanPilotPage() {
                       Profile Settings
                     </h3>
 
-                    {/* Source sensor */}
+                    {/* Source sensor — real sensors from this server, with the live value
+                        inline so the user sees what the curve is actually reacting to. */}
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                        Source Sensor
-                      </label>
+                      <div className="mb-1 flex items-center justify-between">
+                        <label className="text-xs font-medium text-muted-foreground">Source Sensor</label>
+                        {/* Hide the inline live reading when offline so we don't contradict
+                            the CurveEditor (which already suppresses its live indicator). */}
+                        {online && currentTemp !== null && (
+                          <span className="font-mono text-[11px] text-foreground">
+                            {currentTemp}°C
+                          </span>
+                        )}
+                      </div>
                       <select
                         value={editedProfile.source_sensor}
                         onChange={(e) =>
-                          setEditedProfile({
-                            ...editedProfile,
-                            source_sensor: e.target.value,
-                          })
+                          setEditedProfile({ ...editedProfile, source_sensor: e.target.value })
                         }
-                        className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-ring"
+                        disabled={temperatureSensors.length === 0}
+                        className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
                       >
-                        {SENSOR_OPTIONS.map((s) => (
-                          <option key={s} value={s}>
-                            {s}
-                          </option>
-                        ))}
+                        {temperatureSensors.length === 0 && (
+                          <option value="">No temperature sensors available</option>
+                        )}
+                        {temperatureSensors.map((name) => {
+                          const r = sensorReadings[name];
+                          // Same rationale as the inline readout above: drop the live value
+                          // suffix from option labels when the backend is offline.
+                          const live = online && r?.value != null ? ` — ${r.value}°C` : "";
+                          return (
+                            <option key={name} value={name}>
+                              {name}{live}
+                            </option>
+                          );
+                        })}
+                        {/* Stored value not on this server: surface it so the select stays
+                            controlled until the auto-fix effect swaps it. */}
+                        {editedProfile.source_sensor &&
+                          !temperatureSensors.includes(editedProfile.source_sensor) && (
+                            <option value={editedProfile.source_sensor}>
+                              {editedProfile.source_sensor} (not on this server)
+                            </option>
+                          )}
                       </select>
+                      <p className="mt-0.5 text-[10px] text-muted-foreground">
+                        Temperature sensor that drives the curve.
+                      </p>
                     </div>
 
-                    {/* Hysteresis */}
+                    {/* Hysteresis — text input + decimal inputMode so the native spinner
+                        is gone AND the user can clear the field without it snapping back to 0.
+                        Range clamping happens on blur. */}
                     <div>
                       <label className="mb-1 block text-xs font-medium text-muted-foreground">
                         Hysteresis (°C)
                       </label>
                       <input
-                        type="number"
-                        min={0}
-                        max={20}
-                        value={editedProfile.hysteresis}
-                        onChange={(e) =>
-                          setEditedProfile({
-                            ...editedProfile,
-                            hysteresis: Number(e.target.value),
-                          })
-                        }
+                        type="text"
+                        inputMode="decimal"
+                        value={hysteresisStr}
+                        onChange={(e) => {
+                          const v = e.target.value.replace(/[^\d.]/g, "");
+                          setHysteresisStr(v);
+                          if (v === "") return;
+                          const n = parseFloat(v);
+                          if (!isNaN(n) && editedProfile && n >= 0 && n <= 20) {
+                            setEditedProfile({ ...editedProfile, hysteresis: n });
+                          }
+                        }}
+                        onBlur={() => {
+                          if (!editedProfile) return;
+                          const n = parseFloat(hysteresisStr);
+                          if (isNaN(n)) {
+                            setHysteresisStr(String(editedProfile.hysteresis));
+                            return;
+                          }
+                          const clamped = Math.max(0, Math.min(20, n));
+                          setHysteresisStr(String(clamped));
+                          if (clamped !== editedProfile.hysteresis) {
+                            setEditedProfile({ ...editedProfile, hysteresis: clamped });
+                          }
+                        }}
                         className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-ring"
                       />
                       <p className="mt-0.5 text-[10px] text-muted-foreground">
@@ -865,23 +1236,38 @@ export default function FanPilotPage() {
                       </p>
                     </div>
 
-                    {/* Safety threshold */}
+                    {/* Safety threshold — same pattern */}
                     <div>
                       <label className="mb-1 flex items-center gap-1 text-xs font-medium text-muted-foreground">
                         <AlertTriangle className="h-3 w-3 text-warning" />
                         Safety Threshold (°C)
                       </label>
                       <input
-                        type="number"
-                        min={50}
-                        max={105}
-                        value={editedProfile.safety_threshold}
-                        onChange={(e) =>
-                          setEditedProfile({
-                            ...editedProfile,
-                            safety_threshold: Number(e.target.value),
-                          })
-                        }
+                        type="text"
+                        inputMode="decimal"
+                        value={safetyStr}
+                        onChange={(e) => {
+                          const v = e.target.value.replace(/[^\d.]/g, "");
+                          setSafetyStr(v);
+                          if (v === "") return;
+                          const n = parseFloat(v);
+                          if (!isNaN(n) && editedProfile && n >= 0 && n <= 105) {
+                            setEditedProfile({ ...editedProfile, safety_threshold: n });
+                          }
+                        }}
+                        onBlur={() => {
+                          if (!editedProfile) return;
+                          const n = parseFloat(safetyStr);
+                          if (isNaN(n)) {
+                            setSafetyStr(String(editedProfile.safety_threshold));
+                            return;
+                          }
+                          const clamped = Math.max(0, Math.min(105, n));
+                          setSafetyStr(String(clamped));
+                          if (clamped !== editedProfile.safety_threshold) {
+                            setEditedProfile({ ...editedProfile, safety_threshold: clamped });
+                          }
+                        }}
                         className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-ring"
                       />
                       <p className="mt-0.5 text-[10px] text-muted-foreground">
@@ -889,21 +1275,80 @@ export default function FanPilotPage() {
                       </p>
                     </div>
 
-                    {/* Actions */}
-                    <div className="flex gap-2 pt-2 border-t border-border">
+                    {/* Actions — vertical stack:
+                          [Save]                  ← always
+                          [Save and Activate]     ← only when this profile is NOT the active one
+                          [Reset to default]      ← presets only, with inline confirm
+                          [Delete]                ← custom profiles only
+                        Save semantics: on the active profile, the backend wakes the
+                        loop so changes go live within ~1s; on a non-active profile,
+                        Save just persists without activating. */}
+                    <div className="space-y-2 border-t border-border pt-3">
                       <button
                         onClick={handleSave}
-                        className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                        disabled={activating || !online}
+                        title={!online ? "Backend disconnected" : undefined}
+                        className="flex w-full items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <Save className="h-3 w-3" />
                         Save
                       </button>
-                      {!editedProfile.is_preset && (
+
+                      {!isActiveProfile && (
+                        <button
+                          onClick={handleSaveAndActivate}
+                          disabled={activating || !contextServerId || !online}
+                          title={!online ? "Backend disconnected" : undefined}
+                          className="flex w-full items-center justify-center gap-1.5 rounded-md border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <Fan className="h-3 w-3" />
+                          {activating ? "Activating…" : "Save and Activate"}
+                        </button>
+                      )}
+
+                      {editedProfile.is_preset ? (
+                        !confirmingReset ? (
+                          <button
+                            onClick={() => setConfirmingReset(true)}
+                            className="flex w-full items-center justify-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted transition-colors"
+                          >
+                            <RotateCcw className="h-3 w-3" />
+                            Reset to default
+                          </button>
+                        ) : (
+                          <div className="rounded-md border border-red-500/30 bg-red-500/5 p-2.5">
+                            <div className="flex items-start gap-1.5">
+                              <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-red-500" />
+                              <p className="text-[11px] leading-tight text-muted-foreground">
+                                Reset <span className="font-medium text-foreground">{editedProfile.name}</span> to factory defaults?
+                                Loaded into the editor — click Save to persist.
+                              </p>
+                            </div>
+                            <div className="mt-2 flex gap-1.5">
+                              <button
+                                onClick={() => setConfirmingReset(false)}
+                                className="flex-1 rounded-md border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                onClick={handleReset}
+                                className="flex-1 rounded-md bg-red-500 px-2 py-1 text-[11px] font-semibold text-white hover:bg-red-600"
+                              >
+                                Reset
+                              </button>
+                            </div>
+                          </div>
+                        )
+                      ) : (
                         <button
                           onClick={handleDelete}
-                          className="flex items-center justify-center gap-1 rounded-md bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/20 transition-colors"
+                          disabled={!online}
+                          title={!online ? "Backend disconnected" : undefined}
+                          className="flex w-full items-center justify-center gap-1.5 rounded-md bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/20 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           <Trash2 className="h-3 w-3" />
+                          Delete
                         </button>
                       )}
                     </div>
@@ -932,71 +1377,100 @@ export default function FanPilotPage() {
             )}
           </div>
 
-          {/* ---- Bottom bar: Mode selector ---- */}
+          {/* ---- Bottom bar: Fan mode + live status ---- */}
           <div className="shrink-0 border-t border-border bg-card px-6 py-3">
-            <div className="flex items-center gap-4">
-              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Fan Mode
-              </span>
-
-              <div className="flex items-center gap-1 rounded-lg bg-muted p-0.5">
-                {(
-                  [
-                    { mode: "auto" as FanMode, label: "BMC Auto" },
-                    { mode: "manual" as FanMode, label: "Manual" },
-                    { mode: "fanpilot" as FanMode, label: "FanPilot" },
-                  ] as const
-                ).map(({ mode, label }) => (
-                  <button
-                    key={mode}
-                    disabled={modeLoading}
-                    onClick={() => handleModeChange(mode)}
-                    className={cn(
-                      "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                      status?.mode === mode
-                        ? "bg-background text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    {label}
-                  </button>
-                ))}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              {/* LEFT: mode toggle with icons + tooltips */}
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Fan Mode
+                </span>
+                <div className="flex items-center gap-1 rounded-lg bg-muted p-0.5">
+                  {MODE_OPTIONS.map(({ mode, label, description, icon: Icon }) => {
+                    const active = status?.mode === mode;
+                    return (
+                      <button
+                        key={mode}
+                        disabled={modeLoading || !online}
+                        onClick={() => handleModeChange(mode)}
+                        title={!online ? "Backend disconnected" : description}
+                        className={cn(
+                          "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+                          active
+                            ? "bg-background text-foreground shadow-sm"
+                            : "text-muted-foreground hover:text-foreground"
+                        )}
+                      >
+                        <Icon className="h-3.5 w-3.5" />
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
-              {/* Manual speed slider */}
-              {status?.mode === "manual" && (
-                <div className="flex items-center gap-3 ml-4">
-                  <span className="text-xs text-muted-foreground">Speed:</span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={manualSpeed}
-                    onChange={(e) => setManualSpeed(Number(e.target.value))}
-                    className="h-1.5 w-40 cursor-pointer appearance-none rounded-full bg-muted [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:cursor-grab"
-                  />
-                  <span className="w-8 text-right text-xs font-mono font-medium">
-                    {manualSpeed}%
+              {/* RIGHT: live status readout — gated on `online` so a stale spinning fan
+                  or cached speed % never lies about the current state. When offline we
+                  surface a plain "Disconnected" instead of the last-known mode. */}
+              <div className="flex min-w-0 items-center gap-2 text-xs">
+                {!online && (
+                  <span className="text-red-500/80">Disconnected — live status unavailable</span>
+                )}
+                {online && status?.mode === "auto" && (
+                  <span className="text-muted-foreground">BMC is controlling the fans</span>
+                )}
+                {online && status?.mode === "manual" && (
+                  <span className="text-muted-foreground">
+                    Fixed at{" "}
+                    <span className="font-mono font-semibold text-foreground">
+                      {status.current_speed_pct ?? "—"}%
+                    </span>
                   </span>
-                  <button
-                    onClick={handleManualSpeedApply}
-                    className="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-                  >
-                    Apply
-                  </button>
-                </div>
-              )}
-
-              {/* Active profile indicator */}
-              {status?.mode === "fanpilot" && status.profile && (
-                <div className="ml-4 flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Fan className="h-3.5 w-3.5 text-blue-500 animate-spin" style={{ animationDuration: "3s" }} />
-                  <span>
-                    Active profile: <span className="font-medium text-foreground">{status.profile}</span>
-                  </span>
-                </div>
-              )}
+                )}
+                {online && status?.mode === "fanpilot" && (
+                  <div className="flex items-center gap-1.5">
+                    <Fan
+                      className="h-3.5 w-3.5 animate-spin text-blue-500"
+                      style={{ animationDuration: "3s" }}
+                    />
+                    <span className="text-muted-foreground">Profile:</span>
+                    <span className="font-medium text-foreground">
+                      {status.profile?.name ?? "—"}
+                    </span>
+                    <span className="text-muted-foreground">·</span>
+                    <span className="font-mono font-semibold text-foreground">
+                      {status.current_speed_pct ?? "—"}%
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
+
+            {/* Manual speed control — full row, only while in manual mode */}
+            {status?.mode === "manual" && (
+              <div className="mt-3 flex items-center gap-3">
+                <span className="text-xs text-muted-foreground">Set speed</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={manualSpeed}
+                  onChange={(e) => setManualSpeed(Number(e.target.value))}
+                  className="h-1.5 max-w-xs flex-1 cursor-pointer appearance-none rounded-full bg-muted [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:cursor-grab"
+                />
+                <span className="w-10 text-right text-xs font-mono font-medium">
+                  {manualSpeed}%
+                </span>
+                <button
+                  onClick={handleManualSpeedApply}
+                  disabled={!online || applyingSpeed}
+                  title={!online ? "Backend disconnected" : undefined}
+                  className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {applyingSpeed ? "Applying…" : "Apply"}
+                </button>
+              </div>
+            )}
           </div>
         </main>
       </div>
