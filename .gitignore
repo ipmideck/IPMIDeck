@@ -57,3 +57,12 @@ data/
 
 # Playwright MCP
 .playwright-mcp/
+
+# Dev/local docs — kept on disk, not for the public repo
+CLAUDE.md
+IPMI-COMMANDS-INTEGRATION.md
+mockup.html
+PRD.md
+
+# Temp files
+*.tmp
