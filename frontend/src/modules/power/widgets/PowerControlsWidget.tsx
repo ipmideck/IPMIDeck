@@ -90,49 +90,23 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
         !online && "opacity-50 grayscale"
       )}
     >
-      {/* Row 1: status + chrome icons */}
-      <div className="flex shrink-0 items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Power
-            className={cn(
-              "h-4 w-4",
-              isOn ? "text-emerald-500" : isOff ? "text-red-500" : "text-muted-foreground"
-            )}
-          />
-          <span
-            className={cn(
-              "font-mono text-sm font-semibold",
-              isOn ? "text-emerald-500" : isOff ? "text-red-500" : "text-muted-foreground"
-            )}
-          >
-            {!online ? "Unknown" : isOn ? "Online" : isOff ? "Offline" : "Unknown"}
-          </span>
-        </div>
-        <div className="flex items-center gap-0.5">
-          {sensorName != null && (
-            <button
-              type="button"
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={reset}
-              title="Reset min/max/kWh counters"
-              className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-            >
-              <RefreshCw className="h-3 w-3" />
-            </button>
+      {/* Row 1: status only — chrome icons (reset, view toggle) now live in the
+          widget card HEADER via PowerControlsHeaderActions (see registry). */}
+      <div className="flex shrink-0 items-center gap-2">
+        <Power
+          className={cn(
+            "h-4 w-4",
+            isOn ? "text-emerald-500" : isOff ? "text-red-500" : "text-muted-foreground"
           )}
-          {onViewChange && sensorName != null && (
-            <button
-              type="button"
-              aria-label={isChart ? "Switch to compact view" : "Switch to chart view"}
-              title={isChart ? "Hide chart" : "Show live chart"}
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={() => onViewChange(isChart ? "compact" : "chart")}
-              className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-            >
-              {isChart ? <LayoutGrid className="h-3 w-3" /> : <LineChartIcon className="h-3 w-3" />}
-            </button>
+        />
+        <span
+          className={cn(
+            "font-mono text-sm font-semibold",
+            isOn ? "text-emerald-500" : isOff ? "text-red-500" : "text-muted-foreground"
           )}
-        </div>
+        >
+          {!online ? "Unknown" : isOn ? "Online" : isOff ? "Offline" : "Unknown"}
+        </span>
       </div>
 
       {/* Body — three branches: chart view (chart fills flex-1), compact view (big number),
@@ -277,5 +251,51 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Header-action chrome for the PowerControls widget — rendered by WidgetGrid in
+ * the widget card title bar (not inside the body). Subscribes to the same
+ * usePowerStats() hook so reset/view-toggle behaviour stays in sync with the
+ * body. All buttons stopPropagation on mousedown so clicking them while the
+ * grid is in edit mode doesn't initiate a drag.
+ */
+export function PowerControlsHeaderActions({
+  serverId,
+  view,
+  onViewChange,
+}: {
+  serverId: string;
+  view: "compact" | "chart";
+  onViewChange?: (v: "compact" | "chart") => void;
+}) {
+  const { sensorName, reset } = usePowerStats(serverId);
+  if (sensorName == null) return null;
+  const isChart = view === "chart";
+  return (
+    <>
+      <button
+        type="button"
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={reset}
+        title="Reset min/max/kWh counters"
+        className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+      >
+        <RefreshCw className="h-3 w-3" />
+      </button>
+      {onViewChange && (
+        <button
+          type="button"
+          aria-label={isChart ? "Switch to compact view" : "Switch to chart view"}
+          title={isChart ? "Hide chart" : "Show live chart"}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={() => onViewChange(isChart ? "compact" : "chart")}
+          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          {isChart ? <LayoutGrid className="h-3 w-3" /> : <LineChartIcon className="h-3 w-3" />}
+        </button>
+      )}
+    </>
   );
 }

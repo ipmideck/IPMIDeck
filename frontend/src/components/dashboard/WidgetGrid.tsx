@@ -1,11 +1,11 @@
 import { useCallback, useRef, useState, useEffect } from "react";
 import { ResponsiveGridLayout } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
-import { useLayoutStore } from "@/stores/layout-store";
-import { useServerStore } from "@/stores/server-store";
+import { useLayoutStore, type WidgetLayout } from "@/stores/layout-store";
+import { useServerStore, type Server } from "@/stores/server-store";
 import { useModuleStore } from "@/stores/module-store";
 import { useEditModeStore } from "@/stores/edit-mode-store";
-import { WidgetRenderer, getWidgetTitle } from "@/modules/registry";
+import { useWidgetRender, getWidgetTitle } from "@/modules/registry";
 import { ErrorBoundary, WidgetErrorFallback } from "@/components/ErrorBoundary";
 import { X, ChevronDown } from "lucide-react";
 import { put } from "@/api/client";
@@ -21,7 +21,7 @@ export function WidgetGrid() {
   const showIdentity = servers.length > 1;
   const editMode = useEditModeStore((s) => s.editMode);
 
-  // Hydrate the module-enabled map once on mount so WidgetRenderer can gate
+  // Hydrate the module-enabled map once on mount so useWidgetRender can gate
   // disabled-module widgets (MOD-01 D-14). Done here, not in Dashboard.tsx.
   useEffect(() => {
     useModuleStore.getState().loadModules();
@@ -72,6 +72,14 @@ export function WidgetGrid() {
     put("/api/dashboard/layout", { layout: merged }).catch(() => {});
   }, [layout, updateLayout, width]);
 
+  const handleSwitchServer = useCallback((itemId: string, newServerId: string) => {
+    setWidgetServer(itemId, newServerId);
+    const merged = layout.map((w) =>
+      w.i === itemId ? { ...w, server_id: newServerId } : w
+    );
+    put("/api/dashboard/layout", { layout: merged }).catch(() => {});
+  }, [layout, setWidgetServer]);
+
   if (!contextServerId) {
     return (
       <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
@@ -120,97 +128,148 @@ export function WidgetGrid() {
         {layout.map((item) => {
           const widgetServerId = item.server_id || contextServerId;
           const widgetServer = servers.find((s) => s.id === widgetServerId);
-          const accent = showIdentity && widgetServer;
           return (
-            <div
-              key={item.i}
-              className={cn(
-                "group relative rounded-lg shadow-sm overflow-hidden border",
-                editMode ? "border-dashed border-primary/50 bg-card/95" : "border-border bg-card",
-                accent && "border-l-[3px]"
-              )}
-              style={accent ? { borderLeftColor: widgetServer.color } : undefined}
-            >
-              <div
-                className={cn(
-                  "widget-drag-handle flex items-center justify-between border-b border-border/50 px-3 py-2",
-                  editMode ? "cursor-grab active:cursor-grabbing" : "cursor-default"
-                )}
-              >
-                <span className="text-[11px] font-semibold text-muted-foreground select-none">
-                  {getWidgetTitle(item)}
-                </span>
-                <div className="flex items-center gap-1">
-                  {accent && (
-                    <div className="relative">
-                      <button
-                        aria-label="Switch server"
-                        onMouseDown={(e) => e.stopPropagation()}
-                        onClick={() => setOpenTagId((prev) => (prev === item.i ? null : item.i))}
-                        className="flex items-center gap-1 text-[11px] font-semibold text-muted-foreground"
-                      >
-                        <span
-                          className="h-2 w-2 rounded-full"
-                          style={{ background: widgetServer.color }}
-                        />
-                        {widgetServer.name}
-                        <ChevronDown className="h-3 w-3 text-muted-foreground" />
-                      </button>
-                      {openTagId === item.i && (
-                        <div
-                          onMouseDown={(e) => e.stopPropagation()}
-                          className="absolute right-0 top-full z-50 mt-1 min-w-40 rounded-lg border border-border bg-popover text-popover-foreground shadow-lg"
-                        >
-                          <div className="max-h-60 overflow-y-auto py-1">
-                            {servers.map((s) => (
-                              <button
-                                key={s.id}
-                                onMouseDown={(e) => e.stopPropagation()}
-                                onClick={() => {
-                                  setWidgetServer(item.i, s.id);
-                                  const merged = layout.map((w) =>
-                                    w.i === item.i ? { ...w, server_id: s.id } : w
-                                  );
-                                  put("/api/dashboard/layout", { layout: merged }).catch(() => {});
-                                  setOpenTagId(null);
-                                }}
-                                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] hover:bg-muted text-left"
-                              >
-                                <span
-                                  className="h-2 w-2 shrink-0 rounded-full"
-                                  style={{ background: s.color }}
-                                />
-                                <span className="truncate">{s.name}</span>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {editMode && (
-                    <button
-                      onClick={() => handleRemove(item.i)}
-                      className="rounded p-0.5 hover:bg-muted"
-                    >
-                      <X className="h-3 w-3 text-muted-foreground" />
-                    </button>
-                  )}
-                </div>
-              </div>
-              <div className="p-3" style={{ height: "calc(100% - 33px)" }}>
-                <ErrorBoundary renderFallback={(err) => <WidgetErrorFallback error={err} />}>
-                  <WidgetRenderer
-                    layout={item}
-                    defaultServerId={contextServerId}
-                    onConfigChange={(config) => handleConfigChange(item.i, config)}
-                  />
-                </ErrorBoundary>
-              </div>
+            <div key={item.i}>
+              <WidgetCard
+                item={item}
+                contextServerId={contextServerId}
+                servers={servers}
+                accentServer={showIdentity ? widgetServer : undefined}
+                editMode={editMode}
+                openTagId={openTagId}
+                setOpenTagId={setOpenTagId}
+                onRemove={handleRemove}
+                onConfigChange={handleConfigChange}
+                onSwitchServer={handleSwitchServer}
+              />
             </div>
           );
         })}
       </ResponsiveGridLayout>
+    </div>
+  );
+}
+
+/**
+ * Per-widget card. Factored into its own component so the useWidgetRender hook
+ * is called at the top level (React hook rules) — calling it inside the
+ * layout.map() callback would violate them.
+ */
+function WidgetCard({
+  item,
+  contextServerId,
+  servers,
+  accentServer,
+  editMode,
+  openTagId,
+  setOpenTagId,
+  onRemove,
+  onConfigChange,
+  onSwitchServer,
+}: {
+  item: WidgetLayout;
+  contextServerId: string;
+  servers: Server[];
+  accentServer: Server | undefined;
+  editMode: boolean;
+  openTagId: string | null;
+  setOpenTagId: (id: string | null) => void;
+  onRemove: (id: string) => void;
+  onConfigChange: (id: string, config: Record<string, unknown>) => void;
+  onSwitchServer: (itemId: string, serverId: string) => void;
+}) {
+  const { body, headerActions } = useWidgetRender(
+    item,
+    contextServerId,
+    (config) => onConfigChange(item.i, config)
+  );
+  const accent = !!accentServer;
+
+  return (
+    <div
+      className={cn(
+        "group relative h-full rounded-lg shadow-sm overflow-hidden border",
+        editMode ? "border-dashed border-primary/50 bg-card/95" : "border-border bg-card",
+        accent && "border-l-[3px]"
+      )}
+      style={accent && accentServer ? { borderLeftColor: accentServer.color } : undefined}
+    >
+      <div
+        className={cn(
+          "widget-drag-handle flex items-center justify-between border-b border-border/50 px-3 py-2",
+          editMode ? "cursor-grab active:cursor-grabbing" : "cursor-default"
+        )}
+      >
+        <span className="text-[11px] font-semibold text-muted-foreground select-none">
+          {getWidgetTitle(item)}
+        </span>
+        <div className="flex items-center gap-1">
+          {headerActions && (
+            <span
+              onMouseDown={(e) => e.stopPropagation()}
+              className="flex items-center gap-0.5"
+            >
+              {headerActions}
+            </span>
+          )}
+          {accent && accentServer && (
+            <div className="relative">
+              <button
+                aria-label="Switch server"
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={() => setOpenTagId(openTagId === item.i ? null : item.i)}
+                className="flex items-center gap-1 text-[11px] font-semibold text-muted-foreground"
+              >
+                <span
+                  className="h-2 w-2 rounded-full"
+                  style={{ background: accentServer.color }}
+                />
+                {accentServer.name}
+                <ChevronDown className="h-3 w-3 text-muted-foreground" />
+              </button>
+              {openTagId === item.i && (
+                <div
+                  onMouseDown={(e) => e.stopPropagation()}
+                  className="absolute right-0 top-full z-50 mt-1 min-w-40 rounded-lg border border-border bg-popover text-popover-foreground shadow-lg"
+                >
+                  <div className="max-h-60 overflow-y-auto py-1">
+                    {servers.map((s) => (
+                      <button
+                        key={s.id}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={() => {
+                          onSwitchServer(item.i, s.id);
+                          setOpenTagId(null);
+                        }}
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] hover:bg-muted text-left"
+                      >
+                        <span
+                          className="h-2 w-2 shrink-0 rounded-full"
+                          style={{ background: s.color }}
+                        />
+                        <span className="truncate">{s.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {editMode && (
+            <button
+              onClick={() => onRemove(item.i)}
+              className="rounded p-0.5 hover:bg-muted"
+            >
+              <X className="h-3 w-3 text-muted-foreground" />
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="p-3" style={{ height: "calc(100% - 33px)" }}>
+        <ErrorBoundary renderFallback={(err) => <WidgetErrorFallback error={err} />}>
+          {body}
+        </ErrorBoundary>
+      </div>
     </div>
   );
 }
