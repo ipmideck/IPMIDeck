@@ -3,6 +3,7 @@ import { Header } from "@/components/layout/Header";
 import { useServerStore, type Server } from "@/stores/server-store";
 import { useThemeStore } from "@/stores/theme-store";
 import { useAuthStore } from "@/stores/auth-store";
+import { useBackendOnline } from "@/stores/connection-store";
 import { get, post, put, del } from "@/api/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -22,7 +23,22 @@ export default function SettingsPage() {
   const authEnabled = useAuthStore((s) => s.authEnabled);
   const [secUsername, setSecUsername] = useState("");
   const [secPassword, setSecPassword] = useState("");
+  // Confirm-password: re-typing the password protects against typos when enabling
+  // auth — otherwise the operator could lock themselves out with an unrecoverable
+  // misspelling. Mirrors the same guard on the setup wizard's auth step.
+  const [secPasswordConfirm, setSecPasswordConfirm] = useState("");
   const [secBusy, setSecBusy] = useState(false);
+  // Disable-auth confirmation flow: clicking "Disable" expands an inline form that
+  // asks for the CURRENT password (intent confirmation, not a credential change).
+  // Backend rejects the call without it when has_user is true.
+  const [secDisableConfirm, setSecDisableConfirm] = useState(false);
+  const [secCurrentPassword, setSecCurrentPassword] = useState("");
+
+  // Backend connectivity — every mutation button on this page must disable when the
+  // WS is down so the user doesn't fire requests that will hang (and so an auth-toggle
+  // while offline can't leave the user locked out of an unreachable backend).
+  const online = useBackendOnline();
+  const offlineTip = online ? undefined : "Backend disconnected";
 
   const loadServers = async () => {
     try {
@@ -133,12 +149,17 @@ export default function SettingsPage() {
       toast.error("Username and password are required");
       return;
     }
+    if (secPassword !== secPasswordConfirm) {
+      toast.error("Passwords do not match");
+      return;
+    }
     setSecBusy(true);
     try {
       await post("/api/auth/configure", { username: secUsername, password: secPassword });
       useAuthStore.setState({ authEnabled: true, authenticated: true, hasUser: true, username: secUsername });
       setSecUsername("");
       setSecPassword("");
+      setSecPasswordConfirm("");
       toast.success("Authentication enabled");
     } catch {
       toast.error("Failed to enable authentication");
@@ -147,19 +168,39 @@ export default function SettingsPage() {
     }
   };
 
-  // DISABLE: /toggle {enabled:false} only — the stored user row is KEPT (D-10, no credential wipe,
-  // no re-auth). The operator has a valid session, accepted by the backend's first-run-aware helper.
+  // DISABLE: /toggle {enabled:false}. Requires the operator to re-enter their
+  // CURRENT password — defends against accidental clicks and stale-session takeover.
+  // Stored user row is KEPT (D-10, no credential wipe). The session cookie remains
+  // valid until logout / expiry; the backend just stops enforcing auth.
   const disableAuth = async () => {
+    if (!secCurrentPassword.trim()) {
+      toast.error("Current password is required");
+      return;
+    }
     setSecBusy(true);
     try {
-      await post("/api/auth/toggle", { enabled: false });
+      const res = await post<{ success: boolean; error?: string }>(
+        "/api/auth/toggle",
+        { enabled: false, current_password: secCurrentPassword }
+      );
+      if (!res.success) {
+        toast.error(res.error || "Failed to disable authentication");
+        return;
+      }
       useAuthStore.setState({ authEnabled: false }); // user row KEPT (D-10); hasUser stays true
+      setSecDisableConfirm(false);
+      setSecCurrentPassword("");
       toast.success("Authentication disabled");
     } catch {
       toast.error("Failed to disable authentication");
     } finally {
       setSecBusy(false);
     }
+  };
+
+  const cancelDisable = () => {
+    setSecDisableConfirm(false);
+    setSecCurrentPassword("");
   };
 
   const openAddForm = () => {
@@ -181,7 +222,12 @@ export default function SettingsPage() {
           <div className="rounded-lg border border-border bg-card p-5">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Servers</h2>
-              <button onClick={openAddForm} className="flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs font-medium hover:bg-muted">
+              <button
+                onClick={openAddForm}
+                disabled={!online}
+                title={offlineTip}
+                className="flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+              >
                 <Plus className="h-3 w-3" /> Add
               </button>
             </div>
@@ -203,7 +249,14 @@ export default function SettingsPage() {
                 </div>
                 <div className="flex justify-end gap-2">
                   <button onClick={() => setShowForm(false)} className="rounded-md px-3 py-1.5 text-xs hover:bg-muted">Cancel</button>
-                  <button onClick={addServer} className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground">Add Server</button>
+                  <button
+                    onClick={addServer}
+                    disabled={!online}
+                    title={offlineTip}
+                    className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Add Server
+                  </button>
                 </div>
               </div>
             )}
@@ -230,10 +283,22 @@ export default function SettingsPage() {
                         <button onClick={() => startEdit(s)} aria-label="Edit server" className="rounded-md border border-border p-1.5 hover:bg-muted">
                           <Pencil className="h-3.5 w-3.5" />
                         </button>
-                        <button onClick={() => testServer(s.id)} disabled={testing === s.id} aria-label="Test connection" className="rounded-md border border-border p-1.5 hover:bg-muted">
+                        <button
+                          onClick={() => testServer(s.id)}
+                          disabled={testing === s.id || !online}
+                          title={offlineTip}
+                          aria-label="Test connection"
+                          className="rounded-md border border-border p-1.5 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                        >
                           <TestTube className={cn("h-3.5 w-3.5", testing === s.id && "animate-spin")} />
                         </button>
-                        <button onClick={() => deleteServer(s.id)} aria-label="Delete server" className="rounded-md border border-border p-1.5 hover:bg-muted text-red-500">
+                        <button
+                          onClick={() => deleteServer(s.id)}
+                          disabled={!online}
+                          title={offlineTip}
+                          aria-label="Delete server"
+                          className="rounded-md border border-border p-1.5 hover:bg-muted text-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </div>
@@ -256,7 +321,14 @@ export default function SettingsPage() {
                         </div>
                         <div className="flex justify-end gap-2">
                           <button onClick={() => setEditingId(null)} className="rounded-md px-3 py-1.5 text-xs hover:bg-muted">Discard Changes</button>
-                          <button onClick={() => saveEdit(s.id)} className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground">Save Changes</button>
+                          <button
+                            onClick={() => saveEdit(s.id)}
+                            disabled={!online}
+                            title={offlineTip}
+                            className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Save Changes
+                          </button>
                         </div>
                       </div>
                     )}
@@ -280,13 +352,49 @@ export default function SettingsPage() {
             {authEnabled ? (
               <div className="space-y-3">
                 <p className="text-sm text-muted-foreground">Authentication is enabled.</p>
-                <button
-                  onClick={disableAuth}
-                  disabled={secBusy}
-                  className="rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
-                >
-                  Disable Authentication
-                </button>
+                {!secDisableConfirm ? (
+                  <button
+                    onClick={() => setSecDisableConfirm(true)}
+                    disabled={secBusy || !online}
+                    title={offlineTip}
+                    className="rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Disable Authentication
+                  </button>
+                ) : (
+                  <div className="rounded-md border border-red-500/30 bg-red-500/5 p-3 space-y-3">
+                    <p className="text-xs text-muted-foreground">
+                      Enter your current password to confirm. The dashboard will become open
+                      to anyone on your network until you re-enable authentication.
+                    </p>
+                    <input
+                      type="password"
+                      placeholder="Current password"
+                      value={secCurrentPassword}
+                      onChange={(e) => setSecCurrentPassword(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") disableAuth(); }}
+                      autoFocus
+                      className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm font-mono"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={cancelDisable}
+                        disabled={secBusy}
+                        className="flex-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted disabled:opacity-50"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={disableAuth}
+                        disabled={secBusy || !online || !secCurrentPassword.trim()}
+                        title={offlineTip}
+                        className="flex-1 rounded-md bg-red-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {secBusy ? "Disabling…" : "Confirm disable"}
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <p className="text-xs text-muted-foreground">
                   Enabling again will require setting a new username and password.
                 </p>
@@ -311,10 +419,26 @@ export default function SettingsPage() {
                     className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-mono"
                   />
                 </div>
+                <input
+                  type="password"
+                  placeholder="Confirm password"
+                  value={secPasswordConfirm}
+                  onChange={(e) => setSecPasswordConfirm(e.target.value)}
+                  className={cn(
+                    "w-full rounded-md border bg-background px-3 py-1.5 text-sm font-mono",
+                    secPassword && secPasswordConfirm && secPassword !== secPasswordConfirm
+                      ? "border-red-500/60"
+                      : "border-border"
+                  )}
+                />
+                {secPassword && secPasswordConfirm && secPassword !== secPasswordConfirm && (
+                  <p className="text-xs text-red-500">Passwords do not match.</p>
+                )}
                 <button
                   onClick={enableAuth}
-                  disabled={secBusy}
-                  className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
+                  disabled={secBusy || !online}
+                  title={offlineTip}
+                  className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Enable Authentication
                 </button>

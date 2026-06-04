@@ -25,6 +25,15 @@ class ConfigureRequest(BaseModel):
     password: str
 
 
+class ToggleRequest(BaseModel):
+    enabled: bool = True
+    # Required when disabling an ACTIVE login (auth_enabled AND has_user). Used as a
+    # second-factor intent confirmation — see /toggle. Optional during first-run
+    # skip-at-setup (no user yet) and ignored for enable (which is refused here
+    # anyway; enable goes through /configure with fresh credentials).
+    current_password: str | None = None
+
+
 async def _require_session_if_active(request: Request, auth) -> None:
     """REVIEWS #1: require a valid session ONLY when auth is active for a real account.
 
@@ -164,7 +173,7 @@ async def auth_status():
 
 
 @router.post("/toggle")
-async def toggle_auth(request: Request):
+async def toggle_auth(body: ToggleRequest, request: Request):
     """Disable auth (enabled:false). Enabling is REJECTED — use /configure.
 
     REVIEWS #2: enabling auth always requires setting fresh credentials (D-09), so
@@ -173,15 +182,30 @@ async def toggle_auth(request: Request):
     can never be enabled with no user. For {enabled:false} we use the shared first-run-aware
     helper: skip-at-setup (no user / auth off) works with no cookie (D-02); disabling an
     active login (auth_enabled AND has_user) still requires a valid session (Phase 1 D-08).
+
+    SECURITY: when disabling an ACTIVE login (has_user is true), the request MUST
+    include the operator's current password — intent confirmation and typo-prevention
+    against a hijacked session or a stray click on the disable button. The skip-at-
+    setup path (no user yet) is unaffected since there's no password to verify.
     """
     from backend.main import auth
-    body = await request.json()
-    enabled = body.get("enabled", True)
-    if enabled:
+    if body.enabled:
         return {
             "success": False,
             "error": "Use /api/auth/configure to enable authentication",
         }
     await _require_session_if_active(request, auth)
+
+    if await auth.has_user():
+        if not body.current_password:
+            return {
+                "success": False,
+                "error": "Current password is required to disable authentication",
+            }
+        token = request.cookies.get("session")
+        username = auth.verify_session_token(token) if token else None
+        if not username or not await auth.verify_password(username, body.current_password):
+            return {"success": False, "error": "Incorrect password"}
+
     await auth.set_auth_enabled(False)
     return {"success": True, "auth_enabled": False}

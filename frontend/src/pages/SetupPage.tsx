@@ -36,6 +36,9 @@ export default function SetupPage() {
   const [requireLogin, setRequireLogin] = useState(true); // default "Yes" (require login) — secure-by-default per REVIEWS LOW; operator may switch to "No" (open access)
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  // Confirm-password protects against typos — without it the operator could lock
+  // themselves out of a fresh install with a misspelled password they don't know.
+  const [passwordConfirm, setPasswordConfirm] = useState("");
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
 
@@ -63,6 +66,11 @@ export default function SetupPage() {
         // D-03: create user (issues a session cookie) -> continue authenticated.
         if (!username.trim() || !password.trim()) {
           setAuthError("Username and password are required.");
+          setAuthLoading(false);
+          return;
+        }
+        if (password !== passwordConfirm) {
+          setAuthError("Passwords do not match.");
           setAuthLoading(false);
           return;
         }
@@ -328,6 +336,24 @@ export default function SetupPage() {
                       className="w-full rounded-lg border border-border bg-card py-2 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
                     />
                   </div>
+                  <div className="relative">
+                    <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <input
+                      type="password"
+                      placeholder="Confirm password"
+                      value={passwordConfirm}
+                      onChange={(e) => setPasswordConfirm(e.target.value)}
+                      className={cn(
+                        "w-full rounded-lg border bg-card py-2 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50",
+                        password && passwordConfirm && password !== passwordConfirm
+                          ? "border-red-500/60"
+                          : "border-border"
+                      )}
+                    />
+                  </div>
+                  {password && passwordConfirm && password !== passwordConfirm && (
+                    <p className="text-xs text-red-500">Passwords do not match.</p>
+                  )}
                 </div>
               )}
 
