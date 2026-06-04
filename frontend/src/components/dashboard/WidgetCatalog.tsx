@@ -2,7 +2,8 @@ import { useState, useEffect } from "react";
 import { get, put, del } from "@/api/client";
 import { useLayoutStore, type WidgetLayout } from "@/stores/layout-store";
 import { useServerStore } from "@/stores/server-store";
-import { SUPPORTED_WIDGET_IDS } from "@/modules/registry";
+import { useBackendOnline } from "@/stores/connection-store";
+import { SUPPORTED_WIDGET_IDS, WIDGET_VIEWS } from "@/modules/registry";
 import { cn } from "@/lib/utils";
 import { X, LayoutGrid, RotateCcw, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
@@ -29,15 +30,21 @@ export function WidgetCatalog({ open, onClose }: WidgetCatalogProps) {
   const [selectedServer, setSelectedServer] = useState<string>("");
   const [confirmingReset, setConfirmingReset] = useState(false);
   const [resetting, setResetting] = useState(false);
+  // When set, the catalog renders an inline view picker for this multi-view
+  // widget instead of immediately adding it on click. Cleared on close,
+  // selection, or a second click on the same widget.
+  const [pickingFor, setPickingFor] = useState<CatalogWidget | null>(null);
   const addWidget = useLayoutStore((s) => s.addWidget);
   const setLayout = useLayoutStore((s) => s.setLayout);
   const layout = useLayoutStore((s) => s.layout);
   const servers = useServerStore((s) => s.servers);
   const contextServerId = useServerStore((s) => s.contextServerId);
+  const online = useBackendOnline();
 
   useEffect(() => {
     if (!open) {
       setConfirmingReset(false); // never reopen mid-confirmation
+      setPickingFor(null); // never reopen mid-view-pick
       return;
     }
     setLoading(true);
@@ -52,9 +59,9 @@ export function WidgetCatalog({ open, onClose }: WidgetCatalogProps) {
       .finally(() => setLoading(false));
   }, [open, contextServerId]);
 
-  function handleAdd(widget: CatalogWidget) {
+  function handleAddWithView(widget: CatalogWidget, view?: string) {
     const id = `${widget.widget_id}-${Date.now()}`;
-    const newWidget = {
+    const newWidget: WidgetLayout = {
       i: id,
       widget_id: widget.widget_id,
       module_id: widget.module_id,
@@ -63,6 +70,7 @@ export function WidgetCatalog({ open, onClose }: WidgetCatalogProps) {
       y: Infinity,
       w: widget.default_w,
       h: widget.default_h,
+      config: view ? { view } : undefined,
     };
     addWidget(newWidget);
 
@@ -71,7 +79,22 @@ export function WidgetCatalog({ open, onClose }: WidgetCatalogProps) {
     put("/api/dashboard/layout", { layout: updatedLayout }).catch(() => {});
 
     toast.success("Widget added");
+    setPickingFor(null);
     onClose();
+  }
+
+  function handleAdd(widget: CatalogWidget) {
+    handleAddWithView(widget); // no view = no config.view written (single-view widgets)
+  }
+
+  function onClickWidget(widget: CatalogWidget) {
+    const views = WIDGET_VIEWS[widget.widget_id];
+    if (!views || views.length <= 1) {
+      handleAdd(widget); // immediate add (existing behavior)
+      return;
+    }
+    // Multi-view widget — toggle the inline picker for this card
+    setPickingFor((cur) => (cur?.widget_id === widget.widget_id ? null : widget));
   }
 
   async function handleReset() {
@@ -134,7 +157,9 @@ export function WidgetCatalog({ open, onClose }: WidgetCatalogProps) {
           {!confirmingReset ? (
             <button
               onClick={() => setConfirmingReset(true)}
-              className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              disabled={!online}
+              title={!online ? "Backend disconnected" : undefined}
+              className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:cursor-not-allowed disabled:opacity-50"
             >
               <RotateCcw className="h-3.5 w-3.5" />
               Reset layout
@@ -158,8 +183,9 @@ export function WidgetCatalog({ open, onClose }: WidgetCatalogProps) {
                 </button>
                 <button
                   onClick={handleReset}
-                  disabled={resetting}
-                  className="flex-1 rounded-md bg-red-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-600 transition-colors disabled:opacity-50"
+                  disabled={resetting || !online}
+                  title={!online ? "Backend disconnected" : undefined}
+                  className="flex-1 rounded-md bg-red-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-600 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {resetting ? "Resetting…" : "Reset"}
                 </button>
@@ -204,28 +230,67 @@ export function WidgetCatalog({ open, onClose }: WidgetCatalogProps) {
                   {moduleName}
                 </h3>
                 <div className="space-y-2">
-                  {moduleWidgets.map((w) => (
-                    <button
-                      key={w.widget_id}
-                      onClick={() => handleAdd(w)}
-                      className="flex w-full items-start gap-3 rounded-lg border border-border p-3 text-left hover:bg-muted/50 transition-colors"
-                    >
-                      <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted">
-                        <LayoutGrid className="h-4 w-4 text-muted-foreground" />
+                  {moduleWidgets.map((w) => {
+                    const views = WIDGET_VIEWS[w.widget_id];
+                    const isPicking = pickingFor?.widget_id === w.widget_id;
+                    return (
+                      <div key={w.widget_id}>
+                        <button
+                          onClick={() => onClickWidget(w)}
+                          disabled={!online}
+                          title={!online ? "Backend disconnected" : undefined}
+                          className={cn(
+                            "flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+                            isPicking
+                              ? "border-primary bg-primary/5"
+                              : "border-border hover:bg-muted/50"
+                          )}
+                        >
+                          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted">
+                            <LayoutGrid className="h-4 w-4 text-muted-foreground" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium leading-tight">
+                              {w.name}
+                            </p>
+                            <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">
+                              {w.description}
+                            </p>
+                            <p className="mt-1 text-[10px] text-muted-foreground">
+                              {w.default_w}x{w.default_h}
+                            </p>
+                          </div>
+                        </button>
+                        {isPicking && views && (
+                          <div className="mt-2 rounded-md border border-border bg-muted/30 p-2">
+                            <p className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+                              Choose view
+                            </p>
+                            <div className="grid grid-cols-2 gap-2">
+                              {views.map((opt) => {
+                                const Icon = opt.icon;
+                                return (
+                                  <button
+                                    key={opt.value}
+                                    onClick={() => handleAddWithView(w, opt.value)}
+                                    className="flex flex-col items-start gap-1 rounded-md border border-border bg-card p-2 text-left hover:bg-muted/50 transition-colors"
+                                  >
+                                    <div className="flex items-center gap-1.5">
+                                      {Icon && <Icon className="h-3.5 w-3.5 text-muted-foreground" />}
+                                      <span className="text-xs font-semibold">{opt.label}</span>
+                                    </div>
+                                    <span className="text-[10px] leading-snug text-muted-foreground line-clamp-2">
+                                      {opt.description}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium leading-tight">
-                          {w.name}
-                        </p>
-                        <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">
-                          {w.description}
-                        </p>
-                        <p className="mt-1 text-[10px] text-muted-foreground">
-                          {w.default_w}x{w.default_h}
-                        </p>
-                      </div>
-                    </button>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             ))}
