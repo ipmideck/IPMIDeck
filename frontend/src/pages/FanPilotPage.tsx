@@ -56,6 +56,11 @@ interface FanStatus {
 
 type FanMode = "auto" | "manual" | "fanpilot";
 
+// localStorage key for "last opened profile" — UI preference only (profiles are
+// global, not per-server, so a single key is sufficient). Read on profiles fetch,
+// written whenever the operator selects a different profile.
+const LAST_PROFILE_KEY = "fanpilot:last-profile-id";
+
 // Fan-mode metadata used by the bottom bar (icon + short description). The description
 // drives the button tooltip so the user understands what each mode does at a glance.
 const MODE_OPTIONS: { mode: FanMode; label: string; description: string; icon: typeof Cpu }[] = [
@@ -662,7 +667,18 @@ export default function FanPilotPage() {
       const list = Array.isArray(data.profiles) ? data.profiles : [];
       setProfiles(list);
       if (list.length > 0 && !selectedId) {
-        setSelectedId(list[0].id);
+        // Restore the operator's last-opened profile (typo-prevention against
+        // re-picking Balanced every page visit). Falls back to list[0] when the
+        // saved ID no longer exists (deleted) or storage is unavailable.
+        let restoredId: string | number | null = null;
+        try {
+          const saved = localStorage.getItem(LAST_PROFILE_KEY);
+          if (saved) {
+            const match = list.find((p) => String(p.id) === saved);
+            if (match) restoredId = match.id;
+          }
+        } catch { /* localStorage may throw in private browsing — ignore */ }
+        setSelectedId(restoredId ?? list[0].id);
       }
     } catch {
       // API may not be ready yet
@@ -709,6 +725,14 @@ export default function FanPilotPage() {
     const interval = setInterval(fetchStatus, 5000);
     return () => clearInterval(interval);
   }, [contextServerId, fetchStatus]);
+
+  /* ---------- Persist last opened profile ---------- */
+  useEffect(() => {
+    if (selectedId == null) return;
+    try {
+      localStorage.setItem(LAST_PROFILE_KEY, String(selectedId));
+    } catch { /* localStorage may throw in private browsing — ignore */ }
+  }, [selectedId]);
 
   /* ---------- Sync editedProfile when selection changes ---------- */
   useEffect(() => {
