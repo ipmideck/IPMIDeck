@@ -4,10 +4,12 @@ import "react-grid-layout/css/styles.css";
 import { useLayoutStore } from "@/stores/layout-store";
 import { useServerStore } from "@/stores/server-store";
 import { useModuleStore } from "@/stores/module-store";
+import { useEditModeStore } from "@/stores/edit-mode-store";
 import { WidgetRenderer, getWidgetTitle } from "@/modules/registry";
 import { ErrorBoundary, WidgetErrorFallback } from "@/components/ErrorBoundary";
 import { X, ChevronDown } from "lucide-react";
 import { put } from "@/api/client";
+import { cn } from "@/lib/utils";
 
 export function WidgetGrid() {
   const { layout, removeWidget, updateLayout, setWidgetServer, updateWidgetConfig } = useLayoutStore();
@@ -17,6 +19,7 @@ export function WidgetGrid() {
   const [width, setWidth] = useState(1000);
   const [openTagId, setOpenTagId] = useState<string | null>(null);
   const showIdentity = servers.length > 1;
+  const editMode = useEditModeStore((s) => s.editMode);
 
   // Hydrate the module-enabled map once on mount so WidgetRenderer can gate
   // disabled-module widgets (MOD-01 D-14). Done here, not in Dashboard.tsx.
@@ -110,8 +113,8 @@ export function WidgetGrid() {
         rowHeight={120}
         margin={[16, 16] as const}
         containerPadding={[0, 0] as const}
-        dragConfig={{ enabled: true, handle: ".widget-drag-handle" }}
-        resizeConfig={{ enabled: true }}
+        dragConfig={{ enabled: editMode, handle: ".widget-drag-handle" }}
+        resizeConfig={{ enabled: editMode }}
         onLayoutChange={handleLayoutChange}
       >
         {layout.map((item) => {
@@ -121,10 +124,19 @@ export function WidgetGrid() {
           return (
             <div
               key={item.i}
-              className={`group relative rounded-lg border border-border bg-card shadow-sm overflow-hidden${accent ? " border-l-[3px]" : ""}`}
+              className={cn(
+                "group relative rounded-lg shadow-sm overflow-hidden border",
+                editMode ? "border-dashed border-primary/50 bg-card/95" : "border-border bg-card",
+                accent && "border-l-[3px]"
+              )}
               style={accent ? { borderLeftColor: widgetServer.color } : undefined}
             >
-              <div className="widget-drag-handle flex items-center justify-between border-b border-border/50 px-3 py-2 cursor-grab active:cursor-grabbing">
+              <div
+                className={cn(
+                  "widget-drag-handle flex items-center justify-between border-b border-border/50 px-3 py-2",
+                  editMode ? "cursor-grab active:cursor-grabbing" : "cursor-default"
+                )}
+              >
                 <span className="text-[11px] font-semibold text-muted-foreground select-none">
                   {getWidgetTitle(item)}
                 </span>
@@ -176,12 +188,14 @@ export function WidgetGrid() {
                       )}
                     </div>
                   )}
-                  <button
-                    onClick={() => handleRemove(item.i)}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity rounded p-0.5 hover:bg-muted"
-                  >
-                    <X className="h-3 w-3 text-muted-foreground" />
-                  </button>
+                  {editMode && (
+                    <button
+                      onClick={() => handleRemove(item.i)}
+                      className="rounded p-0.5 hover:bg-muted"
+                    >
+                      <X className="h-3 w-3 text-muted-foreground" />
+                    </button>
+                  )}
                 </div>
               </div>
               <div className="p-3" style={{ height: "calc(100% - 33px)" }}>

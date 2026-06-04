@@ -6,10 +6,11 @@ import { WidgetCatalog } from "@/components/dashboard/WidgetCatalog";
 import { useLayoutStore } from "@/stores/layout-store";
 import { useServerStore } from "@/stores/server-store";
 import { useRangeStore } from "@/stores/range-store";
+import { useEditModeStore } from "@/stores/edit-mode-store";
 import { EmptyState } from "@/components/common/EmptyState";
 import { cn } from "@/lib/utils";
 import { get } from "@/api/client";
-import { Plus, Server, LayoutGrid } from "lucide-react";
+import { Plus, Server, LayoutGrid, Pencil } from "lucide-react";
 
 export default function Dashboard() {
   const { layout, setLayout } = useLayoutStore();
@@ -17,6 +18,8 @@ export default function Dashboard() {
   const servers = useServerStore((s) => s.servers);
   const range = useRangeStore((s) => s.range);
   const setRange = useRangeStore((s) => s.setRange);
+  const editMode = useEditModeStore((s) => s.editMode);
+  const toggleEditMode = useEditModeStore((s) => s.toggleEditMode);
   const navigate = useNavigate();
   const [catalogOpen, setCatalogOpen] = useState(false);
 
@@ -45,6 +48,20 @@ export default function Dashboard() {
         >
           <Plus className="h-3.5 w-3.5" />
           Add Widget
+        </button>
+        <button
+          onClick={toggleEditMode}
+          aria-label={editMode ? "Exit edit mode" : "Enter edit mode"}
+          title={editMode ? "Exit edit mode (lock layout)" : "Edit layout (unlock drag/resize)"}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-semibold transition-colors",
+            editMode
+              ? "border-primary bg-primary/10 text-primary"
+              : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+          )}
+        >
+          <Pencil className="h-3.5 w-3.5" />
+          {editMode ? "Done" : "Edit"}
         </button>
         <div className="flex items-center gap-1 rounded-md bg-muted p-0.5">
           {(
