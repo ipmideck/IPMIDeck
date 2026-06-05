@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useId, useMemo, useRef } from "react";
+import { useTranslation, Trans } from "react-i18next";
+import type { TFunction } from "i18next";
 import { Header } from "@/components/layout/Header";
 import { useServerStore } from "@/stores/server-store";
 import { useSensorStore } from "@/stores/sensor-store";
@@ -61,12 +63,14 @@ type FanMode = "auto" | "manual" | "fanpilot";
 // written whenever the operator selects a different profile.
 const LAST_PROFILE_KEY = "fanpilot:last-profile-id";
 
-// Fan-mode metadata used by the bottom bar (icon + short description). The description
-// drives the button tooltip so the user understands what each mode does at a glance.
-const MODE_OPTIONS: { mode: FanMode; label: string; description: string; icon: typeof Cpu }[] = [
-  { mode: "auto", label: "BMC Auto", description: "The BMC (iDRAC) controls fan speed using its built-in thermal algorithm.", icon: Cpu },
-  { mode: "manual", label: "Manual", description: "Fixed speed of your choice. Does not react to temperature.", icon: SlidersHorizontal },
-  { mode: "fanpilot", label: "FanPilot", description: "This app drives the fans following the selected profile's curve.", icon: Fan },
+// Fan-mode metadata used by the bottom bar (icon + i18n keys). Only stable mode codes
+// and translation keys live at module load; label/description are resolved via t() in
+// render so the bottom bar re-translates on language change. The description drives the
+// button tooltip so the user understands what each mode does at a glance.
+const MODE_OPTIONS: { mode: FanMode; labelKey: string; descKey: string; icon: typeof Cpu }[] = [
+  { mode: "auto", labelKey: "fanpilot.modeAuto", descKey: "fanpilot.modeAutoDesc", icon: Cpu },
+  { mode: "manual", labelKey: "fanpilot.modeManual", descKey: "fanpilot.modeManualDesc", icon: SlidersHorizontal },
+  { mode: "fanpilot", labelKey: "fanpilot.modeFanpilot", descKey: "fanpilot.modeFanpilotDesc", icon: Fan },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -194,9 +198,10 @@ interface CurveEditorProps {
   onChange: (pts: CurvePoint[]) => void;
   currentTemp: number | null;
   readonly?: boolean;
+  t: TFunction;
 }
 
-function CurveEditor({ points, onChange, currentTemp, readonly }: CurveEditorProps) {
+function CurveEditor({ points, onChange, currentTemp, readonly, t }: CurveEditorProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [dragging, setDragging] = useState<number | null>(null);
   // Unique gradient id per editor instance — avoids cross-component <defs> collisions.
@@ -294,7 +299,7 @@ function CurveEditor({ points, onChange, currentTemp, readonly }: CurveEditorPro
     e.preventDefault();
     if (readonly) return;
     if (points.length <= 2) {
-      toast.error("Curve must have at least 2 points");
+      toast.error(t("fanpilot.curveMin2Points"));
       return;
     }
     onChange(points.filter((_, i) => i !== idx));
@@ -394,7 +399,7 @@ function CurveEditor({ points, onChange, currentTemp, readonly }: CurveEditorPro
         fontSize={10}
         fontWeight={500}
       >
-        Temperature
+        {t("fanpilot.axisTemperature")}
       </text>
       <text
         x={12}
@@ -405,7 +410,7 @@ function CurveEditor({ points, onChange, currentTemp, readonly }: CurveEditorPro
         fontWeight={500}
         transform={`rotate(-90, 12, ${SVG_PAD_TOP + PLOT_H / 2})`}
       >
-        Fan Speed
+        {t("fanpilot.axisFanSpeed")}
       </text>
 
       {/* Temperature gradient — green<50 / yellow<65 / orange<80 / red≥80.
@@ -583,6 +588,7 @@ function CurveEditor({ points, onChange, currentTemp, readonly }: CurveEditorPro
 /* ------------------------------------------------------------------ */
 
 export default function FanPilotPage() {
+  const { t } = useTranslation();
   const contextServerId = useServerStore((s) => s.contextServerId);
   const sensorReadings = useSensorStore((s) =>
     (contextServerId ? s.readings[contextServerId] : undefined) ?? EMPTY_READINGS
@@ -797,10 +803,10 @@ export default function FanPilotPage() {
       });
       // If this profile is currently active, the backend wakes the loop on PUT so
       // the change reaches the fans within ~1s.
-      toast.success(isActiveProfile ? "Saved — applying live" : "Profile saved");
+      toast.success(isActiveProfile ? t("fanpilot.savedApplyingLive") : t("fanpilot.profileSaved"));
       fetchProfiles();
     } catch (e: any) {
-      toast.error(e.message || "Failed to save profile");
+      toast.error(e.message || t("fanpilot.saveFailed"));
     }
   };
 
@@ -822,11 +828,11 @@ export default function FanPilotPage() {
         mode: "fanpilot",
         profile_id: editedProfile.id,
       });
-      toast.success(`Saved and activated — ${editedProfile.name}`);
+      toast.success(t("fanpilot.savedAndActivated", { name: editedProfile.name }));
       fetchProfiles();
       fetchStatus();
     } catch (e: any) {
-      toast.error(e.message || "Failed to save and activate");
+      toast.error(e.message || t("fanpilot.saveActivateFailed"));
     } finally {
       setActivating(false);
     }
@@ -840,7 +846,7 @@ export default function FanPilotPage() {
     if (!editedProfile || !editedProfile.is_preset) return;
     const defaults = PRESET_DEFAULTS[editedProfile.name];
     if (!defaults) {
-      toast.error("No default known for this preset");
+      toast.error(t("fanpilot.noDefaultForPreset"));
       return;
     }
     setEditedProfile({
@@ -854,7 +860,7 @@ export default function FanPilotPage() {
     setHysteresisStr(String(defaults.hysteresis));
     setSafetyStr(String(defaults.safety_threshold));
     setConfirmingReset(false);
-    toast.success("Reset — click Save to persist");
+    toast.success(t("fanpilot.resetPersistHint"));
   };
 
   const handleCreate = async () => {
@@ -880,7 +886,7 @@ export default function FanPilotPage() {
           source_sensor: "CPU Temp",
         }
       );
-      toast.success("Profile created");
+      toast.success(t("fanpilot.profileCreated"));
       setCreating(false);
       setNewName("");
       await fetchProfiles();
@@ -888,7 +894,7 @@ export default function FanPilotPage() {
         setSelectedId(String(created.profile_id));
       }
     } catch (e: any) {
-      toast.error(e.message || "Failed to create profile");
+      toast.error(e.message || t("fanpilot.createFailed"));
     }
   };
 
@@ -896,11 +902,11 @@ export default function FanPilotPage() {
     if (!editedProfile || editedProfile.is_preset) return;
     try {
       await del(`/api/modules/fanpilot/profiles/${editedProfile.id}`);
-      toast.success("Profile deleted");
+      toast.success(t("fanpilot.profileDeleted"));
       setSelectedId(null);
       fetchProfiles();
     } catch (e: any) {
-      toast.error(e.message || "Failed to delete profile");
+      toast.error(e.message || t("fanpilot.deleteFailed"));
     }
   };
 
@@ -912,10 +918,14 @@ export default function FanPilotPage() {
       if (mode === "manual") body.speed = manualSpeed;
       if (mode === "fanpilot" && selectedId) body.profile_id = selectedId;
       await post(`/api/modules/fanpilot/${contextServerId}/mode`, body);
-      toast.success(`Mode set to ${mode === "auto" ? "BMC Auto" : mode === "manual" ? "Manual" : "FanPilot"}`);
+      const modeLabel =
+        mode === "auto" ? t("fanpilot.modeAuto")
+        : mode === "manual" ? t("fanpilot.modeManual")
+        : t("fanpilot.modeFanpilot");
+      toast.success(t("fanpilot.modeSet", { mode: modeLabel }));
       fetchStatus();
     } catch (e: any) {
-      toast.error(e.message || "Failed to set mode");
+      toast.error(e.message || t("fanpilot.setModeFailed"));
     } finally {
       setModeLoading(false);
     }
@@ -930,12 +940,12 @@ export default function FanPilotPage() {
         mode: "manual",
         speed: speedToApply,
       });
-      toast.success(`Manual speed set to ${speedToApply}%`);
+      toast.success(t("fanpilot.manualSpeedSet", { speed: speedToApply }));
       // Skip fetchStatus() here: the BMC reads back through the next sensor poll
       // (~5-10s after the wake_sensor_loop hook); calling /status now would just
       // return the stale pre-apply value and look like the change didn't take.
     } catch (e: any) {
-      toast.error(e.message || "Failed to set speed");
+      toast.error(e.message || t("fanpilot.setSpeedFailed"));
     } finally {
       setApplyingSpeed(false);
     }
@@ -946,12 +956,12 @@ export default function FanPilotPage() {
   if (!contextServerId) {
     return (
       <>
-        <Header title="FanPilot" />
+        <Header title={t("nav.fanpilot")} />
         <div className="flex-1 overflow-auto p-6">
           <EmptyState
             icon={Fan}
-            title="No server selected"
-            description="Select a server from the sidebar to manage fan profiles and curves."
+            title={t("fanpilot.noServerTitle")}
+            description={t("fanpilot.noServerDescription")}
           />
         </div>
       </>
@@ -960,7 +970,7 @@ export default function FanPilotPage() {
 
   return (
     <>
-      <Header title="FanPilot">
+      <Header title={t("nav.fanpilot")}>
         {online && status && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Fan className="h-3.5 w-3.5" />
@@ -976,13 +986,13 @@ export default function FanPilotPage() {
         <aside className="flex w-56 shrink-0 flex-col border-r border-border bg-card">
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
             <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Profiles
+              {t("fanpilot.profiles")}
             </span>
             <button
               onClick={() => setCreating(true)}
               disabled={!online}
               className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:cursor-not-allowed disabled:opacity-40"
-              title={online ? "Create profile" : "Backend disconnected"}
+              title={online ? t("fanpilot.createProfile") : t("header.backendDisconnected")}
             >
               <Plus className="h-3.5 w-3.5" />
             </button>
@@ -1015,7 +1025,7 @@ export default function FanPilotPage() {
                       {isActive && (
                         <span className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-500">
                           <span className="h-1 w-1 rounded-full bg-emerald-500" />
-                          Active
+                          {t("fanpilot.active")}
                         </span>
                       )}
                     </div>
@@ -1046,17 +1056,17 @@ export default function FanPilotPage() {
                       setNewName("");
                     }
                   }}
-                  placeholder="Profile name..."
+                  placeholder={t("fanpilot.profileNamePlaceholder")}
                   className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
                 />
                 <div className="mt-1.5 flex gap-1">
                   <button
                     onClick={handleCreate}
                     disabled={!online}
-                    title={!online ? "Backend disconnected" : undefined}
+                    title={!online ? t("header.backendDisconnected") : undefined}
                     className="flex-1 rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    Create
+                    {t("fanpilot.create")}
                   </button>
                   <button
                     onClick={() => {
@@ -1065,7 +1075,7 @@ export default function FanPilotPage() {
                     }}
                     className="flex-1 rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground hover:text-foreground"
                   >
-                    Cancel
+                    {t("fanpilot.cancel")}
                   </button>
                 </div>
               </div>
@@ -1073,7 +1083,7 @@ export default function FanPilotPage() {
 
             {profiles.length === 0 && !loading && (
               <p className="px-3 py-6 text-center text-xs text-muted-foreground">
-                No profiles found. The backend may still be loading.
+                {t("fanpilot.noProfilesHint")}
               </p>
             )}
           </div>
@@ -1090,7 +1100,7 @@ export default function FanPilotPage() {
                     <div className="min-w-0">
                       <h2 className="text-sm font-semibold">{editedProfile.name}</h2>
                       <p className="text-xs text-muted-foreground">
-                        Click to add points. Drag to move. Right-click to remove.
+                        {t("fanpilot.editorHint")}
                       </p>
                     </div>
                     {/* Color-coded temperature strip — all temperature sensors on this server,
@@ -1122,7 +1132,7 @@ export default function FanPilotPage() {
                             onClick={() => setExpandedTemps(true)}
                             className="rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted"
                           >
-                            + {allTempChips.length - 4} more
+                            {t("fanpilot.moreCount", { count: allTempChips.length - 4 })}
                           </button>
                         )}
                         {expandedTemps && allTempChips.length > 4 && (
@@ -1130,7 +1140,7 @@ export default function FanPilotPage() {
                             onClick={() => setExpandedTemps(false)}
                             className="rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted"
                           >
-                            Collapse
+                            {t("fanpilot.collapse")}
                           </button>
                         )}
                       </div>
@@ -1146,6 +1156,7 @@ export default function FanPilotPage() {
                       // continuing to draw a position based on the last known temp
                       // would imply a fresh reading we don't actually have.
                       currentTemp={online ? currentTemp : null}
+                      t={t}
                     />
                   </div>
 
@@ -1168,14 +1179,14 @@ export default function FanPilotPage() {
                 <div className="w-60 shrink-0 space-y-4">
                   <div className="rounded-lg border border-border bg-card p-4 space-y-4">
                     <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                      Profile Settings
+                      {t("fanpilot.profileSettings")}
                     </h3>
 
                     {/* Source sensor — real sensors from this server, with the live value
                         inline so the user sees what the curve is actually reacting to. */}
                     <div>
                       <div className="mb-1 flex items-center justify-between">
-                        <label className="text-xs font-medium text-muted-foreground">Source Sensor</label>
+                        <label className="text-xs font-medium text-muted-foreground">{t("fanpilot.sourceSensor")}</label>
                         {/* Hide the inline live reading when offline so we don't contradict
                             the CurveEditor (which already suppresses its live indicator). */}
                         {online && currentTemp !== null && (
@@ -1193,7 +1204,7 @@ export default function FanPilotPage() {
                         className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
                       >
                         {temperatureSensors.length === 0 && (
-                          <option value="">No temperature sensors available</option>
+                          <option value="">{t("fanpilot.noTempSensors")}</option>
                         )}
                         {temperatureSensors.map((name) => {
                           const r = sensorReadings[name];
@@ -1211,12 +1222,12 @@ export default function FanPilotPage() {
                         {editedProfile.source_sensor &&
                           !temperatureSensors.includes(editedProfile.source_sensor) && (
                             <option value={editedProfile.source_sensor}>
-                              {editedProfile.source_sensor} (not on this server)
+                              {t("fanpilot.notOnThisServer", { name: editedProfile.source_sensor })}
                             </option>
                           )}
                       </select>
                       <p className="mt-0.5 text-[10px] text-muted-foreground">
-                        Temperature sensor that drives the curve.
+                        {t("fanpilot.sourceSensorHint")}
                       </p>
                     </div>
 
@@ -1225,7 +1236,7 @@ export default function FanPilotPage() {
                         Range clamping happens on blur. */}
                     <div>
                       <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                        Hysteresis (°C)
+                        {t("fanpilot.hysteresis")}
                       </label>
                       <input
                         type="text"
@@ -1256,7 +1267,7 @@ export default function FanPilotPage() {
                         className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-ring"
                       />
                       <p className="mt-0.5 text-[10px] text-muted-foreground">
-                        Prevents rapid fan speed oscillation
+                        {t("fanpilot.hysteresisHint")}
                       </p>
                     </div>
 
@@ -1264,7 +1275,7 @@ export default function FanPilotPage() {
                     <div>
                       <label className="mb-1 flex items-center gap-1 text-xs font-medium text-muted-foreground">
                         <AlertTriangle className="h-3 w-3 text-warning" />
-                        Safety Threshold (°C)
+                        {t("fanpilot.safetyThreshold")}
                       </label>
                       <input
                         type="text"
@@ -1295,7 +1306,7 @@ export default function FanPilotPage() {
                         className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-ring"
                       />
                       <p className="mt-0.5 text-[10px] text-muted-foreground">
-                        Fans go 100% above this temperature
+                        {t("fanpilot.safetyThresholdHint")}
                       </p>
                     </div>
 
@@ -1311,22 +1322,22 @@ export default function FanPilotPage() {
                       <button
                         onClick={handleSave}
                         disabled={activating || !online}
-                        title={!online ? "Backend disconnected" : undefined}
+                        title={!online ? t("header.backendDisconnected") : undefined}
                         className="flex w-full items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <Save className="h-3 w-3" />
-                        Save
+                        {t("fanpilot.save")}
                       </button>
 
                       {!isActiveProfile && (
                         <button
                           onClick={handleSaveAndActivate}
                           disabled={activating || !contextServerId || !online}
-                          title={!online ? "Backend disconnected" : undefined}
+                          title={!online ? t("header.backendDisconnected") : undefined}
                           className="flex w-full items-center justify-center gap-1.5 rounded-md border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           <Fan className="h-3 w-3" />
-                          {activating ? "Activating…" : "Save and Activate"}
+                          {activating ? t("fanpilot.activating") : t("fanpilot.saveAndActivate")}
                         </button>
                       )}
 
@@ -1337,15 +1348,18 @@ export default function FanPilotPage() {
                             className="flex w-full items-center justify-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted transition-colors"
                           >
                             <RotateCcw className="h-3 w-3" />
-                            Reset to default
+                            {t("fanpilot.resetToDefault")}
                           </button>
                         ) : (
                           <div className="rounded-md border border-red-500/30 bg-red-500/5 p-2.5">
                             <div className="flex items-start gap-1.5">
                               <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-red-500" />
                               <p className="text-[11px] leading-tight text-muted-foreground">
-                                Reset <span className="font-medium text-foreground">{editedProfile.name}</span> to factory defaults?
-                                Loaded into the editor — click Save to persist.
+                                <Trans
+                                  i18nKey="fanpilot.resetConfirm"
+                                  values={{ name: editedProfile.name }}
+                                  components={[<span className="font-medium text-foreground" />]}
+                                />
                               </p>
                             </div>
                             <div className="mt-2 flex gap-1.5">
@@ -1353,13 +1367,13 @@ export default function FanPilotPage() {
                                 onClick={() => setConfirmingReset(false)}
                                 className="flex-1 rounded-md border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted"
                               >
-                                Cancel
+                                {t("fanpilot.cancel")}
                               </button>
                               <button
                                 onClick={handleReset}
                                 className="flex-1 rounded-md bg-red-500 px-2 py-1 text-[11px] font-semibold text-white hover:bg-red-600"
                               >
-                                Reset
+                                {t("fanpilot.reset")}
                               </button>
                             </div>
                           </div>
@@ -1368,11 +1382,11 @@ export default function FanPilotPage() {
                         <button
                           onClick={handleDelete}
                           disabled={!online}
-                          title={!online ? "Backend disconnected" : undefined}
+                          title={!online ? t("header.backendDisconnected") : undefined}
                           className="flex w-full items-center justify-center gap-1.5 rounded-md bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/20 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           <Trash2 className="h-3 w-3" />
-                          Delete
+                          {t("fanpilot.delete")}
                         </button>
                       )}
                     </div>
@@ -1382,21 +1396,21 @@ export default function FanPilotPage() {
             ) : loading ? (
               <EmptyState
                 icon={Fan}
-                title="Loading profiles..."
-                description="Fetching fan profiles from the server."
+                title={t("fanpilot.loadingProfilesTitle")}
+                description={t("fanpilot.loadingProfilesDescription")}
               />
             ) : profiles.length === 0 ? (
               <EmptyState
                 icon={Fan}
-                title="No fan profiles yet"
-                description="Create a profile to define a custom fan curve for this server."
-                action={{ label: "Create Profile", onClick: () => setCreating(true) }}
+                title={t("fanpilot.noProfilesTitle")}
+                description={t("fanpilot.noProfilesDescription")}
+                action={{ label: t("fanpilot.createProfileCta"), onClick: () => setCreating(true) }}
               />
             ) : (
               <EmptyState
                 icon={Fan}
-                title="Select a Profile"
-                description="Choose a profile from the left panel to view and edit its fan curve."
+                title={t("fanpilot.selectProfileTitle")}
+                description={t("fanpilot.selectProfileDescription")}
               />
             )}
           </div>
@@ -1407,17 +1421,17 @@ export default function FanPilotPage() {
               {/* LEFT: mode toggle with icons + tooltips */}
               <div className="flex items-center gap-3">
                 <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Fan Mode
+                  {t("fanpilot.fanMode")}
                 </span>
                 <div className="flex items-center gap-1 rounded-lg bg-muted p-0.5">
-                  {MODE_OPTIONS.map(({ mode, label, description, icon: Icon }) => {
+                  {MODE_OPTIONS.map(({ mode, labelKey, descKey, icon: Icon }) => {
                     const active = status?.mode === mode;
                     return (
                       <button
                         key={mode}
                         disabled={modeLoading || !online}
                         onClick={() => handleModeChange(mode)}
-                        title={!online ? "Backend disconnected" : description}
+                        title={!online ? t("header.backendDisconnected") : t(descKey)}
                         className={cn(
                           "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
                           active
@@ -1426,7 +1440,7 @@ export default function FanPilotPage() {
                         )}
                       >
                         <Icon className="h-3.5 w-3.5" />
-                        {label}
+                        {t(labelKey)}
                       </button>
                     );
                   })}
@@ -1438,14 +1452,14 @@ export default function FanPilotPage() {
                   surface a plain "Disconnected" instead of the last-known mode. */}
               <div className="flex min-w-0 items-center gap-2 text-xs">
                 {!online && (
-                  <span className="text-red-500/80">Disconnected — live status unavailable</span>
+                  <span className="text-red-500/80">{t("fanpilot.disconnectedStatus")}</span>
                 )}
                 {online && status?.mode === "auto" && (
-                  <span className="text-muted-foreground">BMC is controlling the fans</span>
+                  <span className="text-muted-foreground">{t("fanpilot.bmcControlling")}</span>
                 )}
                 {online && status?.mode === "manual" && (
                   <span className="text-muted-foreground">
-                    Fixed at{" "}
+                    {t("fanpilot.fixedAt")}{" "}
                     <span className="font-mono font-semibold text-foreground">
                       {status.current_speed_pct ?? "—"}%
                     </span>
@@ -1457,7 +1471,7 @@ export default function FanPilotPage() {
                       className="h-3.5 w-3.5 animate-spin text-blue-500"
                       style={{ animationDuration: "3s" }}
                     />
-                    <span className="text-muted-foreground">Profile:</span>
+                    <span className="text-muted-foreground">{t("fanpilot.profileLabel")}</span>
                     <span className="font-medium text-foreground">
                       {status.profile?.name ?? "—"}
                     </span>
@@ -1473,7 +1487,7 @@ export default function FanPilotPage() {
             {/* Manual speed control — full row, only while in manual mode */}
             {status?.mode === "manual" && (
               <div className="mt-3 flex items-center gap-3">
-                <span className="text-xs text-muted-foreground">Set speed</span>
+                <span className="text-xs text-muted-foreground">{t("fanpilot.setSpeed")}</span>
                 <input
                   type="range"
                   min={0}
@@ -1488,10 +1502,10 @@ export default function FanPilotPage() {
                 <button
                   onClick={handleManualSpeedApply}
                   disabled={!online || applyingSpeed}
-                  title={!online ? "Backend disconnected" : undefined}
+                  title={!online ? t("header.backendDisconnected") : undefined}
                   className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {applyingSpeed ? "Applying…" : "Apply"}
+                  {applyingSpeed ? t("fanpilot.applying") : t("fanpilot.apply")}
                 </button>
               </div>
             )}

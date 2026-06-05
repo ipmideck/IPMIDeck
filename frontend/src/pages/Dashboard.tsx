@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { Header } from "@/components/layout/Header";
 import { WidgetGrid } from "@/components/dashboard/WidgetGrid";
 import { WidgetCatalog } from "@/components/dashboard/WidgetCatalog";
@@ -13,6 +14,7 @@ import { get } from "@/api/client";
 import { Plus, Server, LayoutGrid, Pencil } from "lucide-react";
 
 export default function Dashboard() {
+  const { t } = useTranslation();
   const { layout, setLayout } = useLayoutStore();
   const contextServerId = useServerStore((s) => s.contextServerId);
   const servers = useServerStore((s) => s.servers);
@@ -41,18 +43,18 @@ export default function Dashboard() {
 
   return (
     <>
-      <Header title="Dashboard">
+      <Header title={t("nav.dashboard")}>
         <button
           onClick={() => setCatalogOpen(true)}
           className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
         >
           <Plus className="h-3.5 w-3.5" />
-          Add Widget
+          {t("widget.addWidget")}
         </button>
         <button
           onClick={toggleEditMode}
-          aria-label={editMode ? "Exit edit mode" : "Enter edit mode"}
-          title={editMode ? "Exit edit mode (lock layout)" : "Edit layout (unlock drag/resize)"}
+          aria-label={editMode ? t("dashboard.editExitAria") : t("dashboard.editEnterAria")}
+          title={editMode ? t("dashboard.editExitTitle") : t("dashboard.editEnterTitle")}
           className={cn(
             "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-semibold transition-colors",
             editMode
@@ -61,17 +63,17 @@ export default function Dashboard() {
           )}
         >
           <Pencil className="h-3.5 w-3.5" />
-          {editMode ? "Done" : "Edit"}
+          {editMode ? t("dashboard.editExit") : t("dashboard.editEnter")}
         </button>
         <div className="flex items-center gap-1 rounded-md bg-muted p-0.5">
           {(
             [
-              ["Live", "live"],
-              ["1H", "1h"],
-              ["24H", "24h"],
-              ["7D", "7d"],
+              ["dashboard.rangeLive", "live"],
+              ["dashboard.range1h", "1h"],
+              ["dashboard.range24h", "24h"],
+              ["dashboard.range7d", "7d"],
             ] as const
-          ).map(([label, value]) => (
+          ).map(([labelKey, value]) => (
             <button
               key={value}
               onClick={() => setRange(value)}
@@ -82,7 +84,7 @@ export default function Dashboard() {
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
-              {label}
+              {t(labelKey)}
             </button>
           ))}
         </div>
@@ -93,16 +95,16 @@ export default function Dashboard() {
         ) : !hasServers ? (
           <EmptyState
             icon={Server}
-            title="No servers configured"
-            description="Add a server to start monitoring your hardware."
-            action={{ label: "Add a Server", onClick: () => navigate("/settings") }}
+            title={t("dashboard.noServersTitle")}
+            description={t("dashboard.noServersDescription")}
+            action={{ label: t("dashboard.addAServer"), onClick: () => navigate("/settings") }}
           />
         ) : (
           <EmptyState
             icon={LayoutGrid}
-            title="Your dashboard is empty"
-            description="Add widgets to build your personalized monitoring view."
-            action={{ label: "Add Your First Widget", onClick: () => setCatalogOpen(true) }}
+            title={t("dashboard.emptyTitle")}
+            description={t("dashboard.emptyDescription")}
+            action={{ label: t("dashboard.addFirstWidget"), onClick: () => setCatalogOpen(true) }}
           />
         )}
       </div>

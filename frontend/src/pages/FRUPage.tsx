@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { Header } from "@/components/layout/Header";
 import { useServerStore } from "@/stores/server-store";
 import { useSensorStore } from "@/stores/sensor-store";
+import { useBackendOnline } from "@/stores/connection-store";
 import { get, post } from "@/api/client";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -13,15 +16,15 @@ interface FRUData {
 }
 
 /** Strip ipmitool's "FRU Device Description :" noise and give common devices a friendly label. */
-function cleanSection(raw: string): string {
+function cleanSection(raw: string, t: TFunction): string {
   const s = raw.replace(/^FRU Device Description\s*:?\s*/i, "").trim();
-  if (/builtin fru device/i.test(s)) return "System Board";
+  if (/builtin fru device/i.test(s)) return t("fru.section.systemBoard");
   const ps = s.match(/^PS(\d+)/i);
-  if (ps) return `Power Supply ${ps[1]}`;
+  if (ps) return t("fru.section.powerSupply", { n: ps[1] });
   const bp = s.match(/^BP(\d+)/i);
-  if (bp) return `Backplane ${bp[1]}`;
-  if (/^PERC/i.test(s) || /storage cntlr/i.test(s)) return "Storage Controller";
-  if (/^NDC/i.test(s)) return "Network Daughter Card";
+  if (bp) return t("fru.section.backplane", { n: bp[1] });
+  if (/^PERC/i.test(s) || /storage cntlr/i.test(s)) return t("fru.section.storageController");
+  if (/^NDC/i.test(s)) return t("fru.section.networkDaughterCard");
   return s || raw;
 }
 
@@ -35,10 +38,12 @@ function pick(fields: { field: string; value: string }[], names: string[]): stri
 }
 
 export default function FRUPage() {
+  const { t } = useTranslation();
   const contextServerId = useServerStore((s) => s.contextServerId);
   const readings = useSensorStore((s) => (contextServerId ? s.readings[contextServerId] : undefined));
   const [data, setData] = useState<FRUData | null>(null);
   const [loading, setLoading] = useState(false);
+  const online = useBackendOnline();
 
   const loadFRU = async () => {
     if (!contextServerId) return;
@@ -54,9 +59,9 @@ export default function FRUPage() {
     try {
       await post(`/api/modules/fru/${contextServerId}/refresh`);
       await loadFRU();
-      toast.success("FRU data refreshed");
+      toast.success(t("fru.refreshed"));
     } catch {
-      toast.error("Failed to refresh FRU");
+      toast.error(t("fru.refreshFailed"));
     } finally {
       setLoading(false);
     }
@@ -66,7 +71,7 @@ export default function FRUPage() {
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
-    toast.success("Copied to clipboard");
+    toast.success(t("fru.copied"));
   };
 
   const sections = data?.sections || {};
@@ -101,9 +106,14 @@ export default function FRUPage() {
 
   return (
     <>
-      <Header title="Hardware">
-        <button onClick={refresh} disabled={loading} className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-muted">
-          <RefreshCw className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} /> Refresh
+      <Header title={t("nav.fru")}>
+        <button
+          onClick={refresh}
+          disabled={loading || !online}
+          title={!online ? t("header.backendDisconnected") : undefined}
+          className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <RefreshCw className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} /> {t("fru.refresh")}
         </button>
       </Header>
       <div className="flex-1 overflow-auto p-6">
@@ -111,14 +121,14 @@ export default function FRUPage() {
           !contextServerId ? (
             <EmptyState
               icon={ServerOff}
-              title="No server selected"
-              description="Select a server from the sidebar to inspect its hardware inventory."
+              title={t("fru.noServerTitle")}
+              description={t("fru.noServerDescription")}
             />
           ) : (
             <EmptyState
               icon={CircuitBoard}
-              title="No hardware data"
-              description="This server returned no FRU inventory. Check the BMC connection."
+              title={t("fru.noDataTitle")}
+              description={t("fru.noDataDescription")}
             />
           )
         ) : (
@@ -131,12 +141,12 @@ export default function FRUPage() {
                     <Server className="h-6 w-6 text-primary" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <h2 className="text-lg font-bold leading-tight">{summary.model || "Unknown system"}</h2>
+                    <h2 className="text-lg font-bold leading-tight">{summary.model || t("fru.unknownSystem")}</h2>
                     <p className="text-sm text-muted-foreground">{summary.vendor}</p>
                     <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-xs">
                       {summary.serviceTag && (
                         <div className="flex items-center gap-1.5">
-                          <span className="text-muted-foreground">Service tag</span>
+                          <span className="text-muted-foreground">{t("fru.serviceTag")}</span>
                           <span className="font-mono font-medium">{summary.serviceTag}</span>
                           <button onClick={() => copyToClipboard(summary.serviceTag!)} className="rounded p-0.5 hover:bg-muted">
                             <Copy className="h-3 w-3 text-muted-foreground" />
@@ -145,14 +155,16 @@ export default function FRUPage() {
                       )}
                       {summary.assetTag && (
                         <div className="flex items-center gap-1.5">
-                          <span className="text-muted-foreground">Asset tag</span>
+                          <span className="text-muted-foreground">{t("fru.assetTag")}</span>
                           <span className="font-mono font-medium">{summary.assetTag}</span>
                         </div>
                       )}
                       <div className="flex items-center gap-1.5">
                         <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
-                        <span className="text-muted-foreground">CPUs detected</span>
-                        <span className="font-medium">{cpuCount > 0 ? cpuCount : "—"}</span>
+                        <span className="text-muted-foreground">{t("fru.cpusDetected")}</span>
+                        {/* Inferred from live sensor readings — when offline that count
+                            would be the LAST seen, so we render an em dash instead. */}
+                        <span className="font-medium">{online && cpuCount > 0 ? cpuCount : "—"}</span>
                       </div>
                     </div>
                   </div>
@@ -164,10 +176,7 @@ export default function FRUPage() {
             <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
               <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               <p>
-                CPU model and memory (RAM) details are not exposed over IPMI/FRU — the BMC reports
-                board, power, storage and network inventory only. Full CPU/DIMM specs require the
-                iDRAC Redfish API (not yet integrated). CPU count above is inferred from per-CPU
-                temperature sensors.
+                {t("fru.capabilityNote")}
               </p>
             </div>
 
@@ -175,7 +184,7 @@ export default function FRUPage() {
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
               {Object.entries(sections).map(([section, fields]) => (
                 <div key={section} className="rounded-lg border border-border bg-card p-5">
-                  <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">{cleanSection(section)}</h3>
+                  <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">{cleanSection(section, t)}</h3>
                   <div className="space-y-2">
                     {fields.map((f, i) => (
                       <div key={i} className="flex items-center justify-between gap-4">
@@ -197,7 +206,8 @@ export default function FRUPage() {
 
             {data?.fetched_at && (
               <p className="text-xs text-muted-foreground">
-                Last updated: {new Date(data.fetched_at).toLocaleString()}
+                {/* Label is translated here; the date VALUE formatting is Plan 04's scope. */}
+                {t("fru.lastUpdated", { value: new Date(data.fetched_at).toLocaleString() })}
               </p>
             )}
           </div>

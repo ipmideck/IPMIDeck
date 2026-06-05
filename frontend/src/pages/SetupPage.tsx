@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { post, get } from "@/api/client";
 import { useServerStore } from "@/stores/server-store";
 import { useAuthStore } from "@/stores/auth-store";
@@ -17,17 +18,22 @@ import {
   Lock,
 } from "lucide-react";
 
-const STEPS = ["Welcome", "Auth Setup", "Add Server", "Done"];
+// Step + vendor metadata: only stable keys/codes live at module load. The displayed
+// labels are resolved via t() INSIDE the component so they re-render on language change.
+const STEP_KEYS = ["welcome", "authSetup", "addServer", "done"] as const;
 
 const VENDORS = [
-  { value: "supermicro", label: "Supermicro" },
-  { value: "dell", label: "Dell iDRAC" },
-  { value: "hp", label: "HP iLO" },
-  { value: "generic", label: "Generic IPMI" },
+  { value: "supermicro", labelKey: "setup.vendors.supermicro" },
+  { value: "dell", labelKey: "setup.vendors.dell" },
+  { value: "hp", labelKey: "setup.vendors.hp" },
+  { value: "generic", labelKey: "setup.vendors.generic" },
 ];
 
 export default function SetupPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
+  // STEPS resolved in render so step labels update on language change.
+  const STEPS = STEP_KEYS.map((k) => t(`setup.steps.${k}`));
   const setServers = useServerStore((s) => s.setServers);
   const setContextServer = useServerStore((s) => s.setContextServer);
   const [step, setStep] = useState(0);
@@ -65,12 +71,12 @@ export default function SetupPage() {
       if (requireLogin) {
         // D-03: create user (issues a session cookie) -> continue authenticated.
         if (!username.trim() || !password.trim()) {
-          setAuthError("Username and password are required.");
+          setAuthError(t("setup.auth.credentialsRequired"));
           setAuthLoading(false);
           return;
         }
         if (password !== passwordConfirm) {
-          setAuthError("Passwords do not match.");
+          setAuthError(t("setup.auth.passwordsDoNotMatch"));
           setAuthLoading(false);
           return;
         }
@@ -97,7 +103,7 @@ export default function SetupPage() {
       }
       setStep(2);
     } catch (e: any) {
-      setAuthError(e.message || "Failed to apply authentication setting.");
+      setAuthError(e.message || t("setup.auth.applyFailed"));
     } finally {
       setAuthLoading(false);
     }
@@ -105,7 +111,7 @@ export default function SetupPage() {
 
   async function handleAddServer() {
     if (!serverName.trim() || !serverHost.trim()) {
-      setServerError("Name and host are required.");
+      setServerError(t("setup.server.nameHostRequired"));
       return;
     }
     setServerLoading(true);
@@ -127,7 +133,7 @@ export default function SetupPage() {
       }
       setStep(3);
     } catch (e: any) {
-      setServerError(e.message || "Failed to add server.");
+      setServerError(e.message || t("setup.server.addFailed"));
     } finally {
       setServerLoading(false);
     }
@@ -135,7 +141,7 @@ export default function SetupPage() {
 
   async function handleTestConnection() {
     if (!serverHost.trim()) {
-      setServerError("Enter a host first.");
+      setServerError(t("setup.server.hostFirst"));
       return;
     }
     setTestLoading(true);
@@ -162,7 +168,7 @@ export default function SetupPage() {
       {/* Stepper */}
       <div className="mx-auto flex w-full max-w-2xl items-center justify-center gap-2 px-6 pt-10 pb-6">
         {STEPS.map((label, i) => (
-          <div key={label} className="flex items-center gap-2">
+          <div key={i} className="flex items-center gap-2">
             <div
               className={cn(
                 "flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold transition-colors",
@@ -196,17 +202,15 @@ export default function SetupPage() {
             <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-primary/10">
               <MonitorCog className="h-10 w-10 text-primary" />
             </div>
-            <h1 className="text-2xl font-bold">Welcome to IPMILink</h1>
+            <h1 className="text-2xl font-bold">{t("setup.welcomeTitle")}</h1>
             <p className="mt-3 max-w-sm text-sm leading-relaxed text-muted-foreground">
-              IPMILink lets you monitor and manage your servers via IPMI from a
-              single, beautiful dashboard. Let's get you set up in a few quick
-              steps.
+              {t("setup.welcomeBody")}
             </p>
             <button
               onClick={() => setStep(1)}
               className="mt-8 inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
             >
-              Get Started
+              {t("setup.getStarted")}
               <ChevronRight className="h-4 w-4" />
             </button>
           </div>
@@ -218,11 +222,9 @@ export default function SetupPage() {
             <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 ring-1 ring-primary/20">
               <ShieldCheck className="h-8 w-8 text-primary" />
             </div>
-            <h1 className="text-2xl font-bold tracking-tight">Require login?</h1>
+            <h1 className="text-2xl font-bold tracking-tight">{t("setup.auth.title")}</h1>
             <p className="mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">
-              Choose whether IPMILink is protected by a username and password, or
-              left open to anyone on your network. You can change this later in
-              Settings.
+              {t("setup.auth.subtitle")}
             </p>
 
             <div className="mt-7 w-full max-w-md space-y-3 text-left">
@@ -250,10 +252,10 @@ export default function SetupPage() {
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm font-semibold text-foreground">
-                    Yes — require login
+                    {t("setup.auth.yesTitle")}
                   </span>
                   <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
-                    Protect the dashboard with a username and password.
+                    {t("setup.auth.yesDescription")}
                   </span>
                 </span>
                 <span
@@ -292,10 +294,10 @@ export default function SetupPage() {
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm font-semibold text-foreground">
-                    No — open access
+                    {t("setup.auth.noTitle")}
                   </span>
                   <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
-                    Anyone on your LAN can use IPMILink without logging in.
+                    {t("setup.auth.noDescription")}
                   </span>
                 </span>
                 <span
@@ -314,13 +316,13 @@ export default function SetupPage() {
               {requireLogin && (
                 <div className="space-y-3 rounded-xl border border-border/60 bg-muted/30 p-4">
                   <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Your credentials
+                    {t("setup.auth.yourCredentials")}
                   </p>
                   <div className="relative">
                     <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <input
                       type="text"
-                      placeholder="Username"
+                      placeholder={t("setup.auth.usernamePlaceholder")}
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
                       className="w-full rounded-lg border border-border bg-card py-2 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
@@ -330,7 +332,7 @@ export default function SetupPage() {
                     <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <input
                       type="password"
-                      placeholder="Password"
+                      placeholder={t("setup.auth.passwordPlaceholder")}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       className="w-full rounded-lg border border-border bg-card py-2 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
@@ -340,7 +342,7 @@ export default function SetupPage() {
                     <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <input
                       type="password"
-                      placeholder="Confirm password"
+                      placeholder={t("setup.auth.confirmPasswordPlaceholder")}
                       value={passwordConfirm}
                       onChange={(e) => setPasswordConfirm(e.target.value)}
                       className={cn(
@@ -352,7 +354,7 @@ export default function SetupPage() {
                     />
                   </div>
                   {password && passwordConfirm && password !== passwordConfirm && (
-                    <p className="text-xs text-red-500">Passwords do not match.</p>
+                    <p className="text-xs text-red-500">{t("setup.auth.passwordsDoNotMatch")}</p>
                   )}
                 </div>
               )}
@@ -370,7 +372,7 @@ export default function SetupPage() {
                 className="inline-flex items-center gap-1 rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
               >
                 <ChevronLeft className="h-4 w-4" />
-                Back
+                {t("common.back")}
               </button>
               <button
                 onClick={handleAuthStep}
@@ -378,7 +380,7 @@ export default function SetupPage() {
                 className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-50"
               >
                 {authLoading && <Loader2 className="h-4 w-4 animate-spin" />}
-                Continue
+                {t("common.continue")}
                 <ChevronRight className="h-4 w-4" />
               </button>
             </div>
@@ -391,19 +393,19 @@ export default function SetupPage() {
             <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
               <Server className="h-8 w-8 text-primary" />
             </div>
-            <h1 className="text-xl font-bold">Add Your First Server</h1>
+            <h1 className="text-xl font-bold">{t("setup.server.title")}</h1>
             <p className="mt-2 max-w-sm text-sm text-muted-foreground">
-              Enter the IPMI/BMC connection details for your server.
+              {t("setup.server.subtitle")}
             </p>
 
             <div className="mt-6 w-full max-w-xs space-y-3 text-left">
               <div>
                 <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                  Server Name
+                  {t("setup.server.name")}
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. TrueNAS"
+                  placeholder={t("setup.server.namePlaceholder")}
                   value={serverName}
                   onChange={(e) => setServerName(e.target.value)}
                   className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
@@ -412,11 +414,11 @@ export default function SetupPage() {
               <div className="flex gap-2">
                 <div className="flex-1">
                   <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                    Host / IP
+                    {t("setup.server.host")}
                   </label>
                   <input
                     type="text"
-                    placeholder="192.0.2.20"
+                    placeholder={t("setup.server.hostPlaceholder")}
                     value={serverHost}
                     onChange={(e) => setServerHost(e.target.value)}
                     className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
@@ -424,7 +426,7 @@ export default function SetupPage() {
                 </div>
                 <div className="w-20">
                   <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                    Port
+                    {t("setup.server.port")}
                   </label>
                   <input
                     type="number"
@@ -436,7 +438,7 @@ export default function SetupPage() {
               </div>
               <div>
                 <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                  IPMI Username
+                  {t("setup.server.username")}
                 </label>
                 <input
                   type="text"
@@ -447,7 +449,7 @@ export default function SetupPage() {
               </div>
               <div>
                 <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                  IPMI Password
+                  {t("setup.server.password")}
                 </label>
                 <input
                   type="password"
@@ -458,7 +460,7 @@ export default function SetupPage() {
               </div>
               <div>
                 <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                  Vendor
+                  {t("setup.server.vendor")}
                 </label>
                 <select
                   value={serverVendor}
@@ -467,7 +469,7 @@ export default function SetupPage() {
                 >
                   {VENDORS.map((v) => (
                     <option key={v.value} value={v.value}>
-                      {v.label}
+                      {t(v.labelKey)}
                     </option>
                   ))}
                 </select>
@@ -479,12 +481,12 @@ export default function SetupPage() {
 
               {testResult === "success" && (
                 <p className="text-xs text-emerald-500">
-                  Connection successful!
+                  {t("setup.server.testSuccess")}
                 </p>
               )}
               {testResult === "fail" && (
                 <p className="text-xs text-red-500">
-                  Connection failed. Check your details and try again.
+                  {t("setup.server.testFail")}
                 </p>
               )}
             </div>
@@ -495,7 +497,7 @@ export default function SetupPage() {
                 className="inline-flex items-center gap-1 rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
               >
                 <ChevronLeft className="h-4 w-4" />
-                Back
+                {t("common.back")}
               </button>
               <button
                 onClick={handleTestConnection}
@@ -503,7 +505,7 @@ export default function SetupPage() {
                 className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
               >
                 {testLoading && <Loader2 className="h-4 w-4 animate-spin" />}
-                Test Connection
+                {t("common.testConnection")}
               </button>
               <button
                 onClick={handleAddServer}
@@ -511,7 +513,7 @@ export default function SetupPage() {
                 className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
               >
                 {serverLoading && <Loader2 className="h-4 w-4 animate-spin" />}
-                Add Server
+                {t("setup.server.addServer")}
                 <ChevronRight className="h-4 w-4" />
               </button>
             </div>
@@ -524,16 +526,15 @@ export default function SetupPage() {
             <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-emerald-500/10">
               <CheckCircle2 className="h-10 w-10 text-emerald-500" />
             </div>
-            <h1 className="text-2xl font-bold">You're all set!</h1>
+            <h1 className="text-2xl font-bold">{t("setup.done.title")}</h1>
             <p className="mt-3 max-w-sm text-sm leading-relaxed text-muted-foreground">
-              IPMILink is ready. Your server has been added and will start
-              polling for sensor data shortly.
+              {t("setup.done.body")}
             </p>
             <button
               onClick={() => navigate("/")}
               className="mt-8 inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
             >
-              Go to Dashboard
+              {t("setup.done.goToDashboard")}
               <ChevronRight className="h-4 w-4" />
             </button>
           </div>

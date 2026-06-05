@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { get, post } from "@/api/client";
 import { useAuthStore } from "@/stores/auth-store";
 import { bootstrapAppData } from "@/lib/bootstrap";
 import { Lock, LogIn, Loader2 } from "lucide-react";
 
 export default function LoginPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -60,11 +62,11 @@ export default function LoginPage() {
       } else {
         // Backend already returns generic invalid/lockout text (Phase 1 D-04) — use verbatim,
         // never rephrase or special-case so username existence is not leaked.
-        setError(res.error || "Login failed.");
+        setError(res.error || t("login.failed"));
         setLoading(false);
       }
     } catch {
-      setError("Login failed. Please try again.");
+      setError(t("login.failedRetry"));
       setLoading(false);
     }
   }
@@ -76,16 +78,16 @@ export default function LoginPage() {
           <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
             <Lock className="h-8 w-8 text-primary" />
           </div>
-          <h1 className="text-xl font-bold">Sign in to IPMILink</h1>
+          <h1 className="text-xl font-bold">{t("login.title")}</h1>
           <p className="mt-2 max-w-sm text-sm text-muted-foreground">
-            Enter your credentials to access the dashboard.
+            {t("login.subtitle")}
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="mt-6 w-full space-y-3">
           <input
             type="text"
-            placeholder="Username"
+            placeholder={t("login.usernamePlaceholder")}
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             autoComplete="username"
@@ -94,7 +96,7 @@ export default function LoginPage() {
           />
           <input
             type="password"
-            placeholder="Password"
+            placeholder={t("login.passwordPlaceholder")}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             autoComplete="current-password"
@@ -111,7 +113,7 @@ export default function LoginPage() {
             ) : (
               <LogIn className="h-4 w-4" />
             )}
-            Sign In
+            {t("login.signIn")}
           </button>
         </form>
       </div>

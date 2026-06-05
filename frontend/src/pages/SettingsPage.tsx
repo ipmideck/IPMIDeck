@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation, Trans } from "react-i18next";
 import { Header } from "@/components/layout/Header";
 import { useServerStore, type Server } from "@/stores/server-store";
 import { useThemeStore } from "@/stores/theme-store";
@@ -11,6 +12,7 @@ import { Plus, Trash2, TestTube, Pencil, ExternalLink, Heart, Code2, Moon, Sun, 
 import { EmptyState } from "@/components/common/EmptyState";
 
 export default function SettingsPage() {
+  const { t } = useTranslation();
   const { servers, setServers } = useServerStore();
   const { theme, setTheme } = useThemeStore();
   const [showForm, setShowForm] = useState(false);
@@ -38,7 +40,7 @@ export default function SettingsPage() {
   // WS is down so the user doesn't fire requests that will hang (and so an auth-toggle
   // while offline can't leave the user locked out of an unreachable backend).
   const online = useBackendOnline();
-  const offlineTip = online ? undefined : "Backend disconnected";
+  const offlineTip = online ? undefined : t("header.backendDisconnected");
 
   const loadServers = async () => {
     try {
@@ -51,7 +53,7 @@ export default function SettingsPage() {
 
   const addServer = async () => {
     if (!form.host || !form.username || !form.password) {
-      toast.error("Host, username, and password are required");
+      toast.error(t("settings.credentialsRequired"));
       return;
     }
     try {
@@ -64,23 +66,23 @@ export default function SettingsPage() {
         vendor: form.vendor,
       });
       if (res.success) {
-        toast.success("Server added");
+        toast.success(t("settings.serverAdded"));
         setForm({ name: "", description: "", host: "", username: "", password: "", vendor: "dell" });
         setShowForm(false);
         await loadServers();
       }
     } catch {
-      toast.error("Failed to add server");
+      toast.error(t("settings.serverAddFailed"));
     }
   };
 
   const deleteServer = async (id: string) => {
     try {
       await del(`/api/servers/${id}`);
-      toast.success("Server removed");
+      toast.success(t("settings.serverRemoved"));
       await loadServers();
     } catch {
-      toast.error("Failed to delete server");
+      toast.error(t("settings.serverDeleteFailed"));
     }
   };
 
@@ -89,13 +91,13 @@ export default function SettingsPage() {
     try {
       const res = await post<{ success: boolean; power_status?: string; error?: string }>(`/api/servers/${id}/test`);
       if (res.success) {
-        toast.success(`Connection OK — power ${res.power_status}`);
+        toast.success(t("settings.testOk", { status: res.power_status }));
         await loadServers();
       } else {
-        toast.error(res.error || "Connection failed");
+        toast.error(res.error || t("settings.connectionFailed"));
       }
     } catch {
-      toast.error("Connection failed");
+      toast.error(t("settings.connectionFailed"));
     } finally {
       setTesting(null);
     }
@@ -118,7 +120,7 @@ export default function SettingsPage() {
 
   const saveEdit = async (id: string) => {
     if (!editForm.host.trim()) {
-      toast.error("Host is required");
+      toast.error(t("settings.hostRequired"));
       return;
     }
     // server_id is NEVER sent (D-13). Omit blank username/password so the
@@ -133,11 +135,11 @@ export default function SettingsPage() {
     if (editForm.password.trim()) payload.password = editForm.password;
     try {
       await put(`/api/servers/${id}`, payload);
-      toast.success("Server updated");
+      toast.success(t("settings.serverUpdated"));
       setEditingId(null);
       await loadServers();
     } catch {
-      toast.error("Failed to update server");
+      toast.error(t("settings.serverUpdateFailed"));
     }
   };
 
@@ -146,11 +148,11 @@ export default function SettingsPage() {
   // A session-expiry 401 here is handled by the global interceptor (REVIEWS #6).
   const enableAuth = async () => {
     if (!secUsername.trim() || !secPassword.trim()) {
-      toast.error("Username and password are required");
+      toast.error(t("settings.usernamePasswordRequired"));
       return;
     }
     if (secPassword !== secPasswordConfirm) {
-      toast.error("Passwords do not match");
+      toast.error(t("settings.passwordsDoNotMatch"));
       return;
     }
     setSecBusy(true);
@@ -160,9 +162,9 @@ export default function SettingsPage() {
       setSecUsername("");
       setSecPassword("");
       setSecPasswordConfirm("");
-      toast.success("Authentication enabled");
+      toast.success(t("settings.authEnabledToast"));
     } catch {
-      toast.error("Failed to enable authentication");
+      toast.error(t("settings.authEnableFailed"));
     } finally {
       setSecBusy(false);
     }
@@ -174,7 +176,7 @@ export default function SettingsPage() {
   // valid until logout / expiry; the backend just stops enforcing auth.
   const disableAuth = async () => {
     if (!secCurrentPassword.trim()) {
-      toast.error("Current password is required");
+      toast.error(t("settings.currentPasswordRequired"));
       return;
     }
     setSecBusy(true);
@@ -184,15 +186,15 @@ export default function SettingsPage() {
         { enabled: false, current_password: secCurrentPassword }
       );
       if (!res.success) {
-        toast.error(res.error || "Failed to disable authentication");
+        toast.error(res.error || t("settings.authDisableFailed"));
         return;
       }
       useAuthStore.setState({ authEnabled: false }); // user row KEPT (D-10); hasUser stays true
       setSecDisableConfirm(false);
       setSecCurrentPassword("");
-      toast.success("Authentication disabled");
+      toast.success(t("settings.authDisabledToast"));
     } catch {
-      toast.error("Failed to disable authentication");
+      toast.error(t("settings.authDisableFailed"));
     } finally {
       setSecBusy(false);
     }
@@ -214,48 +216,48 @@ export default function SettingsPage() {
 
   return (
     <>
-      <Header title="Settings" />
+      <Header title={t("nav.settings")} />
       <div className="flex-1 overflow-auto p-6">
         <div className="mx-auto max-w-2xl space-y-6">
 
           {/* Servers */}
           <div className="rounded-lg border border-border bg-card p-5">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Servers</h2>
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">{t("settings.servers")}</h2>
               <button
                 onClick={openAddForm}
                 disabled={!online}
                 title={offlineTip}
                 className="flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <Plus className="h-3 w-3" /> Add
+                <Plus className="h-3 w-3" /> {t("settings.add")}
               </button>
             </div>
 
             {showForm && (
               <div className="mb-4 space-y-3 rounded-md border border-border bg-muted/50 p-4">
                 <div className="grid grid-cols-2 gap-3">
-                  <input placeholder="Name (e.g., Dell R720)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm" />
-                  <input placeholder="Description (optional)" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm" />
-                  <input placeholder="BMC IP (e.g., 192.0.2.10)" value={form.host} onChange={(e) => setForm({ ...form, host: e.target.value })} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm" />
+                  <input placeholder={t("settings.namePlaceholder")} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm" />
+                  <input placeholder={t("settings.descriptionPlaceholder")} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm" />
+                  <input placeholder={t("settings.hostPlaceholder")} value={form.host} onChange={(e) => setForm({ ...form, host: e.target.value })} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm" />
                   <select value={form.vendor} onChange={(e) => setForm({ ...form, vendor: e.target.value })} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm">
-                    <option value="dell">Dell</option>
-                    <option value="supermicro">Supermicro</option>
-                    <option value="hpe">HPE</option>
-                    <option value="generic">Generic</option>
+                    <option value="dell">{t("settings.vendorDell")}</option>
+                    <option value="supermicro">{t("settings.vendorSupermicro")}</option>
+                    <option value="hpe">{t("settings.vendorHpe")}</option>
+                    <option value="generic">{t("settings.vendorGeneric")}</option>
                   </select>
-                  <input placeholder="IPMI Username" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm" />
-                  <input type="password" placeholder="IPMI Password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-mono" />
+                  <input placeholder={t("settings.usernamePlaceholder")} value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm" />
+                  <input type="password" placeholder={t("settings.passwordPlaceholder")} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-mono" />
                 </div>
                 <div className="flex justify-end gap-2">
-                  <button onClick={() => setShowForm(false)} className="rounded-md px-3 py-1.5 text-xs hover:bg-muted">Cancel</button>
+                  <button onClick={() => setShowForm(false)} className="rounded-md px-3 py-1.5 text-xs hover:bg-muted">{t("settings.cancel")}</button>
                   <button
                     onClick={addServer}
                     disabled={!online}
                     title={offlineTip}
                     className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    Add Server
+                    {t("settings.addServer")}
                   </button>
                 </div>
               </div>
@@ -264,9 +266,9 @@ export default function SettingsPage() {
             {servers.length === 0 ? (
               <EmptyState
                 icon={ServerIcon}
-                title="No servers configured"
-                description="Add one to start monitoring."
-                action={{ label: "Add a Server", onClick: () => { setEditingId(null); setShowForm(true); } }}
+                title={t("settings.noServersTitle")}
+                description={t("settings.noServersDescription")}
+                action={{ label: t("settings.addAServer"), onClick: () => { setEditingId(null); setShowForm(true); } }}
                 className="py-12"
               />
             ) : (
@@ -280,14 +282,14 @@ export default function SettingsPage() {
                         <div className="font-mono text-xs text-muted-foreground">{s.host}</div>
                       </div>
                       <div className="flex gap-1">
-                        <button onClick={() => startEdit(s)} aria-label="Edit server" className="rounded-md border border-border p-1.5 hover:bg-muted">
+                        <button onClick={() => startEdit(s)} aria-label={t("settings.aria.editServer")} className="rounded-md border border-border p-1.5 hover:bg-muted">
                           <Pencil className="h-3.5 w-3.5" />
                         </button>
                         <button
                           onClick={() => testServer(s.id)}
                           disabled={testing === s.id || !online}
                           title={offlineTip}
-                          aria-label="Test connection"
+                          aria-label={t("settings.aria.testConnection")}
                           className="rounded-md border border-border p-1.5 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           <TestTube className={cn("h-3.5 w-3.5", testing === s.id && "animate-spin")} />
@@ -296,7 +298,7 @@ export default function SettingsPage() {
                           onClick={() => deleteServer(s.id)}
                           disabled={!online}
                           title={offlineTip}
-                          aria-label="Delete server"
+                          aria-label={t("settings.aria.deleteServer")}
                           className="rounded-md border border-border p-1.5 hover:bg-muted text-red-500 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
@@ -307,27 +309,27 @@ export default function SettingsPage() {
                     {editingId === s.id && (
                       <div className="mt-2 space-y-3 rounded-md border border-border bg-muted/50 p-4">
                         <div className="grid grid-cols-2 gap-3">
-                          <input placeholder="Name (e.g., Dell R720)" value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm" />
-                          <input placeholder="Description (optional)" value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm" />
-                          <input placeholder="BMC IP (e.g., 192.0.2.10)" value={editForm.host} onChange={(e) => setEditForm({ ...editForm, host: e.target.value })} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm" />
+                          <input placeholder={t("settings.namePlaceholder")} value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm" />
+                          <input placeholder={t("settings.descriptionPlaceholder")} value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm" />
+                          <input placeholder={t("settings.hostPlaceholder")} value={editForm.host} onChange={(e) => setEditForm({ ...editForm, host: e.target.value })} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm" />
                           <select value={editForm.vendor} onChange={(e) => setEditForm({ ...editForm, vendor: e.target.value })} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm">
-                            <option value="dell">Dell</option>
-                            <option value="supermicro">Supermicro</option>
-                            <option value="hpe">HPE</option>
-                            <option value="generic">Generic</option>
+                            <option value="dell">{t("settings.vendorDell")}</option>
+                            <option value="supermicro">{t("settings.vendorSupermicro")}</option>
+                            <option value="hpe">{t("settings.vendorHpe")}</option>
+                            <option value="generic">{t("settings.vendorGeneric")}</option>
                           </select>
-                          <input placeholder="Username (leave blank to keep current)" value={editForm.username} onChange={(e) => setEditForm({ ...editForm, username: e.target.value })} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm" />
-                          <input type="password" placeholder="Password (leave blank to keep current)" value={editForm.password} onChange={(e) => setEditForm({ ...editForm, password: e.target.value })} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-mono" />
+                          <input placeholder={t("settings.editUsernamePlaceholder")} value={editForm.username} onChange={(e) => setEditForm({ ...editForm, username: e.target.value })} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm" />
+                          <input type="password" placeholder={t("settings.editPasswordPlaceholder")} value={editForm.password} onChange={(e) => setEditForm({ ...editForm, password: e.target.value })} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-mono" />
                         </div>
                         <div className="flex justify-end gap-2">
-                          <button onClick={() => setEditingId(null)} className="rounded-md px-3 py-1.5 text-xs hover:bg-muted">Discard Changes</button>
+                          <button onClick={() => setEditingId(null)} className="rounded-md px-3 py-1.5 text-xs hover:bg-muted">{t("settings.discardChanges")}</button>
                           <button
                             onClick={() => saveEdit(s.id)}
                             disabled={!online}
                             title={offlineTip}
                             className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            Save Changes
+                            {t("settings.saveChanges")}
                           </button>
                         </div>
                       </div>
@@ -346,12 +348,12 @@ export default function SettingsPage() {
               ) : (
                 <ShieldOff className="h-4 w-4 text-muted-foreground" />
               )}
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Security</h2>
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">{t("settings.security")}</h2>
             </div>
 
             {authEnabled ? (
               <div className="space-y-3">
-                <p className="text-sm text-muted-foreground">Authentication is enabled.</p>
+                <p className="text-sm text-muted-foreground">{t("settings.authEnabledLabel")}</p>
                 {!secDisableConfirm ? (
                   <button
                     onClick={() => setSecDisableConfirm(true)}
@@ -359,17 +361,16 @@ export default function SettingsPage() {
                     title={offlineTip}
                     className="rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    Disable Authentication
+                    {t("settings.disableAuth")}
                   </button>
                 ) : (
                   <div className="rounded-md border border-red-500/30 bg-red-500/5 p-3 space-y-3">
                     <p className="text-xs text-muted-foreground">
-                      Enter your current password to confirm. The dashboard will become open
-                      to anyone on your network until you re-enable authentication.
+                      {t("settings.disableConfirmText")}
                     </p>
                     <input
                       type="password"
-                      placeholder="Current password"
+                      placeholder={t("settings.currentPasswordPlaceholder")}
                       value={secCurrentPassword}
                       onChange={(e) => setSecCurrentPassword(e.target.value)}
                       onKeyDown={(e) => { if (e.key === "Enter") disableAuth(); }}
@@ -382,7 +383,7 @@ export default function SettingsPage() {
                         disabled={secBusy}
                         className="flex-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted disabled:opacity-50"
                       >
-                        Cancel
+                        {t("settings.cancel")}
                       </button>
                       <button
                         onClick={disableAuth}
@@ -390,30 +391,30 @@ export default function SettingsPage() {
                         title={offlineTip}
                         className="flex-1 rounded-md bg-red-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        {secBusy ? "Disabling…" : "Confirm disable"}
+                        {secBusy ? t("settings.disabling") : t("settings.confirmDisable")}
                       </button>
                     </div>
                   </div>
                 )}
                 <p className="text-xs text-muted-foreground">
-                  Enabling again will require setting a new username and password.
+                  {t("settings.reEnableNote")}
                 </p>
               </div>
             ) : (
               <div className="space-y-3">
                 <p className="text-sm text-muted-foreground">
-                  Authentication is disabled — the dashboard is open on your network.
+                  {t("settings.authDisabledLabel")}
                 </p>
                 <div className="grid grid-cols-2 gap-3">
                   <input
-                    placeholder="Username"
+                    placeholder={t("settings.secUsernamePlaceholder")}
                     value={secUsername}
                     onChange={(e) => setSecUsername(e.target.value)}
                     className="rounded-md border border-border bg-background px-3 py-1.5 text-sm"
                   />
                   <input
                     type="password"
-                    placeholder="Password"
+                    placeholder={t("settings.secPasswordPlaceholder")}
                     value={secPassword}
                     onChange={(e) => setSecPassword(e.target.value)}
                     className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-mono"
@@ -421,7 +422,7 @@ export default function SettingsPage() {
                 </div>
                 <input
                   type="password"
-                  placeholder="Confirm password"
+                  placeholder={t("settings.confirmPasswordPlaceholder")}
                   value={secPasswordConfirm}
                   onChange={(e) => setSecPasswordConfirm(e.target.value)}
                   className={cn(
@@ -432,7 +433,7 @@ export default function SettingsPage() {
                   )}
                 />
                 {secPassword && secPasswordConfirm && secPassword !== secPasswordConfirm && (
-                  <p className="text-xs text-red-500">Passwords do not match.</p>
+                  <p className="text-xs text-red-500">{t("settings.passwordsDoNotMatch")}</p>
                 )}
                 <button
                   onClick={enableAuth}
@@ -440,7 +441,7 @@ export default function SettingsPage() {
                   title={offlineTip}
                   className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Enable Authentication
+                  {t("settings.enableAuth")}
                 </button>
               </div>
             )}
@@ -448,12 +449,12 @@ export default function SettingsPage() {
 
           {/* Appearance */}
           <div className="rounded-lg border border-border bg-card p-5">
-            <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground">Appearance</h2>
+            <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground">{t("settings.appearance")}</h2>
             <div className="flex gap-2">
               {[
-                { value: "dark" as const, label: "Dark", icon: Moon },
-                { value: "light" as const, label: "Light", icon: Sun },
-                { value: "system" as const, label: "System", icon: Monitor },
+                { value: "dark" as const, label: t("settings.themeDark"), icon: Moon },
+                { value: "light" as const, label: t("settings.themeLight"), icon: Sun },
+                { value: "system" as const, label: t("settings.themeSystem"), icon: Monitor },
               ].map((opt) => (
                 <button
                   key={opt.value}
@@ -472,10 +473,10 @@ export default function SettingsPage() {
 
           {/* About */}
           <div className="rounded-lg border border-border bg-card p-5">
-            <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground">About IPMILink</h2>
+            <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground">{t("settings.about")}</h2>
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Version</span>
+                <span className="text-sm text-muted-foreground">{t("settings.version")}</span>
                 <span className="font-mono text-sm">2.0.0-alpha.1</span>
               </div>
               <div className="border-t border-border" />
@@ -483,20 +484,22 @@ export default function SettingsPage() {
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-semibold">LT</div>
                 <div>
                   <p className="text-sm font-medium">Luigi Tanzillo</p>
-                  <p className="text-xs text-muted-foreground">Creator & Developer</p>
+                  <p className="text-xs text-muted-foreground">{t("settings.creatorRole")}</p>
                   <div className="mt-1.5 flex items-center gap-2">
                     <a href="https://github.com/dev-luigi" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground">
                       <Code2 className="h-3 w-3" /> dev-luigi <ExternalLink className="h-2.5 w-2.5" />
                     </a>
                     <a href="https://github.com/sponsors/dev-luigi" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded-md border border-pink-500/30 bg-pink-500/10 px-2 py-0.5 text-[11px] font-medium text-pink-400 transition-colors hover:bg-pink-500/20">
-                      <Heart className="h-3 w-3 fill-current" /> Sponsor <ExternalLink className="h-2.5 w-2.5" />
+                      <Heart className="h-3 w-3 fill-current" /> {t("settings.sponsor")} <ExternalLink className="h-2.5 w-2.5" />
                     </a>
                   </div>
                 </div>
               </div>
               <div className="border-t border-border" />
               <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                Made with <Heart className="h-3 w-3 text-red-500" /> for the homelab community
+                <Trans i18nKey="settings.about.madeWith">
+                  Made with <Heart className="h-3 w-3 text-red-500" /> for the homelab community
+                </Trans>
               </p>
             </div>
           </div>
