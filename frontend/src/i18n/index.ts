@@ -8,6 +8,33 @@ import resourcesToBackend from "i18next-resources-to-backend";
 import en from "./locales/en/translation.json";
 import { SUPPORTED_LNGS } from "./languages";
 
+/**
+ * Normalize a detected/cached language tag (navigator.language OR a stale
+ * localStorage value) to a SUPPORTED_LNGS code BEFORE i18next resolves it.
+ * Without this, `load: "currentOnly"` tries to load the exact regional tag
+ * (e.g. "it-IT") which has no catalog and falls back to English (GAP-I18N-01).
+ *
+ * Rules:
+ *  - lowercase the tag.
+ *  - Chinese: zh-TW / zh-Hant* -> "en" (Simplified-only per CONTEXT D-01/D-03;
+ *    Traditional Chinese is not a shipped catalog, so zh-TW falls back to en by
+ *    design). All other zh* (zh, zh-cn, zh-sg, zh-hans*) -> "zh-Hans".
+ *  - Otherwise take the primary subtag (before the first "-"); if it is in
+ *    SUPPORTED_LNGS return that base code; else fall back to "en".
+ */
+function convertDetectedLanguage(lng: string): string {
+  if (!lng) return "en";
+  const lower = lng.toLowerCase();
+  if (lower.startsWith("zh")) {
+    // Traditional Chinese is not shipped -> English by design.
+    if (lower.startsWith("zh-tw") || lower.startsWith("zh-hant")) return "en";
+    // zh / zh-cn / zh-sg / zh-hans* -> canonical Simplified code.
+    return "zh-Hans";
+  }
+  const primary = lower.split("-")[0];
+  return (SUPPORTED_LNGS as readonly string[]).includes(primary) ? primary : "en";
+}
+
 i18n
   .use(LanguageDetector)
   // Lazy-load every non-bundled language as a separate Vite chunk.
@@ -34,7 +61,18 @@ i18n
       order: ["localStorage", "navigator"],
       lookupLocalStorage: "ipmilink-language",
       caches: ["localStorage"],
+      convertDetectedLanguage,
     },
   });
+
+// Keep <html lang> in sync with the active language (a11y/SEO). Runs on every
+// change and once now for the initial resolved language.
+function syncHtmlLang(lng: string) {
+  if (typeof document !== "undefined") {
+    document.documentElement.lang = lng;
+  }
+}
+i18n.on("languageChanged", syncHtmlLang);
+syncHtmlLang(i18n.resolvedLanguage ?? i18n.language ?? "en");
 
 export default i18n;
