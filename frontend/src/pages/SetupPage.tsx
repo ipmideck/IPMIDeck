@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { post, get } from "@/api/client";
 import { useServerStore } from "@/stores/server-store";
 import { useAuthStore } from "@/stores/auth-store";
+import { LanguageSelect } from "@/components/LanguageSelect";
 import { cn } from "@/lib/utils";
 import {
   MonitorCog,
@@ -165,9 +166,14 @@ export default function SetupPage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
-      {/* Stepper */}
-      <div className="mx-auto flex w-full max-w-2xl items-center justify-center gap-2 px-6 pt-10 pb-6">
-        {STEPS.map((label, i) => (
+      {/* Stepper — relative wrapper so the language box can sit top-right on every step (D-09/D-10) */}
+      <div className="relative">
+        {/* Onboarding language box: detected default (i18next), correctable, switches the wizard immediately (D-09/D-10/D-12) */}
+        <div className="absolute right-6 top-10 z-10">
+          <LanguageSelect className="rounded-md border border-border bg-card px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50" />
+        </div>
+        <div className="mx-auto flex w-full max-w-2xl items-center justify-center gap-2 px-6 pt-10 pb-6">
+          {STEPS.map((label, i) => (
           <div key={i} className="flex items-center gap-2">
             <div
               className={cn(
@@ -191,7 +197,8 @@ export default function SetupPage() {
               <div className="mx-1 h-px w-8 bg-border sm:w-12" />
             )}
           </div>
-        ))}
+          ))}
+        </div>
       </div>
 
       {/* Content */}
