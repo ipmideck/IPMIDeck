@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Plus, Trash2, TestTube, Pencil, ExternalLink, Heart, Code2, Moon, Sun, Monitor, Server as ServerIcon, ShieldCheck, ShieldOff } from "lucide-react";
 import { EmptyState } from "@/components/common/EmptyState";
+import { LanguageSelect } from "@/components/LanguageSelect";
 
 export default function SettingsPage() {
   const { t } = useTranslation();
@@ -468,6 +469,11 @@ export default function SettingsPage() {
                   {opt.label}
                 </button>
               ))}
+            </div>
+            {/* Language switcher (D-11/D-12): native names, switchable anytime, applies immediately + persists via the i18next detector. */}
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <span className="text-sm font-medium">{t("settings.language")}</span>
+              <LanguageSelect className="rounded-md border border-border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
             </div>
           </div>
 
