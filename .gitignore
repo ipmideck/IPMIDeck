@@ -66,3 +66,7 @@ PRD.md
 
 # Temp files
 *.tmp
+
+# Throwaway demo-mode UAT scratch (isolated data dir + server log + helper scripts)
+_uat_data/
+_spa_copy.ps1
