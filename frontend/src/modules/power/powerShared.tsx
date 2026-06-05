@@ -21,6 +21,8 @@ import {
 } from "recharts";
 import { useSensorStore, type SensorReading } from "@/stores/sensor-store";
 import { sensorNamesForType } from "@/modules/sensors/sensorUtils";
+import { useRangeStore } from "@/stores/range-store";
+import { get } from "@/api/client";
 import i18n from "@/i18n";
 import { intlLocale } from "@/i18n/languages";
 
@@ -142,12 +144,14 @@ interface ChartPoint {
 }
 
 /**
- * Full recharts live chart for the picked power sensor. Same look-and-feel as the
- * temperature/fan chart in SensorChart (CartesianGrid + axes + tooltip + ResponsiveContainer)
- * so the user gets a consistent reading experience across widgets.
+ * Full recharts chart for the picked power sensor. Same look-and-feel and range
+ * behavior as SensorChart — subscribes to the global useRangeStore so toggling
+ * Live / 1H / 24H / 7D in the dashboard header updates the power chart too.
  *
- * Maintains its own live buffer (60 points, ~3s tick) — independent of the global
- * sparkline buffer so the X-axis time labels stay coherent.
+ * - range === "live": maintains a small in-memory buffer (60 points, ~3s tick)
+ *   sourced from the sensor store, identical to the previous behavior.
+ * - range !== "live": fetches /api/modules/sensors/{serverId}/history once on
+ *   range/sensor change, then refreshes every 15s (same cadence as SensorChart).
  */
 export function PowerLiveChart({
   serverId,
@@ -158,14 +162,22 @@ export function PowerLiveChart({
   sensorName: string | null;
   color?: string;
 }) {
-  const [data, setData] = useState<ChartPoint[]>([]);
+  const range = useRangeStore((s) => s.range);
+  const [liveData, setLiveData] = useState<ChartPoint[]>([]);
+  const [historyData, setHistoryData] = useState<ChartPoint[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const lastUpdateRef = useRef(0);
 
+  // ---- Live buffer (60-point rolling, 3s tick) — only when range is "live" ----
   useEffect(() => {
-    // Reset the buffer whenever we switch server or tracked sensor so the chart
-    // doesn't mix data from two different sources.
-    setData([]);
+    if (range !== "live") {
+      // Reset the live buffer when we leave live mode so toggling back to live
+      // starts fresh instead of showing stale points from a past session.
+      setLiveData([]);
+      return;
+    }
     if (!serverId || !sensorName) return;
+    setLiveData([]);
 
     const tick = () => {
       const r = useSensorStore.getState().readings[serverId];
@@ -181,7 +193,7 @@ export function PowerLiveChart({
       const timeStr = new Date().toLocaleTimeString(intlLocale(i18n.resolvedLanguage), {
         hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit",
       });
-      setData((prev) => [
+      setLiveData((prev) => [
         ...prev,
         { time: timeStr, value: typeof v === "number" ? v : null },
       ].slice(-60));
@@ -190,7 +202,49 @@ export function PowerLiveChart({
     tick(); // seed the first point right away
     const id = setInterval(tick, 3000);
     return () => clearInterval(id);
-  }, [serverId, sensorName]);
+  }, [serverId, sensorName, range]);
+
+  // ---- History fetch — only when range is NOT "live" ----
+  useEffect(() => {
+    if (range === "live") {
+      setHistoryData([]);
+      setHistoryLoading(false);
+      return;
+    }
+    if (!serverId || !sensorName) return;
+
+    let cancelled = false;
+    setHistoryData([]);
+    setHistoryLoading(true);
+
+    const toIso = (t: string) =>
+      /[zZ]|[+-]\d\d:?\d\d$/.test(t) ? t : t.replace(" ", "T") + "Z";
+
+    async function loadHistory() {
+      try {
+        const r = await get<{ data: { value: number; timestamp: string }[] }>(
+          `/api/modules/sensors/${serverId}/history?sensor_name=${encodeURIComponent(sensorName as string)}&range=${range}`
+        );
+        if (cancelled) return;
+        const points: ChartPoint[] = (r.data || []).map((pt) => ({
+          time: toIso(pt.timestamp),
+          value: pt.value,
+        }));
+        setHistoryData(points);
+      } catch {
+        if (!cancelled) setHistoryData([]);
+      } finally {
+        if (!cancelled) setHistoryLoading(false);
+      }
+    }
+
+    loadHistory();
+    const id = setInterval(loadHistory, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [serverId, sensorName, range]);
 
   if (!sensorName) {
     return (
@@ -199,7 +253,24 @@ export function PowerLiveChart({
       </div>
     );
   }
-  if (data.length < 2) {
+
+  const chartData = range === "live" ? liveData : historyData;
+
+  if (range !== "live" && historyLoading && historyData.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+        Loading…
+      </div>
+    );
+  }
+  if (range !== "live" && !historyLoading && historyData.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+        No data for this range
+      </div>
+    );
+  }
+  if (range === "live" && liveData.length < 2) {
     return (
       <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
         Waiting for data…
@@ -209,7 +280,7 @@ export function PowerLiveChart({
 
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <LineChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+      <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
         <CartesianGrid stroke="var(--color-border)" strokeDasharray="3 3" vertical={false} />
         <XAxis
           dataKey="time"
@@ -217,6 +288,13 @@ export function PowerLiveChart({
           tickLine={false}
           axisLine={false}
           interval="preserveStartEnd"
+          tickFormatter={(t: string) =>
+            range === "live"
+              ? t
+              : new Date(t).toLocaleTimeString(intlLocale(i18n.resolvedLanguage), {
+                  hour12: false, hour: "2-digit", minute: "2-digit",
+                })
+          }
         />
         <YAxis
           tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
