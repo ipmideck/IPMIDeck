@@ -1,4 +1,5 @@
 import React, { Component, type ReactNode } from "react";
+import i18n from "@/i18n";
 
 interface Props {
   children: ReactNode;
@@ -30,7 +31,7 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         <div className="flex min-h-screen items-center justify-center bg-background p-8">
           <div className="max-w-md rounded-lg border border-red-500/30 bg-red-500/10 p-6">
-            <h2 className="text-lg font-semibold text-red-500">Something went wrong</h2>
+            <h2 className="text-lg font-semibold text-red-500">{i18n.t("error.title")}</h2>
             <p className="mt-2 font-mono text-sm text-red-400">
               {this.state.error?.message}
             </p>
@@ -41,7 +42,7 @@ export class ErrorBoundary extends Component<Props, State> {
               }}
               className="mt-4 rounded-md bg-red-500 px-4 py-2 text-sm font-medium text-white hover:bg-red-600"
             >
-              Reload
+              {i18n.t("error.reload")}
             </button>
           </div>
         </div>
@@ -55,7 +56,7 @@ export class ErrorBoundary extends Component<Props, State> {
 export function WidgetErrorFallback({ error }: { error?: Error | null }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-1 text-xs text-red-400">
-      <span>Widget error</span>
+      <span>{i18n.t("error.widgetError")}</span>
       {error?.message && (
         <span className="max-w-full truncate px-2 text-[10px] text-red-400/70">{error.message}</span>
       )}

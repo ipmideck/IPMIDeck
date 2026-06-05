@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -29,6 +30,7 @@ export function SensorFilterMenu({
   onAll: (show: boolean) => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
@@ -87,20 +89,20 @@ export function SensorFilterMenu({
     <div
       ref={menuRef}
       role="group"
-      aria-label="Choose which sensors to show"
+      aria-label={t("widget.chooseSensorsToShow")}
       style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width, zIndex: 9999 }}
       className="rounded-lg border border-border bg-popover text-popover-foreground shadow-lg"
       onMouseDown={(e) => e.stopPropagation()}
     >
       <div className="flex items-center justify-between border-b border-border px-2 py-1.5">
-        <span className="text-[11px] font-medium text-muted-foreground">Show sensors</span>
+        <span className="text-[11px] font-medium text-muted-foreground">{t("widget.showSensors")}</span>
         <button
           type="button"
           onMouseDown={(e) => e.stopPropagation()}
           onClick={() => onAll(allHidden)}
           className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
         >
-          {allHidden ? "Show all" : "Hide all"}
+          {allHidden ? t("widget.showAll") : t("widget.hideAll")}
         </button>
       </div>
       <div className="max-h-60 overflow-y-auto py-1">

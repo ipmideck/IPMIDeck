@@ -14,6 +14,8 @@ import {
   Legend,
 } from "recharts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { SlidersHorizontal, Fan, LayoutGrid, LineChart as LineChartIcon } from "lucide-react";
 import { CHART_TYPE_META, sensorNamesForChart, type ChartType } from "@/modules/sensors/sensorUtils";
 import { SensorFilterMenu } from "@/modules/sensors/SensorFilterMenu";
@@ -56,7 +58,7 @@ function fanSpinSeconds(rpm: number): number {
   return Math.max(0.8, 5 - 4 * normalized);
 }
 
-function FanCard({ name, rpm, online }: { name: string; rpm: number | null; online: boolean }) {
+function FanCard({ name, rpm, online, t }: { name: string; rpm: number | null; online: boolean; t: TFunction }) {
   const stopped = rpm == null || rpm <= 0;
   const band = fanBand(rpm ?? 0);
   const duration = stopped ? 0 : fanSpinSeconds(rpm ?? 0);
@@ -97,7 +99,7 @@ function FanCard({ name, rpm, online }: { name: string; rpm: number | null; onli
         {name}
       </div>
       <div className="font-mono text-sm font-semibold tabular-nums">
-        {stopped ? "STOPPED" : `${rpm} RPM`}
+        {stopped ? t("widget.fanStopped") : `${rpm} RPM`}
       </div>
     </div>
   );
@@ -116,6 +118,7 @@ export function SensorChart({
   view = "chart",
   onViewChange,
 }: SensorChartProps) {
+  const { t } = useTranslation();
   // SEPARATE state: live (WebSocket buffer) and historical (fetched) data never mix
   const [liveData, setLiveData] = useState<DataPoint[]>([]);
   const [historyData, setHistoryData] = useState<DataPoint[]>([]);
@@ -244,19 +247,19 @@ export function SensorChart({
   if (!serverId) {
     body = <div className="flex h-full items-center justify-center text-muted-foreground">—</div>;
   } else if (!meta) {
-    body = <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Unknown chart type</div>;
+    body = <div className="flex h-full items-center justify-center text-sm text-muted-foreground">{t("widget.unknownChartType")}</div>;
   } else if (allSensors.length === 0) {
     body = (
       <div className="flex h-full flex-col items-center justify-center text-center text-sm text-muted-foreground">
-        <p>No {chartType} sensors</p>
-        <p className="mt-1 text-xs">Waiting for readings or this server reports none.</p>
+        <p>{t("widget.chartNoSensors", { type: chartType })}</p>
+        <p className="mt-1 text-xs">{t("widget.chartWaitingReadings")}</p>
       </div>
     );
   } else if (visibleSensors.length === 0) {
     body = (
       <div className="flex h-full flex-col items-center justify-center text-center text-sm text-muted-foreground">
-        <p>No sensors selected</p>
-        <p className="mt-1 text-xs">Use the filter (top-right) to choose which to show.</p>
+        <p>{t("widget.voltagesNoneSelectedTitle")}</p>
+        <p className="mt-1 text-xs">{t("widget.chartNoneSelectedHint")}</p>
       </div>
     );
   } else if (chartType === "fan" && view === "cards") {
@@ -272,6 +275,7 @@ export function SensorChart({
               name={name}
               rpm={typeof v === "number" ? v : null}
               online={online}
+              t={t}
             />
           );
         })}
@@ -286,14 +290,14 @@ export function SensorChart({
   } else if (range !== "live" && !loading && historyData.length === 0) {
     body = (
       <div className="flex h-full flex-col items-center justify-center text-center text-sm text-muted-foreground">
-        <p>No data for this range</p>
-        <p className="mt-1 text-xs">History accumulates over time — check back later.</p>
+        <p>{t("widget.noDataForRange")}</p>
+        <p className="mt-1 text-xs">{t("widget.noDataForRangeHint")}</p>
       </div>
     );
   } else if (range === "live" && liveData.length < 2) {
     body = (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Waiting for data...
+        {t("widget.waitingForData")}
       </div>
     );
   } else {
@@ -358,7 +362,7 @@ export function SensorChart({
     <div className="pointer-events-none absolute bottom-2 left-2 z-10">
       <div className="flex items-center gap-1.5 rounded-md border border-red-500/30 bg-card/95 px-2 py-0.5 text-[10px] font-medium text-red-500 shadow">
         <WifiOff className="h-3 w-3" />
-        Disconnected
+        {t("power.disconnected")}
       </div>
     </div>
   ) : null;
@@ -391,6 +395,7 @@ export function SensorChartHeaderActions({
   view = "chart",
   onViewChange,
 }: SensorChartProps) {
+  const { t } = useTranslation();
   const readings = useSensorStore((s) => s.readings[serverId]);
   const allSensors = useMemo(
     () => sensorNamesForChart(readings, chartType),
@@ -424,8 +429,8 @@ export function SensorChartHeaderActions({
     chartType === "fan" && onViewChange ? (
       <button
         type="button"
-        aria-label={view === "chart" ? "Switch to fan cards view" : "Switch to chart view"}
-        title={view === "chart" ? "Show fans as cards" : "Show chart"}
+        aria-label={view === "chart" ? t("widget.switchToFanCards") : t("widget.switchToChartView")}
+        title={view === "chart" ? t("widget.showFansAsCards") : t("widget.showChart")}
         onMouseDown={(e) => e.stopPropagation()}
         onClick={() => onViewChange(view === "chart" ? "cards" : "chart")}
         className="flex items-center rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted"
@@ -439,7 +444,7 @@ export function SensorChartHeaderActions({
       <button
         ref={filterRef}
         type="button"
-        aria-label="Choose sensors"
+        aria-label={t("widget.chooseSensors")}
         aria-haspopup="true"
         aria-expanded={filterOpen}
         onMouseDown={(e) => e.stopPropagation()}
@@ -448,7 +453,7 @@ export function SensorChartHeaderActions({
           "flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] hover:bg-muted",
           hiddenSet.size > 0 ? "text-primary" : "text-muted-foreground"
         )}
-        title="Choose which sensors to show"
+        title={t("widget.chooseSensorsTitle")}
       >
         <SlidersHorizontal className="h-3 w-3" />
         {hiddenSet.size > 0 && <span>{visibleSensors.length}/{allSensors.length}</span>}

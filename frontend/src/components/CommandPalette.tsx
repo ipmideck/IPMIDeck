@@ -1,6 +1,7 @@
 import { Command } from "cmdk";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useServerStore } from "@/stores/server-store";
 import { put } from "@/api/client";
 import {
@@ -16,25 +17,27 @@ import {
   Volume2,
 } from "lucide-react";
 
+// Only stable paths/keys + icons at module load; labels resolved via t() in render.
 const pages = [
-  { label: "Dashboard", path: "/", icon: LayoutDashboard },
-  { label: "FanPilot", path: "/fanpilot", icon: Fan },
-  { label: "Event Log", path: "/sel", icon: List },
-  { label: "Hardware", path: "/fru", icon: Cpu },
-  { label: "Modules", path: "/modules", icon: Package },
-  { label: "Settings", path: "/settings", icon: Settings },
+  { labelKey: "nav.dashboard", path: "/", icon: LayoutDashboard },
+  { labelKey: "nav.fanpilot", path: "/fanpilot", icon: Fan },
+  { labelKey: "nav.sel", path: "/sel", icon: List },
+  { labelKey: "nav.fru", path: "/fru", icon: Cpu },
+  { labelKey: "nav.modules", path: "/modules", icon: Package },
+  { labelKey: "nav.settings", path: "/settings", icon: Settings },
 ];
 
 const actions = [
-  { label: "Power On", keywords: ["power", "start", "boot"], icon: Power },
-  { label: "Power Off", keywords: ["power", "shutdown", "stop"], icon: PowerOff },
-  { label: "Power Cycle", keywords: ["restart", "reboot", "cycle"], icon: Power },
-  { label: "Switch to Silent", keywords: ["fan", "quiet", "silent", "profile"], icon: Volume2 },
-  { label: "Switch to Balanced", keywords: ["fan", "balanced", "profile"], icon: Volume2 },
-  { label: "Switch to Performance", keywords: ["fan", "performance", "loud", "profile"], icon: Volume2 },
+  { id: "powerOn", labelKey: "palette.powerOn", keywords: ["power", "start", "boot"], icon: Power },
+  { id: "powerOff", labelKey: "palette.powerOff", keywords: ["power", "shutdown", "stop"], icon: PowerOff },
+  { id: "powerCycle", labelKey: "palette.powerCycle", keywords: ["restart", "reboot", "cycle"], icon: Power },
+  { id: "switchSilent", labelKey: "palette.switchSilent", keywords: ["fan", "quiet", "silent", "profile"], icon: Volume2 },
+  { id: "switchBalanced", labelKey: "palette.switchBalanced", keywords: ["fan", "balanced", "profile"], icon: Volume2 },
+  { id: "switchPerformance", labelKey: "palette.switchPerformance", keywords: ["fan", "performance", "loud", "profile"], icon: Volume2 },
 ];
 
 export function CommandPalette() {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const { servers, setContextServer } = useServerStore();
@@ -66,7 +69,7 @@ export function CommandPalette() {
     setOpen(false);
   }
 
-  function handleSelectAction(_label: string) {
+  function handleSelectAction(_id: string) {
     // Actions are placeholders for now — close palette
     setOpen(false);
   }
@@ -75,25 +78,25 @@ export function CommandPalette() {
     <Command.Dialog
       open={open}
       onOpenChange={setOpen}
-      label="Command palette"
+      label={t("palette.label")}
       loop
       overlayClassName="fixed inset-0 bg-black/50 z-50"
       contentClassName="fixed top-[20%] left-1/2 -translate-x-1/2 z-50 w-full max-w-lg"
     >
       <div className="rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl overflow-hidden">
         <Command.Input
-          placeholder="Type a command or search..."
+          placeholder={t("palette.placeholder")}
           className="w-full border-b border-border bg-transparent px-4 py-3 text-sm outline-none placeholder:text-muted-foreground"
         />
         <Command.List className="max-h-80 overflow-y-auto p-2">
           <Command.Empty className="px-4 py-6 text-center text-sm text-muted-foreground">
-            No results found.
+            {t("palette.empty")}
           </Command.Empty>
 
           {/* Servers */}
           {servers.length > 0 && (
             <Command.Group
-              heading="Servers"
+              heading={t("palette.groupServers")}
               className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-muted-foreground"
             >
               {servers.map((server) => (
@@ -123,39 +126,45 @@ export function CommandPalette() {
 
           {/* Pages */}
           <Command.Group
-            heading="Pages"
+            heading={t("palette.groupPages")}
             className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-muted-foreground"
           >
-            {pages.map((page) => (
-              <Command.Item
-                key={page.path}
-                value={`page ${page.label}`}
-                onSelect={() => handleSelectPage(page.path)}
-                className="flex items-center gap-3 rounded-md px-2 py-2 text-sm cursor-pointer aria-selected:bg-accent aria-selected:text-accent-foreground"
-              >
-                <page.icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                <span>{page.label}</span>
-              </Command.Item>
-            ))}
+            {pages.map((page) => {
+              const label = t(page.labelKey);
+              return (
+                <Command.Item
+                  key={page.path}
+                  value={`page ${label}`}
+                  onSelect={() => handleSelectPage(page.path)}
+                  className="flex items-center gap-3 rounded-md px-2 py-2 text-sm cursor-pointer aria-selected:bg-accent aria-selected:text-accent-foreground"
+                >
+                  <page.icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <span>{label}</span>
+                </Command.Item>
+              );
+            })}
           </Command.Group>
 
           {/* Actions */}
           <Command.Group
-            heading="Actions"
+            heading={t("palette.groupActions")}
             className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-muted-foreground"
           >
-            {actions.map((action) => (
-              <Command.Item
-                key={action.label}
-                value={`action ${action.label}`}
-                keywords={action.keywords}
-                onSelect={() => handleSelectAction(action.label)}
-                className="flex items-center gap-3 rounded-md px-2 py-2 text-sm cursor-pointer aria-selected:bg-accent aria-selected:text-accent-foreground"
-              >
-                <action.icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                <span>{action.label}</span>
-              </Command.Item>
-            ))}
+            {actions.map((action) => {
+              const label = t(action.labelKey);
+              return (
+                <Command.Item
+                  key={action.id}
+                  value={`action ${label}`}
+                  keywords={action.keywords}
+                  onSelect={() => handleSelectAction(action.id)}
+                  className="flex items-center gap-3 rounded-md px-2 py-2 text-sm cursor-pointer aria-selected:bg-accent aria-selected:text-accent-foreground"
+                >
+                  <action.icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <span>{label}</span>
+                </Command.Item>
+              );
+            })}
           </Command.Group>
         </Command.List>
       </div>

@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { ResponsiveGridLayout } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import { useLayoutStore, type WidgetLayout } from "@/stores/layout-store";
@@ -12,6 +13,7 @@ import { put } from "@/api/client";
 import { cn } from "@/lib/utils";
 
 export function WidgetGrid() {
+  const { t } = useTranslation();
   const { layout, removeWidget, updateLayout, setWidgetServer, updateWidgetConfig } = useLayoutStore();
   const contextServerId = useServerStore((s) => s.contextServerId);
   const servers = useServerStore((s) => s.servers);
@@ -83,7 +85,7 @@ export function WidgetGrid() {
   if (!contextServerId) {
     return (
       <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-        No server configured
+        {t("widget.noServerConfigured")}
       </div>
     );
   }
@@ -178,6 +180,7 @@ function WidgetCard({
   onConfigChange: (id: string, config: Record<string, unknown>) => void;
   onSwitchServer: (itemId: string, serverId: string) => void;
 }) {
+  const { t } = useTranslation();
   const { body, headerActions } = useWidgetRender(
     item,
     contextServerId,
@@ -201,7 +204,7 @@ function WidgetCard({
         )}
       >
         <span className="text-[11px] font-semibold text-muted-foreground select-none">
-          {getWidgetTitle(item)}
+          {getWidgetTitle(item, t)}
         </span>
         <div className="flex items-center gap-1">
           {headerActions && (
@@ -215,7 +218,7 @@ function WidgetCard({
           {accent && accentServer && (
             <div className="relative">
               <button
-                aria-label="Switch server"
+                aria-label={t("widget.switchServer")}
                 onMouseDown={(e) => e.stopPropagation()}
                 onClick={() => setOpenTagId(openTagId === item.i ? null : item.i)}
                 className="flex items-center gap-1 text-[11px] font-semibold text-muted-foreground"

@@ -17,6 +17,8 @@ import { PowerStatsWidget } from "@/modules/power/widgets/PowerStatsWidget";
 import { FanPilotStatusWidget } from "@/modules/fanpilot/widgets/FanPilotStatusWidget";
 import type { WidgetLayout } from "@/stores/layout-store";
 import { useModuleStore } from "@/stores/module-store";
+import i18n from "@/i18n";
+import type { TFunction } from "i18next";
 import type { LucideIcon } from "lucide-react";
 import { PowerOff, LayoutGrid as LayoutGridIcon, LineChart as LineChartIcon, Thermometer, Fan, Zap } from "lucide-react";
 
@@ -144,7 +146,7 @@ export function renderWidget(
     return {
       body: (
         <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-          Unknown widget: {layout.widget_id}
+          {i18n.t("widget.unknownWidget", { id: layout.widget_id })}
         </div>
       ),
     };
@@ -155,12 +157,14 @@ export function renderWidget(
 
 /** Placeholder rendered in the widget body when the owning module is disabled. */
 function DisabledPlaceholder({ moduleId }: { moduleId: string }) {
+  // Module-store gate is reactive; read the active language so the placeholder
+  // re-translates on language change without a hook (it's rendered inside the grid).
   return (
     <div className="flex h-full flex-col items-center justify-center text-center text-sm text-muted-foreground">
       <PowerOff className="mb-2 h-5 w-5" />
-      <p>Module disabled</p>
+      <p>{i18n.t("widget.moduleDisabled")}</p>
       <p className="mt-1 text-xs">
-        Enable {moduleId} in Settings → Modules to restore this widget.
+        {i18n.t("widget.moduleDisabledHint", { module: moduleId })}
       </p>
     </div>
   );
@@ -187,16 +191,20 @@ export function useWidgetRender(
   return renderWidget(layout, defaultServerId, onConfigChange);
 }
 
-export function getWidgetTitle(layout: WidgetLayout): string {
+export function getWidgetTitle(layout: WidgetLayout, t: TFunction): string {
+  // sensors-metric title is the (BMC-sourced) sensor name when set, otherwise a
+  // translated generic. The chart "type" is an app-defined axis, translated below.
   const titles: Record<string, string> = {
-    "sensors-metric": (layout.config?.sensor as string) || "Sensor",
-    "sensors-chart": `${(layout.config?.type as string) || "Temperature"} Chart`,
-    "sensors-voltages": "Voltages",
-    "power-status": "Power",
-    "power-controls": "Power Control",
-    "power-stats": "Power Stats",
-    "fanpilot-status": "FanPilot",
-    "fanpilot-curve": "Fan Curve",
+    "sensors-metric": (layout.config?.sensor as string) || t("widget.titleSensor"),
+    "sensors-chart": t("widget.titleChart", {
+      type: (layout.config?.type as string) || t("widget.titleChartDefault"),
+    }),
+    "sensors-voltages": t("widget.titleVoltages"),
+    "power-status": t("widget.titlePower"),
+    "power-controls": t("widget.titlePowerControl"),
+    "power-stats": t("widget.titlePowerStats"),
+    "fanpilot-status": t("widget.titleFanpilot"),
+    "fanpilot-curve": t("widget.titleFanCurve"),
   };
   return titles[layout.widget_id] || layout.widget_id;
 }
@@ -210,8 +218,9 @@ export interface ViewOption {
    *  when `config` is omitted — preserves backward compatibility with widgets that
    *  only differ on a single `view` axis (e.g. power-controls compact vs chart). */
   value: string;
-  label: string;
-  description: string;
+  /** i18n keys for the picker label/description — resolved via t() at the WidgetCatalog callsite. */
+  labelKey: string;
+  descKey: string;
   icon?: LucideIcon;
   /** Optional explicit config patch merged into the new widget's config. When set,
    *  replaces the implicit `{view: value}` mapping — used by widgets that need to
@@ -229,14 +238,14 @@ export const WIDGET_VIEWS: Record<string, ViewOption[]> = {
   "power-controls": [
     {
       value: "compact",
-      label: "Compact",
-      description: "Big wattage number with min/max/total stats",
+      labelKey: "widget.viewCompact",
+      descKey: "widget.viewCompactDesc",
       icon: LayoutGridIcon,
     },
     {
       value: "chart",
-      label: "Live chart",
-      description: "Inline stats with a rolling power-draw chart",
+      labelKey: "widget.viewLiveChart",
+      descKey: "widget.viewLiveChartDesc",
       icon: LineChartIcon,
     },
   ],
@@ -249,29 +258,29 @@ export const WIDGET_VIEWS: Record<string, ViewOption[]> = {
   "sensors-chart": [
     {
       value: "temperature",
-      label: "Temperature",
-      description: "Time-series line chart for all temperature sensors",
+      labelKey: "widget.viewTemperature",
+      descKey: "widget.viewTemperatureDesc",
       icon: Thermometer,
       config: { type: "temperature", view: "chart" },
     },
     {
       value: "fan-chart",
-      label: "Fans (chart)",
-      description: "Time-series line chart for all fan RPM sensors",
+      labelKey: "widget.viewFanChart",
+      descKey: "widget.viewFanChartDesc",
       icon: LineChartIcon,
       config: { type: "fan", view: "chart" },
     },
     {
       value: "fan-cards",
-      label: "Fans (cards)",
-      description: "Animated fan cards with color-coded RPM",
+      labelKey: "widget.viewFanCards",
+      descKey: "widget.viewFanCardsDesc",
       icon: Fan,
       config: { type: "fan", view: "cards" },
     },
     {
       value: "power",
-      label: "Power",
-      description: "Time-series line chart for power draw sensors",
+      labelKey: "widget.viewPower",
+      descKey: "widget.viewPowerDesc",
       icon: Zap,
       config: { type: "power", view: "chart" },
     },

@@ -1,3 +1,5 @@
+import i18n from "@/i18n";
+
 const BASE = "";
 
 let onUnauthorized: (() => void) | null = null;
@@ -16,6 +18,10 @@ export async function api<T = unknown>(
   const res = await fetch(`${BASE}${path}`, {
     headers: {
       "Content-Type": "application/json",
+      // D-14: send the active UI language so the backend (Plan 06) can localize
+      // error messages. Placed before ...options.headers so an explicit per-call
+      // override still wins.
+      "Accept-Language": i18n.resolvedLanguage ?? i18n.language ?? "en",
       ...options.headers,
     },
     ...options,

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { get, post } from "@/api/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -14,15 +15,17 @@ interface PowerControlsWidgetProps {
   onViewChange?: (view: "compact" | "chart") => void;
 }
 
-// Destructive actions — only meaningful while the host is running.
+// Destructive actions — only meaningful while the host is running. Stable ids + i18n
+// keys at module load; labels resolved via t() in render.
 const DESTRUCTIVE = [
-  { id: "soft", label: "Soft Off", icon: PowerOff },
-  { id: "off", label: "Hard Off", icon: PowerOff },
-  { id: "reset", label: "Reset", icon: RotateCcw },
-  { id: "cycle", label: "Cycle", icon: RefreshCw },
+  { id: "soft", labelKey: "power.softOff", icon: PowerOff },
+  { id: "off", labelKey: "power.hardOff", icon: PowerOff },
+  { id: "reset", labelKey: "power.reset", icon: RotateCcw },
+  { id: "cycle", labelKey: "power.cycle", icon: RefreshCw },
 ] as const;
 
 export function PowerControlsWidget({ serverId, view = "compact", onViewChange }: PowerControlsWidgetProps) {
+  const { t } = useTranslation();
   const [status, setStatus] = useState("unknown");
   const [loading, setLoading] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<string | null>(null);
@@ -53,13 +56,13 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
     try {
       const res = await post<{ success: boolean; error?: string }>(`/api/modules/power/${serverId}/command`, { action });
       if (res.success) {
-        toast.success(`Power ${action} executed`);
+        toast.success(t("power.executed", { action }));
         setStatus(action === "on" || action === "reset" || action === "cycle" ? "on" : "off");
       } else {
-        toast.error(res.error || "Command failed");
+        toast.error(res.error || t("power.commandFailed"));
       }
     } catch (e: any) {
-      toast.error(e.message || "Connection error");
+      toast.error(e.message || t("power.connectionError"));
     } finally {
       setLoading(null);
     }
@@ -86,7 +89,7 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
   return (
     <div
       className={cn(
-        "flex h-full flex-col gap-1.5 transition-[filter,opacity]",
+        "flex h-full flex-col gap-1 overflow-hidden transition-[filter,opacity]",
         !online && "opacity-50 grayscale"
       )}
     >
@@ -105,7 +108,7 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
             isOn ? "text-emerald-500" : isOff ? "text-red-500" : "text-muted-foreground"
           )}
         >
-          {!online ? "Unknown" : isOn ? "Online" : isOff ? "Offline" : "Unknown"}
+          {!online ? t("power.unknown") : isOn ? t("power.online") : isOff ? t("power.offline") : t("power.unknown")}
         </span>
       </div>
 
@@ -113,7 +116,7 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
           or fallback messaging. */}
       {!online ? (
         <div className="flex min-h-0 flex-1 items-center justify-center text-xs text-muted-foreground">
-          Disconnected
+          {t("power.disconnected")}
         </div>
       ) : isChart && online ? (
         <>
@@ -127,9 +130,9 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
               <span className="text-[11px] text-muted-foreground">{unit}</span>
             </div>
             <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-              <span>Min <span className="font-mono text-foreground">{min != null ? `${Math.round(min)} ${unit}` : "—"}</span></span>
-              <span>Max <span className="font-mono text-foreground">{max != null ? `${Math.round(max)} ${unit}` : "—"}</span></span>
-              <span>Total <span className="font-mono text-foreground">{formatKwh(totalWh)}</span></span>
+              <span>{t("power.min")} <span className="font-mono text-foreground">{min != null ? `${Math.round(min)} ${unit}` : "—"}</span></span>
+              <span>{t("power.max")} <span className="font-mono text-foreground">{max != null ? `${Math.round(max)} ${unit}` : "—"}</span></span>
+              <span>{t("power.total")} <span className="font-mono text-foreground">{formatKwh(totalWh)}</span></span>
             </div>
           </div>
           {/* Recharts live chart — fills remaining vertical space */}
@@ -141,26 +144,26 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
         // Top-aligned, left-aligned column: wattage -> "Power draw" label ->
         // Min/Max/Total row. No vertical centering so the Power On button below
         // (in its own shrink-0 wrapper) never overlaps the stats at 2x2.
-        <div className="flex min-h-0 flex-col gap-1">
+        <div className="flex min-h-0 flex-1 flex-col gap-0.5">
           <div className="flex items-baseline gap-1">
             <Zap className="h-4 w-4 self-center text-violet-400" />
-            <span className="font-mono text-3xl font-bold tabular-nums">{Math.round(live)}</span>
+            <span className="font-mono text-2xl font-bold tabular-nums">{Math.round(live)}</span>
             <span className="text-sm text-muted-foreground">{unit}</span>
           </div>
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-            Power draw
+            {t("power.powerDraw")}
           </span>
           {sensorName != null && (
-            <div className="mt-1 flex items-center gap-4">
-              <StatBlock label="Min" value={min != null ? `${Math.round(min)} ${unit}` : "—"} />
-              <StatBlock label="Max" value={max != null ? `${Math.round(max)} ${unit}` : "—"} />
-              <StatBlock label="Total" value={formatKwh(totalWh)} />
+            <div className="mt-auto flex items-center gap-4">
+              <StatBlock label={t("power.min")} value={min != null ? `${Math.round(min)} ${unit}` : "—"} />
+              <StatBlock label={t("power.max")} value={max != null ? `${Math.round(max)} ${unit}` : "—"} />
+              <StatBlock label={t("power.total")} value={formatKwh(totalWh)} />
             </div>
           )}
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 items-center justify-center text-xs text-muted-foreground">
-          {isOff ? "Server is powered off" : "No power reading"}
+          {isOff ? t("power.poweredOff") : t("power.noReading")}
         </div>
       )}
 
@@ -181,11 +184,12 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
               )}
             >
               <Power className="h-3 w-3" />
-              <span className="hidden sm:inline">On</span>
+              <span className="hidden sm:inline">{t("power.onShort")}</span>
             </button>
             {DESTRUCTIVE.map((a) => {
               const Icon = a.icon;
               const confirming = confirm === a.id;
+              const label = t(a.labelKey);
               return (
                 <button
                   key={a.id}
@@ -199,21 +203,21 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
                     isOff && "cursor-not-allowed opacity-40 hover:border-border hover:text-muted-foreground",
                     loading === a.id && "opacity-50"
                   )}
-                  title={a.label}
+                  title={label}
                 >
                   <Icon className="h-3 w-3" />
-                  <span className="truncate">{confirming ? "OK?" : a.label}</span>
+                  <span className="truncate">{confirming ? t("power.ok") : label}</span>
                 </button>
               );
             })}
           </div>
         ) : (
-          <div className="mt-2 space-y-1.5">
+          <div className="space-y-1">
             <button
               onClick={() => handleAction("on")}
               disabled={busy || isOn}
               className={cn(
-                "flex w-full items-center justify-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[11px] font-medium transition-colors",
+                "flex w-full items-center justify-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors",
                 isOn
                   ? "cursor-not-allowed border-border text-muted-foreground/40"
                   : "border-emerald-500/40 bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20",
@@ -221,19 +225,20 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
               )}
             >
               <Power className="h-3.5 w-3.5" />
-              Power On
+              {t("power.on")}
             </button>
-            <div className="grid grid-cols-2 gap-1.5 border-t border-border pt-1.5">
+            <div className="grid grid-cols-2 gap-1 border-t border-border pt-1">
               {DESTRUCTIVE.map((a) => {
                 const Icon = a.icon;
                 const confirming = confirm === a.id;
+                const label = t(a.labelKey);
                 return (
                   <button
                     key={a.id}
                     onClick={() => handleAction(a.id)}
                     disabled={busy || isOff}
                     className={cn(
-                      "flex items-center justify-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[11px] font-medium transition-colors",
+                      "flex items-center justify-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors",
                       confirming
                         ? "border-red-500 bg-red-500/20 text-red-400"
                         : "border-border text-muted-foreground hover:border-red-500/50 hover:text-red-400",
@@ -242,7 +247,7 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
                     )}
                   >
                     <Icon className="h-3.5 w-3.5" />
-                    {confirming ? "Confirm?" : a.label}
+                    {confirming ? t("power.confirm") : label}
                   </button>
                 );
               })}
@@ -270,6 +275,7 @@ export function PowerControlsHeaderActions({
   view: "compact" | "chart";
   onViewChange?: (v: "compact" | "chart") => void;
 }) {
+  const { t } = useTranslation();
   const { sensorName, reset } = usePowerStats(serverId);
   if (sensorName == null) return null;
   const isChart = view === "chart";
@@ -279,7 +285,7 @@ export function PowerControlsHeaderActions({
         type="button"
         onMouseDown={(e) => e.stopPropagation()}
         onClick={reset}
-        title="Reset min/max/kWh counters"
+        title={t("power.resetCounters")}
         className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
       >
         <RefreshCw className="h-3 w-3" />
@@ -287,8 +293,8 @@ export function PowerControlsHeaderActions({
       {onViewChange && (
         <button
           type="button"
-          aria-label={isChart ? "Switch to compact view" : "Switch to chart view"}
-          title={isChart ? "Hide chart" : "Show live chart"}
+          aria-label={isChart ? t("power.switchToCompact") : t("power.switchToChart")}
+          title={isChart ? t("power.hideChart") : t("power.showChart")}
           onMouseDown={(e) => e.stopPropagation()}
           onClick={() => onViewChange(isChart ? "compact" : "chart")}
           className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"

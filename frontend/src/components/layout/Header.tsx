@@ -1,8 +1,9 @@
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { LogOut } from "lucide-react";
 import { useServerStore } from "@/stores/server-store";
 import { useAuthStore } from "@/stores/auth-store";
-import { useWebSocket, type WSStatus } from "@/hooks/useWebSocket";
+import { useConnectionStore, type WSStatus } from "@/stores/connection-store";
 import { post } from "@/api/client";
 import { cn } from "@/lib/utils";
 
@@ -12,6 +13,7 @@ interface HeaderProps {
 }
 
 function ConnectionBadge({ status }: { status: WSStatus }) {
+  const { t } = useTranslation();
   return (
     <div
       className={cn(
@@ -29,13 +31,16 @@ function ConnectionBadge({ status }: { status: WSStatus }) {
           status === "disconnected" && "bg-red-500"
         )}
       />
-      {status === "connected" ? "Live" : status === "connecting" ? "Connecting" : "Offline"}
+      {status === "connected" ? t("header.live") : status === "connecting" ? t("header.connecting") : t("header.offline")}
     </div>
   );
 }
 
 export function Header({ title, children }: HeaderProps) {
-  const { status } = useWebSocket();
+  const { t } = useTranslation();
+  // Read from the global connection store. The WebSocket itself is hoisted to
+  // PageLayout so we don't open a new socket every time the user navigates.
+  const status = useConnectionStore((s) => s.wsStatus);
   const contextServer = useServerStore((s) =>
     s.servers.find((srv) => srv.id === s.contextServerId)
   );
@@ -71,11 +76,11 @@ export function Header({ title, children }: HeaderProps) {
         {authEnabled && authenticated && (
           <button
             onClick={handleLogout}
-            aria-label="Log out"
+            aria-label={t("header.logoutAria")}
             className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs font-medium hover:bg-muted"
           >
             <LogOut className="h-3.5 w-3.5" />
-            Logout
+            {t("header.logout")}
           </button>
         )}
       </div>

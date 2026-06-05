@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { useSensorStore } from "@/stores/sensor-store";
+import { useBackendOnline } from "@/stores/connection-store";
 import { cn } from "@/lib/utils";
 import { naturalCompare } from "@/modules/sensors/sensorUtils";
 import { ChevronDown } from "lucide-react";
@@ -24,31 +26,49 @@ interface MetricWidgetProps {
 }
 
 function Sparkline({ data, color }: { data: number[]; color: string }) {
-  // Need at least 2 distinct points for a meaningful line; otherwise render nothing
-  // (a single value would draw a stray dot/mark near the badge).
-  if (data.length < 2) return null;
+  const gid = useId(); // unique gradient id per tile (avoids cross-widget collisions)
+  // Reserve the strip even with too little data so the card layout doesn't jump
+  // as readings accumulate.
+  if (data.length < 2) return <div className="mt-2 h-9 w-full" aria-hidden="true" />;
+
   const min = Math.min(...data);
   const max = Math.max(...data);
   const range = max - min || 1;
-  const w = 80;
-  const h = 24;
-  const points = data
-    .map((v, i) => {
-      const x = (i / (data.length - 1)) * w;
-      const y = h - ((v - min) / range) * h;
-      return `${x},${y}`;
-    })
-    .join(" ");
+  const W = 100;
+  const H = 32;
+  const coords = data.map((v, i) => {
+    const x = (i / (data.length - 1)) * W;
+    // 2px inner padding top/bottom so peaks/troughs aren't clipped at the edges.
+    const y = H - 2 - ((v - min) / range) * (H - 4);
+    return `${x},${y}`;
+  });
+  const line = coords.join(" ");
+  const area = `0,${H} ${line} ${W},${H}`;
 
+  // viewBox + preserveAspectRatio="none" makes the line stretch full-width; the
+  // non-scaling stroke keeps it crisp regardless of the horizontal scale.
   return (
-    <svg width={w} height={h} className="mt-1 opacity-60" aria-hidden="true">
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      preserveAspectRatio="none"
+      className="mt-2 h-9 w-full"
+      aria-hidden="true"
+    >
+      <defs>
+        <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity={0.28} />
+          <stop offset="100%" stopColor={color} stopOpacity={0} />
+        </linearGradient>
+      </defs>
+      <polygon points={area} fill={`url(#${gid})`} />
       <polyline
-        points={points}
+        points={line}
         fill="none"
         stroke={color}
-        strokeWidth="1.5"
+        strokeWidth={1.75}
         strokeLinecap="round"
         strokeLinejoin="round"
+        vectorEffect="non-scaling-stroke"
       />
     </svg>
   );
@@ -194,8 +214,10 @@ function SensorPickerMenu({
 }
 
 export function MetricWidget({ serverId, sensorName, label, onSelectSensor }: MetricWidgetProps) {
+  const { t } = useTranslation();
   // Subscribe to the readings map for this server (stable ref per server — no React #185).
   const readings = useSensorStore((s) => s.readings[serverId]);
+  const online = useBackendOnline();
   const [pickerOpen, setPickerOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -258,7 +280,9 @@ export function MetricWidget({ serverId, sensorName, label, onSelectSensor }: Me
     const value = reading?.value;
     const unit = reading?.unit || "";
     const status = reading?.status || "unknown";
-    const displayLabel = label || effectiveName || "Sensor";
+    // The sensor name is already shown by the card header and the picker, so only
+    // render an inner label when the user set a CUSTOM one that differs from it.
+    const customLabel = label && label !== effectiveName ? label : null;
 
     const badgeBg =
       status === "ok" ? "bg-emerald-500/10 text-emerald-500" :
@@ -273,7 +297,7 @@ export function MetricWidget({ serverId, sensorName, label, onSelectSensor }: Me
       unit === "A" ? "#06b6d4" : "#a1a1aa";
 
     return (
-      <div className="relative flex h-full flex-col justify-center">
+      <div className={cn("relative flex h-full flex-col", !online && "opacity-50 grayscale transition-[filter,opacity]")}>
         {/* Sensor picker — lets the user choose which sensor this card shows, from the
             server's actual sensor list. The menu is portalled to <body> so it isn't clipped
             by the card's overflow-hidden or the grid stacking context. */}
@@ -282,14 +306,14 @@ export function MetricWidget({ serverId, sensorName, label, onSelectSensor }: Me
             <button
               ref={triggerRef}
               type="button"
-              aria-label="Select sensor"
+              aria-label={t("widget.selectSensor")}
               aria-haspopup="listbox"
               aria-expanded={pickerOpen}
               onMouseDown={(e) => e.stopPropagation()}
               onClick={() => setPickerOpen((p) => !p)}
               className="flex max-w-[140px] items-center gap-1 rounded px-1 py-0.5 text-[10px] text-muted-foreground hover:bg-muted"
             >
-              <span className="truncate">{effectiveName ?? "Select"}</span>
+              <span className="truncate">{effectiveName ?? t("widget.select")}</span>
               <ChevronDown className="h-3 w-3 shrink-0" />
             </button>
             {pickerOpen && (
@@ -305,21 +329,25 @@ export function MetricWidget({ serverId, sensorName, label, onSelectSensor }: Me
           </div>
         )}
 
-        <div className="font-mono text-2xl font-semibold leading-none tracking-tight">
-          {value !== null && value !== undefined ? (
-            <>
-              {typeof value === "number" ? (Number.isInteger(value) ? value : value.toFixed(1)) : value}
-              <span className="ml-0.5 text-sm font-normal text-muted-foreground">{unit}</span>
-            </>
-          ) : (
-            <span className="text-muted-foreground">—</span>
-          )}
-        </div>
-        <div className="mt-0.5 truncate text-[10px] text-muted-foreground">{displayLabel}</div>
-        <div className="mt-1 flex items-center gap-2">
-          <span className={cn("inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-semibold", badgeBg)}>
-            {status === "ok" ? "Normal" : status}
-          </span>
+        <div className="flex flex-1 flex-col justify-center">
+          <div className="font-mono text-2xl font-semibold leading-none tracking-tight">
+            {value !== null && value !== undefined ? (
+              <>
+                {Number.isInteger(value) ? value : value.toFixed(1)}
+                <span className="ml-0.5 text-sm font-normal text-muted-foreground">{unit}</span>
+              </>
+            ) : (
+              <span className="text-muted-foreground">—</span>
+            )}
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <span className={cn("inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-semibold", badgeBg)}>
+              {status === "ok" ? t("widget.statusNormal") : status}
+            </span>
+            {customLabel && (
+              <span className="truncate text-[10px] text-muted-foreground">{customLabel}</span>
+            )}
+          </div>
         </div>
         <Sparkline data={Array.isArray(sparkline) ? sparkline : []} color={chartColor} />
       </div>

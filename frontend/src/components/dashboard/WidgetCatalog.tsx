@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { get, put, del } from "@/api/client";
 import { useLayoutStore, type WidgetLayout } from "@/stores/layout-store";
 import { useServerStore } from "@/stores/server-store";
@@ -25,6 +26,7 @@ interface WidgetCatalogProps {
 }
 
 export function WidgetCatalog({ open, onClose }: WidgetCatalogProps) {
+  const { t } = useTranslation();
   const [widgets, setWidgets] = useState<CatalogWidget[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedServer, setSelectedServer] = useState<string>("");
@@ -78,7 +80,7 @@ export function WidgetCatalog({ open, onClose }: WidgetCatalogProps) {
     const updatedLayout = [...layout, newWidget];
     put("/api/dashboard/layout", { layout: updatedLayout }).catch(() => {});
 
-    toast.success("Widget added");
+    toast.success(t("widget.added"));
     setPickingFor(null);
     onClose();
   }
@@ -103,11 +105,11 @@ export function WidgetCatalog({ open, onClose }: WidgetCatalogProps) {
       // Backend DELETE clears the saved layout and returns the default set.
       const res = await del<{ success: boolean; layout: WidgetLayout[] }>("/api/dashboard/layout");
       setLayout(res.layout || []);
-      toast.success("Dashboard layout reset to default");
+      toast.success(t("widget.resetLayoutDone"));
       setConfirmingReset(false);
       onClose();
     } catch {
-      toast.error("Failed to reset layout");
+      toast.error(t("widget.resetLayoutFailed"));
     } finally {
       setResetting(false);
     }
@@ -144,7 +146,7 @@ export function WidgetCatalog({ open, onClose }: WidgetCatalogProps) {
         {/* Header */}
         <div className="border-b border-border px-4 py-3">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold">Add Widget</h2>
+            <h2 className="text-sm font-semibold">{t("widget.catalogTitle")}</h2>
             <button
               onClick={onClose}
               className="rounded p-1 hover:bg-muted transition-colors"
@@ -158,19 +160,18 @@ export function WidgetCatalog({ open, onClose }: WidgetCatalogProps) {
             <button
               onClick={() => setConfirmingReset(true)}
               disabled={!online}
-              title={!online ? "Backend disconnected" : undefined}
+              title={!online ? t("header.backendDisconnected") : undefined}
               className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:cursor-not-allowed disabled:opacity-50"
             >
               <RotateCcw className="h-3.5 w-3.5" />
-              Reset layout
+              {t("widget.resetLayout")}
             </button>
           ) : (
             <div className="mt-3 rounded-md border border-red-500/30 bg-red-500/5 p-3">
               <div className="flex items-start gap-2">
                 <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-500" />
                 <p className="text-xs text-muted-foreground">
-                  Reset the dashboard to the default layout? This removes all your widgets and
-                  customizations (selected sensors, hidden series, positions).
+                  {t("widget.resetLayoutConfirm")}
                 </p>
               </div>
               <div className="mt-3 flex gap-2">
@@ -179,15 +180,15 @@ export function WidgetCatalog({ open, onClose }: WidgetCatalogProps) {
                   disabled={resetting}
                   className="flex-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
                 >
-                  Cancel
+                  {t("widget.cancel")}
                 </button>
                 <button
                   onClick={handleReset}
                   disabled={resetting || !online}
-                  title={!online ? "Backend disconnected" : undefined}
+                  title={!online ? t("header.backendDisconnected") : undefined}
                   className="flex-1 rounded-md bg-red-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-600 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {resetting ? "Resetting…" : "Reset"}
+                  {resetting ? t("widget.resetting") : t("widget.reset")}
                 </button>
               </div>
             </div>
@@ -195,7 +196,7 @@ export function WidgetCatalog({ open, onClose }: WidgetCatalogProps) {
 
           {servers.length > 1 && (
             <select
-              aria-label="Assign widget to server"
+              aria-label={t("widget.assignToServer")}
               value={selectedServer || contextServerId || ""}
               onChange={(e) => setSelectedServer(e.target.value)}
               className="mt-3 w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
@@ -219,7 +220,7 @@ export function WidgetCatalog({ open, onClose }: WidgetCatalogProps) {
 
           {!loading && widgets.length === 0 && (
             <p className="py-8 text-center text-xs text-muted-foreground">
-              No widgets available.
+              {t("widget.noWidgets")}
             </p>
           )}
 
@@ -238,7 +239,7 @@ export function WidgetCatalog({ open, onClose }: WidgetCatalogProps) {
                         <button
                           onClick={() => onClickWidget(w)}
                           disabled={!online}
-                          title={!online ? "Backend disconnected" : undefined}
+                          title={!online ? t("header.backendDisconnected") : undefined}
                           className={cn(
                             "flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50",
                             isPicking
@@ -264,7 +265,7 @@ export function WidgetCatalog({ open, onClose }: WidgetCatalogProps) {
                         {isPicking && views && (
                           <div className="mt-2 rounded-md border border-border bg-muted/30 p-2">
                             <p className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground">
-                              Choose view
+                              {t("widget.chooseView")}
                             </p>
                             <div className="grid grid-cols-2 gap-2">
                               {views.map((opt) => {
@@ -279,10 +280,10 @@ export function WidgetCatalog({ open, onClose }: WidgetCatalogProps) {
                                   >
                                     <div className="flex items-center gap-1.5">
                                       {Icon && <Icon className="h-3.5 w-3.5 text-muted-foreground" />}
-                                      <span className="text-xs font-semibold">{opt.label}</span>
+                                      <span className="text-xs font-semibold">{t(opt.labelKey)}</span>
                                     </div>
                                     <span className="text-[10px] leading-snug text-muted-foreground line-clamp-2">
-                                      {opt.description}
+                                      {t(opt.descKey)}
                                     </span>
                                   </button>
                                 );
