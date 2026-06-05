@@ -1,0 +1,28 @@
+{
+  "common": {
+    "language": "Lingua",
+    "save": "Salva",
+    "cancel": "Annulla",
+    "delete": "Elimina",
+    "edit": "Modifica",
+    "close": "Chiudi",
+    "loading": "Caricamento",
+    "testConnection": "Prova connessione"
+  },
+  "language": {
+    "label": "Lingua"
+  },
+  "settings": {
+    "appearance": "Aspetto",
+    "language": "Lingua"
+  },
+  "setup": {
+    "welcomeTitle": "Benvenuto in IPMILink",
+    "steps": {
+      "welcome": "Benvenuto",
+      "authSetup": "Autenticazione",
+      "addServer": "Aggiungi server",
+      "done": "Fine"
+    }
+  }
+}
