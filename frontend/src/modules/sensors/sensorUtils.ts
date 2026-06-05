@@ -1,4 +1,6 @@
 import type { SensorReading } from "@/stores/sensor-store";
+import i18n from "@/i18n";
+import { intlLocale } from "@/i18n/languages";
 
 /** Map a chart's high-level category to the backend sensor `type` it should render. */
 export type ChartType = "temperature" | "fan" | "power";
@@ -43,5 +45,10 @@ export function sensorNamesForType(
 
 /** Natural sort so "Fan2" < "Fan10" and "Temp" < "Temp (2)". */
 export function naturalCompare(a: string, b: string): number {
-  return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+  // Singleton import (not a locale parameter) is intentional: naturalCompare is used as a
+  // bare `.sort()` comparator and flows through pure helpers (pickPowerSensorName) and
+  // interval tick closures that have no i18n.resolvedLanguage to hand — a broad, partly
+  // non-component call graph. Reading the active locale here keeps collation locale-correct
+  // (D-16) without threading a locale through every caller's signature.
+  return a.localeCompare(b, intlLocale(i18n.resolvedLanguage), { numeric: true, sensitivity: "base" });
 }
