@@ -47,8 +47,18 @@ i18n
   .init({
     fallbackLng: "en",
     supportedLngs: SUPPORTED_LNGS,
-    // zh-CN / zh-SG / zh-Hans-CN all resolve to zh-Hans (front/back agreement); zh-TW falls back to en by design.
-    nonExplicitSupportedLngs: true,
+    // NOTE: `nonExplicitSupportedLngs` MUST stay false. When true, i18next's
+    // isSupportedCode() reduces a tag to its primary subtag before the
+    // supportedLngs check (e.g. "zh-Hans" -> "zh"). Because our only script-
+    // subtag code is "zh-Hans" (and "zh" is NOT in SUPPORTED_LNGS), that
+    // reduction made i18next REJECT "zh-Hans" from the resolve hierarchy, so
+    // the Simplified-Chinese catalog was never requested/loaded (the resolve
+    // chain collapsed to ["en"]). All 11 lowercase single-subtag codes were
+    // unaffected because their primary subtag equals the full code.
+    // Regional normalization (zh-CN / zh-SG / zh-Hans-CN -> zh-Hans, zh-TW -> en)
+    // is handled explicitly by convertDetectedLanguage below, so this flag is
+    // redundant for that purpose and harmful for script-subtag codes.
+    nonExplicitSupportedLngs: false,
     load: "currentOnly",
     ns: ["translation"],
     defaultNS: "translation",
