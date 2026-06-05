@@ -81,8 +81,8 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
   // and below the big number (compact view) without restyling.
   const StatBlock = ({ label, value }: { label: string; value: string }) => (
     <div className="flex flex-col">
-      <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
-      <span className="font-mono text-[11px] text-foreground">{value}</span>
+      <span className="text-xs uppercase tracking-wider text-muted-foreground">{label}</span>
+      <span className="font-mono text-sm text-foreground">{value}</span>
     </div>
   );
 
@@ -129,10 +129,10 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
               </span>
               <span className="text-[11px] text-muted-foreground">{unit}</span>
             </div>
-            <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-              <span>{t("power.min")} <span className="font-mono text-foreground">{min != null ? `${Math.round(min)} ${unit}` : "—"}</span></span>
-              <span>{t("power.max")} <span className="font-mono text-foreground">{max != null ? `${Math.round(max)} ${unit}` : "—"}</span></span>
-              <span>{t("power.total")} <span className="font-mono text-foreground">{formatKwh(totalWh)}</span></span>
+            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+              <span>{t("power.min")} <span className="font-mono text-sm text-foreground">{min != null ? `${Math.round(min)} ${unit}` : "—"}</span></span>
+              <span>{t("power.max")} <span className="font-mono text-sm text-foreground">{max != null ? `${Math.round(max)} ${unit}` : "—"}</span></span>
+              <span>{t("power.total")} <span className="font-mono text-sm text-foreground">{formatKwh(totalWh)}</span></span>
             </div>
           </div>
           {/* Recharts live chart — fills remaining vertical space */}

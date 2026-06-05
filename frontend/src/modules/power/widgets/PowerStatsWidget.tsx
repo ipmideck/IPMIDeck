@@ -41,10 +41,10 @@ export function PowerStatsWidget({ serverId }: PowerStatsWidgetProps) {
           </span>
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-            <span>{t("power.min")} <span className="font-mono text-foreground">{online && min != null ? `${Math.round(min)} ${unit}` : "—"}</span></span>
-            <span>{t("power.max")} <span className="font-mono text-foreground">{online && max != null ? `${Math.round(max)} ${unit}` : "—"}</span></span>
-            <span>{t("power.total")} <span className="font-mono text-foreground">{online ? formatKwh(totalWh) : "—"}</span></span>
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            <span>{t("power.min")} <span className="font-mono text-sm text-foreground">{online && min != null ? `${Math.round(min)} ${unit}` : "—"}</span></span>
+            <span>{t("power.max")} <span className="font-mono text-sm text-foreground">{online && max != null ? `${Math.round(max)} ${unit}` : "—"}</span></span>
+            <span>{t("power.total")} <span className="font-mono text-sm text-foreground">{online ? formatKwh(totalWh) : "—"}</span></span>
           </div>
           {sensorName != null && (
             <button
