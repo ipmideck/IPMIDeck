@@ -4,12 +4,16 @@ import { useCommandStore, type CommandEntry } from "@/stores/command-store";
 import { useServerStore } from "@/stores/server-store";
 import { get } from "@/api/client";
 import { cn } from "@/lib/utils";
+import i18n from "@/i18n";
+import { intlLocale } from "@/i18n/languages";
 import { Terminal, X } from "lucide-react";
 
 function formatTime(ts: string) {
   try {
     const d = new Date(ts);
-    return d.toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    // Module-level helper: read the active language from the i18n singleton so log
+    // timestamps format in the user's locale (D-16) without threading a prop through EntryRow.
+    return d.toLocaleTimeString(intlLocale(i18n.resolvedLanguage), { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
   } catch {
     return ts;
   }

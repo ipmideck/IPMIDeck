@@ -20,6 +20,8 @@ import { SlidersHorizontal, Fan, LayoutGrid, LineChart as LineChartIcon } from "
 import { CHART_TYPE_META, sensorNamesForChart, type ChartType } from "@/modules/sensors/sensorUtils";
 import { SensorFilterMenu } from "@/modules/sensors/SensorFilterMenu";
 import { cn } from "@/lib/utils";
+import i18nInstance from "@/i18n";
+import { intlLocale } from "@/i18n/languages";
 
 export type SensorChartView = "chart" | "cards";
 
@@ -118,7 +120,10 @@ export function SensorChart({
   view = "chart",
   onViewChange,
 }: SensorChartProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  // Active Intl locale for user-facing time labels (D-16). Pulling i18n from
+  // useTranslation re-renders the chart on language change so the X-axis re-formats.
+  const loc = intlLocale(i18n.resolvedLanguage);
   // SEPARATE state: live (WebSocket buffer) and historical (fetched) data never mix
   const [liveData, setLiveData] = useState<DataPoint[]>([]);
   const [historyData, setHistoryData] = useState<DataPoint[]>([]);
@@ -164,7 +169,9 @@ export function SensorChart({
       if (now - lastUpdateRef.current < 2000) return;
       lastUpdateRef.current = now;
 
-      const timeStr = new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      // Interval tick: effect deps don't include the language, so read the active locale
+      // from the i18n singleton at tick-time to stay fresh after a language switch (D-16).
+      const timeStr = new Date().toLocaleTimeString(intlLocale(i18nInstance.resolvedLanguage), { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
       const point: DataPoint = { time: timeStr };
       for (const name of sensorNamesForChart(r, chartType)) {
@@ -314,7 +321,7 @@ export function SensorChart({
             tickFormatter={(t: string) =>
               range === "live"
                 ? t
-                : new Date(t).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit" })
+                : new Date(t).toLocaleTimeString(loc, { hour12: false, hour: "2-digit", minute: "2-digit" })
             }
           />
           <YAxis

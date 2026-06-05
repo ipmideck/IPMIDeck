@@ -21,6 +21,8 @@ import {
 } from "recharts";
 import { useSensorStore, type SensorReading } from "@/stores/sensor-store";
 import { sensorNamesForType } from "@/modules/sensors/sensorUtils";
+import i18n from "@/i18n";
+import { intlLocale } from "@/i18n/languages";
 
 const SAMPLE_INTERVAL_MS = 3000;
 
@@ -174,7 +176,9 @@ export function PowerLiveChart({
       lastUpdateRef.current = now;
 
       const v = r[sensorName]?.value;
-      const timeStr = new Date().toLocaleTimeString("en-US", {
+      // Interval tick (not a render hook): read the active locale from the i18n singleton
+      // at format-time so X-axis time labels follow the user's locale (D-16).
+      const timeStr = new Date().toLocaleTimeString(intlLocale(i18n.resolvedLanguage), {
         hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit",
       });
       setData((prev) => [
