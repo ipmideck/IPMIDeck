@@ -6,8 +6,10 @@ import csv
 import io
 import json
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
+
+from backend.core.i18n import get_lang, t
 
 router = APIRouter()
 
@@ -42,7 +44,7 @@ async def get_sel(
 
 
 @router.get("/{server_id}/info")
-async def get_sel_info(server_id: str):
+async def get_sel_info(server_id: str, lang: str = Depends(get_lang)):
     import backend.modules as ctx
     from backend.core.crypto import decrypt
     from backend.main import auth
@@ -51,7 +53,7 @@ async def get_sel_info(server_id: str):
         "SELECT host, username_enc, password_enc FROM servers WHERE id = ?", (server_id,)
     )
     if not server:
-        return {"success": False, "error": "Server not found"}
+        return {"success": False, "error": t("server_not_found", lang)}
 
     key = auth.get_encryption_key()
     try:
@@ -64,7 +66,7 @@ async def get_sel_info(server_id: str):
 
 
 @router.post("/{server_id}/refresh")
-async def refresh_sel(server_id: str):
+async def refresh_sel(server_id: str, lang: str = Depends(get_lang)):
     """Fetch SEL from BMC and update cache."""
     import backend.modules as ctx
     from backend.core.crypto import decrypt
@@ -74,7 +76,7 @@ async def refresh_sel(server_id: str):
         "SELECT host, username_enc, password_enc FROM servers WHERE id = ?", (server_id,)
     )
     if not server:
-        return {"success": False, "error": "Server not found"}
+        return {"success": False, "error": t("server_not_found", lang)}
 
     key = auth.get_encryption_key()
     try:
@@ -101,7 +103,7 @@ async def refresh_sel(server_id: str):
 
 
 @router.post("/{server_id}/clear")
-async def clear_sel(server_id: str):
+async def clear_sel(server_id: str, lang: str = Depends(get_lang)):
     import backend.modules as ctx
     from backend.core.crypto import decrypt
     from backend.main import auth
@@ -110,7 +112,7 @@ async def clear_sel(server_id: str):
         "SELECT host, username_enc, password_enc FROM servers WHERE id = ?", (server_id,)
     )
     if not server:
-        return {"success": False, "error": "Server not found"}
+        return {"success": False, "error": t("server_not_found", lang)}
 
     key = auth.get_encryption_key()
     try:

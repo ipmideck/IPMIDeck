@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+
+from backend.core.i18n import get_lang, t
 
 router = APIRouter()
 
@@ -72,7 +74,7 @@ async def create_server(body: ServerCreate):
 
 
 @router.get("/{server_id}")
-async def get_server(server_id: str):
+async def get_server(server_id: str, lang: str = Depends(get_lang)):
     from backend.main import db
     server = await db.fetchone(
         "SELECT id, name, description, host, port, vendor, color, poll_interval, "
@@ -80,12 +82,12 @@ async def get_server(server_id: str):
         (server_id,),
     )
     if not server:
-        return {"success": False, "error": "Server not found"}
+        return {"success": False, "error": t("server_not_found", lang)}
     return {"server": server}
 
 
 @router.put("/{server_id}")
-async def update_server(server_id: str, body: ServerUpdate):
+async def update_server(server_id: str, body: ServerUpdate, lang: str = Depends(get_lang)):
     from backend.main import db, auth
     from backend.core.crypto import encrypt
 
@@ -108,7 +110,7 @@ async def update_server(server_id: str, body: ServerUpdate):
         params.append(encrypt(body.password, key))
 
     if not updates:
-        return {"success": False, "error": "No fields to update"}
+        return {"success": False, "error": t("no_fields_to_update", lang)}
 
     updates.append("updated_at = CURRENT_TIMESTAMP")
     params.append(server_id)
@@ -125,8 +127,27 @@ async def delete_server(server_id: str):
     return {"success": True}
 
 
+class TestCredentials(BaseModel):
+    host: str
+    port: int = 623
+    username: str
+    password: str
+
+
+@router.post("/test")
+async def test_raw_connection(body: TestCredentials):
+    """Test IPMI connection with raw credentials (no saved server needed)."""
+    from backend.main import ipmi_service
+
+    try:
+        status = await ipmi_service.get_power_status(body.host, body.username, body.password)
+        return {"success": True, "power_status": status}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 @router.post("/{server_id}/test")
-async def test_connection(server_id: str):
+async def test_connection(server_id: str, lang: str = Depends(get_lang)):
     from backend.main import db, auth, ipmi_service
     from backend.core.crypto import decrypt
 
@@ -134,7 +155,7 @@ async def test_connection(server_id: str):
         "SELECT host, username_enc, password_enc FROM servers WHERE id = ?", (server_id,)
     )
     if not server:
-        return {"success": False, "error": "Server not found"}
+        return {"success": False, "error": t("server_not_found", lang)}
 
     key = auth.get_encryption_key()
     host = server["host"]

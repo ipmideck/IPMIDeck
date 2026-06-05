@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import time
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+
+from backend.core.i18n import get_lang, t
 
 router = APIRouter()
 
@@ -19,7 +21,7 @@ class PowerAction(BaseModel):
 
 
 @router.get("/{server_id}/status")
-async def get_power_status(server_id: str):
+async def get_power_status(server_id: str, lang: str = Depends(get_lang)):
     import backend.modules as ctx
     from backend.core.crypto import decrypt
     from backend.main import auth
@@ -28,7 +30,7 @@ async def get_power_status(server_id: str):
         "SELECT host, username_enc, password_enc FROM servers WHERE id = ?", (server_id,)
     )
     if not server:
-        return {"success": False, "error": "Server not found"}
+        return {"success": False, "error": t("server_not_found", lang)}
 
     key = auth.get_encryption_key()
     try:
@@ -41,7 +43,7 @@ async def get_power_status(server_id: str):
 
 
 @router.post("/{server_id}/command")
-async def power_command(server_id: str, body: PowerAction):
+async def power_command(server_id: str, body: PowerAction, lang: str = Depends(get_lang)):
     import backend.modules as ctx
     from backend.core.crypto import decrypt
     from backend.main import auth
@@ -61,7 +63,7 @@ async def power_command(server_id: str, body: PowerAction):
         "SELECT host, username_enc, password_enc FROM servers WHERE id = ?", (server_id,)
     )
     if not server:
-        return {"success": False, "error": "Server not found"}
+        return {"success": False, "error": t("server_not_found", lang)}
 
     key = auth.get_encryption_key()
     host = server["host"]

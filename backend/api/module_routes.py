@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+
+from backend.core.i18n import get_lang, t
 
 router = APIRouter()
 
@@ -33,11 +35,11 @@ async def list_modules():
 
 
 @router.put("/{module_id}")
-async def toggle_module(module_id: str, body: ModuleToggle):
+async def toggle_module(module_id: str, body: ModuleToggle, lang: str = Depends(get_lang)):
     from backend.main import module_loader
     mod = module_loader.get_module(module_id)
     if not mod:
-        return {"success": False, "error": "Module not found"}
+        return {"success": False, "error": t("module_not_found", lang)}
     await module_loader.set_enabled(module_id, body.enabled)
     if body.enabled:
         started = await module_loader.start_module(module_id)

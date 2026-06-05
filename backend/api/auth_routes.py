@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from backend.core.auth import require_auth
+from backend.core.i18n import get_lang, t
 
 router = APIRouter()
 
@@ -69,7 +70,7 @@ async def get_me(request: Request):
 
 
 @router.post("/login")
-async def login(body: LoginRequest, response: Response):
+async def login(body: LoginRequest, response: Response, lang: str = Depends(get_lang)):
     """Authenticate and issue session cookie.
 
     SEC-03 lockout flow (D-03):
@@ -88,7 +89,7 @@ async def login(body: LoginRequest, response: Response):
 
     # 1. Pre-check lockout BEFORE attempting password verify (avoids leaking timing).
     if await auth.check_lockout(body.username):
-        return {"success": False, "error": "Too many failed attempts. Try again later."}
+        return {"success": False, "error": t("too_many_attempts", lang)}
 
     # 2. Verify password.
     if not await auth.verify_password(body.username, body.password):
@@ -96,8 +97,8 @@ async def login(body: LoginRequest, response: Response):
         # If this failure pushed us into lockout, return the generic message
         # (Pitfall #3: must not leak that this specific attempt was the trigger).
         if await auth.check_lockout(body.username):
-            return {"success": False, "error": "Too many failed attempts. Try again later."}
-        return {"success": False, "error": "Invalid credentials"}
+            return {"success": False, "error": t("too_many_attempts", lang)}
+        return {"success": False, "error": t("invalid_credentials", lang)}
 
     # 3. Success: clear any prior failure counter, issue session.
     await auth.reset_failures(body.username)
@@ -119,10 +120,10 @@ async def logout(response: Response):
 
 
 @router.post("/setup")
-async def setup(body: SetupRequest, response: Response):
+async def setup(body: SetupRequest, response: Response, lang: str = Depends(get_lang)):
     from backend.main import auth
     if await auth.has_user():
-        return {"success": False, "error": "User already exists"}
+        return {"success": False, "error": t("user_already_exists", lang)}
     await auth.create_user(body.username, body.password)
     token = auth.create_session_token(body.username)
     response.set_cookie(
@@ -173,7 +174,7 @@ async def auth_status():
 
 
 @router.post("/toggle")
-async def toggle_auth(body: ToggleRequest, request: Request):
+async def toggle_auth(body: ToggleRequest, request: Request, lang: str = Depends(get_lang)):
     """Disable auth (enabled:false). Enabling is REJECTED — use /configure.
 
     REVIEWS #2: enabling auth always requires setting fresh credentials (D-09), so
@@ -192,7 +193,7 @@ async def toggle_auth(body: ToggleRequest, request: Request):
     if body.enabled:
         return {
             "success": False,
-            "error": "Use /api/auth/configure to enable authentication",
+            "error": t("use_configure_to_enable", lang),
         }
     await _require_session_if_active(request, auth)
 

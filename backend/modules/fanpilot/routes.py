@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
+from backend.core.i18n import get_lang, t
 from backend.modules.fanpilot.tasks import get_last_state, set_last_state, wake_loop
 from backend.modules.sensors.tasks import wake_loop as wake_sensor_loop
 
@@ -70,21 +71,21 @@ async def create_profile(body: ProfileCreate):
 
 
 @router.get("/profiles/{profile_id}")
-async def get_profile(profile_id: int):
+async def get_profile(profile_id: int, lang: str = Depends(get_lang)):
     import backend.modules as ctx
     row = await ctx.db.fetchone("SELECT * FROM fan_profiles WHERE id = ?", (profile_id,))
     if not row:
-        return {"success": False, "error": "Profile not found"}
+        return {"success": False, "error": t("profile_not_found", lang)}
     row["curve_points"] = json.loads(row["curve_points"])
     return {"profile": row}
 
 
 @router.put("/profiles/{profile_id}")
-async def update_profile(profile_id: int, body: ProfileUpdate):
+async def update_profile(profile_id: int, body: ProfileUpdate, lang: str = Depends(get_lang)):
     import backend.modules as ctx
     existing = await ctx.db.fetchone("SELECT is_preset FROM fan_profiles WHERE id = ?", (profile_id,))
     if not existing:
-        return {"success": False, "error": "Profile not found"}
+        return {"success": False, "error": t("profile_not_found", lang)}
 
     updates = []
     params = []
@@ -99,7 +100,7 @@ async def update_profile(profile_id: int, body: ProfileUpdate):
         params.append(json.dumps(body.curve_points))
 
     if not updates:
-        return {"success": False, "error": "No fields to update"}
+        return {"success": False, "error": t("no_fields_to_update", lang)}
 
     updates.append("updated_at = CURRENT_TIMESTAMP")
     params.append(profile_id)
@@ -115,13 +116,13 @@ async def update_profile(profile_id: int, body: ProfileUpdate):
 
 
 @router.delete("/profiles/{profile_id}")
-async def delete_profile(profile_id: int):
+async def delete_profile(profile_id: int, lang: str = Depends(get_lang)):
     import backend.modules as ctx
     existing = await ctx.db.fetchone("SELECT is_preset FROM fan_profiles WHERE id = ?", (profile_id,))
     if not existing:
-        return {"success": False, "error": "Profile not found"}
+        return {"success": False, "error": t("profile_not_found", lang)}
     if existing["is_preset"]:
-        return {"success": False, "error": "Cannot delete preset profiles"}
+        return {"success": False, "error": t("cannot_delete_preset", lang)}
     await ctx.db.execute("DELETE FROM fan_profiles WHERE id = ?", (profile_id,))
     await ctx.db.commit()
     return {"success": True}
@@ -130,13 +131,13 @@ async def delete_profile(profile_id: int):
 # === Server FanPilot control ===
 
 @router.get("/{server_id}/status")
-async def get_fanpilot_status(server_id: str):
+async def get_fanpilot_status(server_id: str, lang: str = Depends(get_lang)):
     import backend.modules as ctx
     server = await ctx.db.fetchone(
         "SELECT fanpilot_enabled, fanpilot_profile_id FROM servers WHERE id = ?", (server_id,)
     )
     if not server:
-        return {"success": False, "error": "Server not found"}
+        return {"success": False, "error": t("server_not_found", lang)}
 
     profile = None
     if server["fanpilot_profile_id"]:
@@ -162,7 +163,7 @@ async def get_fanpilot_status(server_id: str):
 
 
 @router.post("/{server_id}/mode")
-async def set_fanpilot_mode(server_id: str, body: FanMode):
+async def set_fanpilot_mode(server_id: str, body: FanMode, lang: str = Depends(get_lang)):
     import backend.modules as ctx
     from backend.core.crypto import decrypt
     from backend.main import auth
@@ -171,7 +172,7 @@ async def set_fanpilot_mode(server_id: str, body: FanMode):
         "SELECT host, username_enc, password_enc FROM servers WHERE id = ?", (server_id,)
     )
     if not server:
-        return {"success": False, "error": "Server not found"}
+        return {"success": False, "error": t("server_not_found", lang)}
 
     key = auth.get_encryption_key()
     host = server["host"]
@@ -195,7 +196,7 @@ async def set_fanpilot_mode(server_id: str, body: FanMode):
     elif body.mode == "fanpilot":
         profile_id = body.profile_id
         if not profile_id:
-            return {"success": False, "error": "profile_id required for fanpilot mode"}
+            return {"success": False, "error": t("profile_id_required", lang)}
         await ctx.db.execute(
             "UPDATE servers SET fanpilot_enabled = 1, fanpilot_profile_id = ? WHERE id = ?",
             (profile_id, server_id),

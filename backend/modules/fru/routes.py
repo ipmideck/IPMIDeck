@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from backend.core.i18n import get_lang, t
 
 router = APIRouter()
 
@@ -41,7 +43,7 @@ async def get_fru(server_id: str):
 
 
 @router.post("/{server_id}/refresh")
-async def refresh_fru(server_id: str):
+async def refresh_fru(server_id: str, lang: str = Depends(get_lang)):
     """Fetch FRU data from BMC and update cache."""
     import backend.modules as ctx
     from backend.core.crypto import decrypt
@@ -51,7 +53,7 @@ async def refresh_fru(server_id: str):
         "SELECT host, username_enc, password_enc FROM servers WHERE id = ?", (server_id,)
     )
     if not server:
-        return {"success": False, "error": "Server not found"}
+        return {"success": False, "error": t("server_not_found", lang)}
 
     key = auth.get_encryption_key()
     try:
