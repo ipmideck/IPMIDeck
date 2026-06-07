@@ -467,5 +467,14 @@
     "setModeFailed": "モードの設定に失敗しました",
     "manualSpeedSet": "手動速度を {{speed}}% に設定しました",
     "setSpeedFailed": "速度の設定に失敗しました"
+  },
+  "shortcuts": {
+    "title": "キーボードショートカット",
+    "groupNavigation": "ナビゲーション",
+    "groupServers": "サーバー",
+    "groupHelp": "ヘルプ",
+    "switchServer": "インデックスでサーバーを切り替え (1-9)",
+    "showHelp": "このヘルプを表示",
+    "commandPalette": "コマンドパレットを開く"
   }
 }

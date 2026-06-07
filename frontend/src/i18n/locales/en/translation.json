@@ -468,5 +468,14 @@
     "setModeFailed": "Failed to set mode",
     "manualSpeedSet": "Manual speed set to {{speed}}%",
     "setSpeedFailed": "Failed to set speed"
+  },
+  "shortcuts": {
+    "title": "Keyboard Shortcuts",
+    "groupNavigation": "Navigation",
+    "groupServers": "Servers",
+    "groupHelp": "Help",
+    "switchServer": "Switch server by index (1-9)",
+    "showHelp": "Show this help",
+    "commandPalette": "Open command palette"
   }
 }

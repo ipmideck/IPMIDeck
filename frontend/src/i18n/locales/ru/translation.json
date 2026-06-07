@@ -470,5 +470,14 @@
     "setModeFailed": "Не удалось установить режим",
     "manualSpeedSet": "Ручная скорость установлена на {{speed}}%",
     "setSpeedFailed": "Не удалось установить скорость"
+  },
+  "shortcuts": {
+    "title": "Горячие клавиши",
+    "groupNavigation": "Навигация",
+    "groupServers": "Серверы",
+    "groupHelp": "Справка",
+    "switchServer": "Переключить сервер по индексу (1-9)",
+    "showHelp": "Показать эту справку",
+    "commandPalette": "Открыть палитру команд"
   }
 }

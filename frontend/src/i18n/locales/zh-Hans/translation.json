@@ -467,5 +467,14 @@
     "setModeFailed": "设置模式失败",
     "manualSpeedSet": "手动转速已设置为 {{speed}}%",
     "setSpeedFailed": "设置转速失败"
+  },
+  "shortcuts": {
+    "title": "键盘快捷键",
+    "groupNavigation": "导航",
+    "groupServers": "服务器",
+    "groupHelp": "帮助",
+    "switchServer": "按索引切换服务器 (1-9)",
+    "showHelp": "显示此帮助",
+    "commandPalette": "打开命令面板"
   }
 }

@@ -470,5 +470,14 @@
     "setModeFailed": "Nie udało się ustawić trybu",
     "manualSpeedSet": "Ręczna prędkość ustawiona na {{speed}}%",
     "setSpeedFailed": "Nie udało się ustawić prędkości"
+  },
+  "shortcuts": {
+    "title": "Skróty klawiszowe",
+    "groupNavigation": "Nawigacja",
+    "groupServers": "Serwery",
+    "groupHelp": "Pomoc",
+    "switchServer": "Przełącz serwer według indeksu (1-9)",
+    "showHelp": "Pokaż tę pomoc",
+    "commandPalette": "Otwórz paletę poleceń"
   }
 }

@@ -468,5 +468,14 @@
     "setModeFailed": "Kan modus niet instellen",
     "manualSpeedSet": "Handmatige snelheid ingesteld op {{speed}}%",
     "setSpeedFailed": "Kan snelheid niet instellen"
+  },
+  "shortcuts": {
+    "title": "Sneltoetsen",
+    "groupNavigation": "Navigatie",
+    "groupServers": "Servers",
+    "groupHelp": "Help",
+    "switchServer": "Server wisselen op index (1-9)",
+    "showHelp": "Deze help tonen",
+    "commandPalette": "Opdrachtenpalet openen"
   }
 }

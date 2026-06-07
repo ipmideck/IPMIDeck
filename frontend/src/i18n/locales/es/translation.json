@@ -468,5 +468,14 @@
     "setModeFailed": "No se pudo establecer el modo",
     "manualSpeedSet": "Velocidad manual establecida en {{speed}}%",
     "setSpeedFailed": "No se pudo establecer la velocidad"
+  },
+  "shortcuts": {
+    "title": "Atajos de teclado",
+    "groupNavigation": "Navegación",
+    "groupServers": "Servidores",
+    "groupHelp": "Ayuda",
+    "switchServer": "Cambiar de servidor por índice (1-9)",
+    "showHelp": "Mostrar esta ayuda",
+    "commandPalette": "Abrir la paleta de comandos"
   }
 }

@@ -467,5 +467,14 @@
     "setModeFailed": "모드 설정에 실패했습니다",
     "manualSpeedSet": "수동 속도가 {{speed}}%로 설정되었습니다",
     "setSpeedFailed": "속도 설정에 실패했습니다"
+  },
+  "shortcuts": {
+    "title": "키보드 단축키",
+    "groupNavigation": "탐색",
+    "groupServers": "서버",
+    "groupHelp": "도움말",
+    "switchServer": "인덱스로 서버 전환 (1-9)",
+    "showHelp": "이 도움말 표시",
+    "commandPalette": "명령 팔레트 열기"
   }
 }

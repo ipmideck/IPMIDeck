@@ -468,5 +468,14 @@
     "setModeFailed": "Modus konnte nicht gesetzt werden",
     "manualSpeedSet": "Manuelle Drehzahl auf {{speed}}% gesetzt",
     "setSpeedFailed": "Drehzahl konnte nicht gesetzt werden"
+  },
+  "shortcuts": {
+    "title": "Tastenkürzel",
+    "groupNavigation": "Navigation",
+    "groupServers": "Server",
+    "groupHelp": "Hilfe",
+    "switchServer": "Server per Index wechseln (1-9)",
+    "showHelp": "Diese Hilfe anzeigen",
+    "commandPalette": "Befehlspalette öffnen"
   }
 }
