@@ -194,7 +194,6 @@
     "language": "Sprache",
     "servers": "Server",
     "security": "Sicherheit",
-    "about": "Über IPMILink",
     "add": "Hinzufügen",
     "addServer": "Server hinzufügen",
     "cancel": "Abbrechen",
@@ -255,6 +254,7 @@
     "creatorRole": "Ersteller & Entwickler",
     "sponsor": "Sponsor",
     "about": {
+      "title": "Über IPMILink",
       "madeWith": "Erstellt mit <0></0> für die Homelab-Community"
     }
   },

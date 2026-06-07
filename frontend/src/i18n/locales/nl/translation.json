@@ -194,7 +194,6 @@
     "language": "Taal",
     "servers": "Servers",
     "security": "Beveiliging",
-    "about": "Over IPMILink",
     "add": "Toevoegen",
     "addServer": "Server toevoegen",
     "cancel": "Annuleren",
@@ -255,6 +254,7 @@
     "creatorRole": "Maker en ontwikkelaar",
     "sponsor": "Sponsor",
     "about": {
+      "title": "Over IPMILink",
       "madeWith": "Gemaakt met <0></0> voor de homelab-gemeenschap"
     }
   },

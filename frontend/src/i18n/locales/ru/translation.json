@@ -194,7 +194,6 @@
     "language": "Язык",
     "servers": "Серверы",
     "security": "Безопасность",
-    "about": "О программе IPMILink",
     "add": "Добавить",
     "addServer": "Добавить сервер",
     "cancel": "Отмена",
@@ -255,6 +254,7 @@
     "creatorRole": "Создатель и разработчик",
     "sponsor": "Поддержать",
     "about": {
+      "title": "О программе IPMILink",
       "madeWith": "Сделано с <0></0> для сообщества homelab"
     }
   },

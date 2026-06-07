@@ -194,7 +194,6 @@
     "language": "言語",
     "servers": "サーバー",
     "security": "セキュリティ",
-    "about": "IPMILink について",
     "add": "追加",
     "addServer": "サーバーを追加",
     "cancel": "キャンセル",
@@ -255,6 +254,7 @@
     "creatorRole": "作成者 & 開発者",
     "sponsor": "スポンサー",
     "about": {
+      "title": "IPMILink について",
       "madeWith": "homelab コミュニティのために <0></0> を込めて作成"
     }
   },

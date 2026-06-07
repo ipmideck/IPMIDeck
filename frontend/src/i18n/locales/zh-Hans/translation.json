@@ -194,7 +194,6 @@
     "language": "语言",
     "servers": "服务器",
     "security": "安全",
-    "about": "关于 IPMILink",
     "add": "添加",
     "addServer": "添加服务器",
     "cancel": "取消",
@@ -255,6 +254,7 @@
     "creatorRole": "创建者与开发者",
     "sponsor": "赞助",
     "about": {
+      "title": "关于 IPMILink",
       "madeWith": "用 <0></0> 为 homelab 社区打造"
     }
   },

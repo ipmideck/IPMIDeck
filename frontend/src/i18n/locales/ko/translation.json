@@ -194,7 +194,6 @@
     "language": "언어",
     "servers": "서버",
     "security": "보안",
-    "about": "IPMILink 정보",
     "add": "추가",
     "addServer": "서버 추가",
     "cancel": "취소",
@@ -255,6 +254,7 @@
     "creatorRole": "제작자 및 개발자",
     "sponsor": "후원",
     "about": {
+      "title": "IPMILink 정보",
       "madeWith": "homelab 커뮤니티를 위해 <0></0>으로 제작"
     }
   },

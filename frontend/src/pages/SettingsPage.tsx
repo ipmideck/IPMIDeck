@@ -479,7 +479,7 @@ export default function SettingsPage() {
 
           {/* About */}
           <div className="rounded-lg border border-border bg-card p-5">
-            <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground">{t("settings.about")}</h2>
+            <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground">{t("settings.about.title")}</h2>
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-sm text-muted-foreground">{t("settings.version")}</span>
