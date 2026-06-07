@@ -41,6 +41,14 @@ include = ["backend*"]
 target-version = "py311"
 line-length = 100
 
+[tool.ruff.lint.per-file-ignores]
+# Intentional deferred imports placed after route definitions to preserve
+# Starlette route ordering (SPA catch-all must register after module routes).
+"backend/main.py" = ["E402"]
+# conftest sets IPMILINK_* env vars BEFORE `import backend.main` so the app's
+# lifespan reads the test config / temp DB — imports must follow that setup.
+"tests/conftest.py" = ["E402"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

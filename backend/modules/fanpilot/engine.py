@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 
 logger = logging.getLogger("ipmilink.modules.fanpilot")
