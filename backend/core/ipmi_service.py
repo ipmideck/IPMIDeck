@@ -67,7 +67,11 @@ class LocalIPMIService(IPMIService):
             self._host_locks[host] = asyncio.Semaphore(1)
         return self._host_locks[host]
 
-    async def _exec(self, host: str, user: str, password: str, args: list[str]) -> str:
+    async def _exec(self, host: str, user: str, password: str, args: list[str]) -> str:  # pragma: no cover
+        # The subprocess body cannot run without a real ipmitool binary + reachable BMC, so it
+        # is excluded from coverage (REVIEWS MED #7, up-front decision). The thin command methods
+        # that call _exec (power_command/set_fan_speed/etc.) ARE covered via a monkeypatched _exec
+        # in tests/unit/test_ipmi_service.py — only this network/subprocess surface is pragma'd.
         cmd = ["ipmitool", "-I", "lanplus", "-H", host, "-U", user, "-P", password, *args]
         logger.debug("Executing: ipmitool -I lanplus -H %s -U %s ... %s", host, user, " ".join(args))
         async with self._get_host_lock(host):

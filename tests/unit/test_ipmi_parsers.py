@@ -13,7 +13,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from backend.core.ipmi_service import _parse_fru, _parse_sdr_elist, _parse_sel
+from backend.core.ipmi_service import (
+    _infer_severity,
+    _parse_fru,
+    _parse_sdr_elist,
+    _parse_sel,
+    _parse_sel_info,
+)
 
 FIX = Path(__file__).parent.parent / "fixtures" / "ipmi"
 
@@ -128,3 +134,19 @@ def test_sel_failure_row_inferred_critical():
     failure = [e for e in events if "Failure" in e["description"]]
     assert len(failure) == 1
     assert failure[0]["severity"] == "critical"
+
+
+def test_infer_severity_levels():
+    """_infer_severity maps keywords to critical / warning / info."""
+    assert _infer_severity(["x", "fault detected"]) == "critical"
+    assert _infer_severity(["x", "Upper warning going high"]) == "warning"
+    assert _infer_severity(["x", "Presence detected"]) == "info"
+
+
+def test_parse_sel_info_key_value_pairs():
+    """_parse_sel_info turns `Key : Value` lines into a normalized snake_case dict."""
+    raw = "SEL Information\nVersion : 1.5\nEntries : 3\nFree Space : 8128 bytes\n"
+    info = _parse_sel_info(raw)
+    assert info["version"] == "1.5"
+    assert info["entries"] == "3"
+    assert info["free_space"] == "8128 bytes"
