@@ -1,0 +1,9 @@
+FRU Device Description : Builtin FRU Device (ID 0)
+ Board Mfg             : Dell Inc.
+ Board Product         : PowerEdge R720
+ Board Serial          : CN000000DEMO00
+ Board Part Number     : 04N3DF
+ Product Manufacturer  : Dell Inc.
+ Product Name          : PowerEdge R720
+ Product Serial        : DEMO123
+ Product Asset Tag     : R720-DEMO

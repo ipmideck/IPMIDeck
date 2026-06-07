@@ -1,0 +1,2 @@
+# Shell hooks must stay LF so the #!/bin/sh shebang is not corrupted by CRLF on Windows.
+.githooks/** text eol=lf

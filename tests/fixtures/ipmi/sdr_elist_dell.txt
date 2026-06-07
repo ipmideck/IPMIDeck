@@ -1,0 +1,11 @@
+Inlet Temp       | 04h | ok  |  7.1 | 23 degrees C
+Exhaust Temp     | 01h | ok  |  7.1 | 31 degrees C
+Temp             | 0Eh | ok  |  3.1 | 42 degrees C
+Temp             | 0Fh | ok  |  3.2 | 44 degrees C
+Fan1 RPM         | 30h | ok  |  7.1 | 3720 RPM
+Fan2 RPM         | 32h | ok  |  7.1 | 3840 RPM
+Voltage 1        | 50h | ok  | 10.1 | 12.1 Volts
+Pwr Consumption  | 77h | ok  | 10.1 | 168 Watts
+Current 1        | 6Ah | ok  | 10.1 | 0.8 Amps
+PSU1 Status      | 70h | ok  | 10.1 | 0x0180
+Status           | 00h | ns  |  7.1 | No Reading

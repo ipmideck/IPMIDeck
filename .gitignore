@@ -70,3 +70,9 @@ PRD.md
 # Throwaway demo-mode UAT scratch (isolated data dir + server log + helper scripts)
 _uat_data/
 _spa_copy.ps1
+
+# Coverage artifacts
+coverage/
+htmlcov/
+.coverage
+frontend/coverage/
