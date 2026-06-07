@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """API integration tests (TEST-04) — FastAPI TestClient against the real ASGI stack.
 
 These tests drive backend.main.app through its real lifespan over an ISOLATED temp SQLite
@@ -21,6 +19,8 @@ REVIEWS-driven choices (03-REVIEWS.md):
   * MED #11 — tests target static /api/* routes (matched before the per-lifespan re-mounted SPA
     catch-all + module routes).
 """
+
+from __future__ import annotations
 
 from backend.core.i18n import t
 
@@ -64,3 +64,93 @@ def test_me_endpoint_open(client):
     assert "has_user" in body
     assert "authenticated" in body
     assert body["auth_enabled"] is False
+
+
+# --- Task 2: server CRUD (auth OFF) + localized login failure (auth ON) ---------------------
+
+
+def test_server_crud_roundtrip(client):
+    """Create -> list (present) -> delete (absent) through the genuinely auth-OFF `client`.
+
+    Works ONLY because the `client` fixture wrote auth_enabled=false to the DB after lifespan
+    (HIGH #1); under auth-ON these guarded routes would 401. No request reaches data/ipmilink.db
+    (temp DB via the conftest env overrides). create_server's auth.get_encryption_key dependency
+    is available because lifespan initialized bm.auth.
+    """
+    # CREATE
+    create_resp = client.post(
+        "/api/servers",
+        json={
+            "name": "Test R720",
+            "host": "192.0.2.30",
+            "username": "root",
+            "password": "calvin",
+            "vendor": "dell",
+        },
+    )
+    assert create_resp.status_code == 200, create_resp.text  # not 401 -> auth is truly off
+    created = create_resp.json()
+    assert created["success"] is True
+    server_id = created["server_id"]
+
+    # LIST -> the created server appears
+    list_resp = client.get("/api/servers")
+    assert list_resp.status_code == 200
+    servers = list_resp.json()["servers"]
+    match = [s for s in servers if s["id"] == server_id]
+    assert len(match) == 1
+    assert match[0]["name"] == "Test R720"
+    assert match[0]["host"] == "192.0.2.30"
+
+    # DELETE -> success, then no longer listed
+    delete_resp = client.delete(f"/api/servers/{server_id}")
+    assert delete_resp.status_code == 200
+    assert delete_resp.json()["success"] is True
+
+    after_resp = client.get("/api/servers")
+    assert after_resp.status_code == 200
+    remaining_ids = [s["id"] for s in after_resp.json()["servers"]]
+    assert server_id not in remaining_ids
+
+
+def test_login_failure_localized(client_auth):
+    """A failing login honors Accept-Language (02.2 wiring) under auth-ENABLED + a seeded user.
+
+    With auth OFF, /api/auth/login short-circuits to {"success": True, "Auth disabled"}, so the
+    localized invalid-credentials path is only reachable under `client_auth` + a real user
+    (REVIEWS HIGH #2). Stays under the SEC-03 lockout threshold (6th failure) so the message
+    remains "invalid_credentials", not "too_many_attempts".
+    """
+    # Seed a user (setup succeeds only when no user exists yet; sets a cookie — harmless here).
+    setup_resp = client_auth.post(
+        "/api/auth/setup", json={"username": "admin", "password": "correcthorse"}
+    )
+    assert setup_resp.status_code == 200
+    assert setup_resp.json()["success"] is True
+
+    # Bad login, Accept-Language: it -> Italian invalid-credentials string.
+    it_resp = client_auth.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": "wrong"},
+        headers={"Accept-Language": "it"},
+    )
+    assert it_resp.status_code == 200
+    it_body = it_resp.json()
+    assert it_body["success"] is False
+    assert it_body["error"] == t("invalid_credentials", "it")
+    assert it_body["error"] == "Credenziali non valide"
+
+    # Bad login, Accept-Language: en -> English invalid-credentials string (resolver switch).
+    en_resp = client_auth.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": "wrong"},
+        headers={"Accept-Language": "en"},
+    )
+    assert en_resp.status_code == 200
+    en_body = en_resp.json()
+    assert en_body["success"] is False
+    assert en_body["error"] == t("invalid_credentials", "en")
+    assert en_body["error"] == "Invalid credentials"
+
+    # Resolver actually switched languages between the two requests.
+    assert it_body["error"] != en_body["error"]
