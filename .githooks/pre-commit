@@ -1,0 +1,14 @@
+#!/bin/sh
+# IPMILink local test gate (D-15). No-push policy (CLAUDE.md): GitHub Actions is
+# intentionally NOT used; this committed hook is the enforced gate. POSIX sh so it
+# runs under the bundled Git-Bash on Windows. Activate per-clone with:
+#   git config core.hooksPath .githooks
+set -e
+echo "[pre-commit] ruff lint"
+python -m ruff check backend tests
+echo "[pre-commit] backend tests + coverage gate"
+python -m pytest --cov --cov-report=term-missing
+echo "[pre-commit] i18n parity"
+node scripts/check-i18n-parity.mjs
+echo "[pre-commit] frontend tests"
+( cd frontend && npm run test )
