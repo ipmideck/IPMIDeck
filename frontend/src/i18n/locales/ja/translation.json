@@ -476,5 +476,25 @@
     "switchServer": "インデックスでサーバーを切り替え (1-9)",
     "showHelp": "このヘルプを表示",
     "commandPalette": "コマンドパレットを開く"
+  },
+  "tour": {
+    "skip": "スキップ",
+    "next": "次へ",
+    "back": "戻る",
+    "last": "完了",
+    "close": "閉じる",
+    "replay": "ツアーを再生",
+    "navTitle": "ナビゲーション",
+    "navBody": "サイドバーでダッシュボード、FanPilot、イベントログ、ハードウェア情報を切り替えます。",
+    "serverTitle": "サーバーの切り替え",
+    "serverBody": "表示するサーバーをここで選びます。1-9 を押すと素早く切り替えられます。",
+    "widgetTitle": "ウィジェットの追加",
+    "widgetBody": "センサー、ファン、電源のウィジェットを追加してダッシュボードを作成します。",
+    "fanpilotTitle": "FanPilot",
+    "fanpilotBody": "カスタムファンカーブを作成して冷却と静音のバランスを取ります。",
+    "languageTitle": "言語",
+    "languageBody": "設定を開けばいつでも表示言語を変更できます。選択は記憶されます。",
+    "commandTitle": "コマンドパレット",
+    "commandBody": "Cmd+K（または Ctrl+K）でページ、サーバー、操作をすばやく検索できます。? を押すとすべてのショートカットを表示します。"
   }
 }

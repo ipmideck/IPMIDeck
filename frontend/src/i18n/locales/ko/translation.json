@@ -476,5 +476,25 @@
     "switchServer": "인덱스로 서버 전환 (1-9)",
     "showHelp": "이 도움말 표시",
     "commandPalette": "명령 팔레트 열기"
+  },
+  "tour": {
+    "skip": "건너뛰기",
+    "next": "다음",
+    "back": "뒤로",
+    "last": "완료",
+    "close": "닫기",
+    "replay": "둘러보기 다시 보기",
+    "navTitle": "탐색",
+    "navBody": "사이드바를 사용해 대시보드, FanPilot, 이벤트 로그, 하드웨어 정보 사이를 이동하세요.",
+    "serverTitle": "서버 전환",
+    "serverBody": "여기에서 보고 있는 서버를 선택합니다. 1-9 를 눌러 빠르게 전환하세요.",
+    "widgetTitle": "위젯 추가",
+    "widgetBody": "센서, 팬, 전원 위젯을 추가해 대시보드를 구성하세요.",
+    "fanpilotTitle": "FanPilot",
+    "fanpilotBody": "사용자 지정 팬 곡선을 만들어 냉각과 소음의 균형을 맞추세요.",
+    "languageTitle": "언어",
+    "languageBody": "설정을 열면 언제든 인터페이스 언어를 변경할 수 있습니다. 선택한 언어는 기억됩니다.",
+    "commandTitle": "명령 팔레트",
+    "commandBody": "Cmd+K(또는 Ctrl+K)를 눌러 페이지, 서버, 작업을 빠르게 검색하세요. ? 를 누르면 모든 단축키를 볼 수 있습니다."
   }
 }

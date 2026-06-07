@@ -477,5 +477,25 @@
     "switchServer": "Cambia server per indice (1-9)",
     "showHelp": "Mostra questo aiuto",
     "commandPalette": "Apri la palette comandi"
+  },
+  "tour": {
+    "skip": "Salta",
+    "next": "Avanti",
+    "back": "Indietro",
+    "last": "Fatto",
+    "close": "Chiudi",
+    "replay": "Ripeti il tour",
+    "navTitle": "Navigazione",
+    "navBody": "Usa la barra laterale per spostarti tra dashboard, FanPilot, registro eventi e info hardware.",
+    "serverTitle": "Cambia server",
+    "serverBody": "Scegli qui quale server stai visualizzando. Premi 1-9 per passare rapidamente.",
+    "widgetTitle": "Aggiungi widget",
+    "widgetBody": "Componi la tua dashboard aggiungendo widget di sensori, ventole e alimentazione.",
+    "fanpilotTitle": "FanPilot",
+    "fanpilotBody": "Crea curve delle ventole personalizzate per bilanciare raffreddamento e rumore.",
+    "languageTitle": "Lingua",
+    "languageBody": "Apri le Impostazioni per cambiare la lingua dell'interfaccia in qualsiasi momento. La tua scelta viene ricordata.",
+    "commandTitle": "Tavolozza comandi",
+    "commandBody": "Premi Cmd+K (o Ctrl+K) per cercare rapidamente pagine, server e azioni. Premi ? per vedere tutte le scorciatoie."
   }
 }

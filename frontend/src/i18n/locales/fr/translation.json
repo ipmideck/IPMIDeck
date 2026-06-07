@@ -477,5 +477,25 @@
     "switchServer": "Changer de serveur par index (1-9)",
     "showHelp": "Afficher cette aide",
     "commandPalette": "Ouvrir la palette de commandes"
+  },
+  "tour": {
+    "skip": "Ignorer",
+    "next": "Suivant",
+    "back": "Retour",
+    "last": "Terminé",
+    "close": "Fermer",
+    "replay": "Revoir la visite",
+    "navTitle": "Navigation",
+    "navBody": "Utilisez la barre latérale pour passer du tableau de bord à FanPilot, au journal d'événements et aux infos matériel.",
+    "serverTitle": "Changer de serveur",
+    "serverBody": "Choisissez ici le serveur affiché. Appuyez sur 1-9 pour basculer rapidement.",
+    "widgetTitle": "Ajouter des widgets",
+    "widgetBody": "Composez votre tableau de bord en ajoutant des widgets de capteurs, de ventilateurs et d'alimentation.",
+    "fanpilotTitle": "FanPilot",
+    "fanpilotBody": "Créez des courbes de ventilation personnalisées pour équilibrer refroidissement et bruit.",
+    "languageTitle": "Langue",
+    "languageBody": "Ouvrez les Réglages pour changer la langue de l'interface à tout moment. Votre choix est mémorisé.",
+    "commandTitle": "Palette de commandes",
+    "commandBody": "Appuyez sur Cmd+K (ou Ctrl+K) pour rechercher rapidement pages, serveurs et actions. Appuyez sur ? pour voir tous les raccourcis."
   }
 }

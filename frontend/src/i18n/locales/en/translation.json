@@ -477,5 +477,25 @@
     "switchServer": "Switch server by index (1-9)",
     "showHelp": "Show this help",
     "commandPalette": "Open command palette"
+  },
+  "tour": {
+    "skip": "Skip",
+    "next": "Next",
+    "back": "Back",
+    "last": "Done",
+    "close": "Close",
+    "replay": "Replay tour",
+    "navTitle": "Navigation",
+    "navBody": "Use the sidebar to move between the dashboard, FanPilot, the event log, and hardware info.",
+    "serverTitle": "Switch servers",
+    "serverBody": "Pick which server you're viewing here. Press 1-9 to switch quickly.",
+    "widgetTitle": "Add widgets",
+    "widgetBody": "Build your dashboard by adding sensor, fan, and power widgets.",
+    "fanpilotTitle": "FanPilot",
+    "fanpilotBody": "Create custom fan curves to balance cooling and noise.",
+    "languageTitle": "Language",
+    "languageBody": "Open Settings to change the interface language anytime. Your choice is remembered.",
+    "commandTitle": "Command palette",
+    "commandBody": "Press Cmd+K (or Ctrl+K) to quickly search pages, servers, and actions. Press ? to see all shortcuts."
   }
 }

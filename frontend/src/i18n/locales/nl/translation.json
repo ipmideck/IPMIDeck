@@ -477,5 +477,25 @@
     "switchServer": "Server wisselen op index (1-9)",
     "showHelp": "Deze help tonen",
     "commandPalette": "Opdrachtenpalet openen"
+  },
+  "tour": {
+    "skip": "Overslaan",
+    "next": "Volgende",
+    "back": "Terug",
+    "last": "Klaar",
+    "close": "Sluiten",
+    "replay": "Rondleiding opnieuw",
+    "navTitle": "Navigatie",
+    "navBody": "Gebruik de zijbalk om te schakelen tussen het dashboard, FanPilot, het gebeurtenislogboek en hardware-info.",
+    "serverTitle": "Server wisselen",
+    "serverBody": "Kies hier welke server je bekijkt. Druk op 1-9 om snel te wisselen.",
+    "widgetTitle": "Widgets toevoegen",
+    "widgetBody": "Bouw je dashboard door sensor-, ventilator- en stroomwidgets toe te voegen.",
+    "fanpilotTitle": "FanPilot",
+    "fanpilotBody": "Maak aangepaste ventilatorcurves om koeling en geluid in balans te brengen.",
+    "languageTitle": "Taal",
+    "languageBody": "Open Instellingen om de interfacetaal op elk moment te wijzigen. Je keuze wordt onthouden.",
+    "commandTitle": "Opdrachtenpalet",
+    "commandBody": "Druk op Cmd+K (of Ctrl+K) om snel pagina's, servers en acties te zoeken. Druk op ? om alle sneltoetsen te zien."
   }
 }

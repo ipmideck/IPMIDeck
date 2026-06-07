@@ -477,5 +477,25 @@
     "switchServer": "Trocar de servidor por índice (1-9)",
     "showHelp": "Mostrar esta ajuda",
     "commandPalette": "Abrir a paleta de comandos"
+  },
+  "tour": {
+    "skip": "Pular",
+    "next": "Próximo",
+    "back": "Voltar",
+    "last": "Concluir",
+    "close": "Fechar",
+    "replay": "Repetir o tour",
+    "navTitle": "Navegação",
+    "navBody": "Use a barra lateral para alternar entre o painel, o FanPilot, o registro de eventos e as informações de hardware.",
+    "serverTitle": "Trocar de servidor",
+    "serverBody": "Escolha aqui qual servidor você está visualizando. Pressione 1-9 para alternar rapidamente.",
+    "widgetTitle": "Adicionar widgets",
+    "widgetBody": "Monte seu painel adicionando widgets de sensores, ventoinhas e energia.",
+    "fanpilotTitle": "FanPilot",
+    "fanpilotBody": "Crie curvas de ventoinha personalizadas para equilibrar resfriamento e ruído.",
+    "languageTitle": "Idioma",
+    "languageBody": "Abra as Configurações para mudar o idioma da interface a qualquer momento. Sua escolha é lembrada.",
+    "commandTitle": "Paleta de comandos",
+    "commandBody": "Pressione Cmd+K (ou Ctrl+K) para buscar rapidamente páginas, servidores e ações. Pressione ? para ver todos os atalhos."
   }
 }

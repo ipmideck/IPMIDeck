@@ -479,5 +479,25 @@
     "switchServer": "Przełącz serwer według indeksu (1-9)",
     "showHelp": "Pokaż tę pomoc",
     "commandPalette": "Otwórz paletę poleceń"
+  },
+  "tour": {
+    "skip": "Pomiń",
+    "next": "Dalej",
+    "back": "Wstecz",
+    "last": "Gotowe",
+    "close": "Zamknij",
+    "replay": "Powtórz przewodnik",
+    "navTitle": "Nawigacja",
+    "navBody": "Użyj paska bocznego, aby przełączać się między pulpitem, FanPilot, dziennikiem zdarzeń i informacjami o sprzęcie.",
+    "serverTitle": "Przełączanie serwerów",
+    "serverBody": "Tutaj wybierasz oglądany serwer. Naciśnij 1-9, aby szybko przełączać.",
+    "widgetTitle": "Dodawanie widżetów",
+    "widgetBody": "Zbuduj swój pulpit, dodając widżety czujników, wentylatorów i zasilania.",
+    "fanpilotTitle": "FanPilot",
+    "fanpilotBody": "Twórz własne krzywe wentylatorów, aby zrównoważyć chłodzenie i hałas.",
+    "languageTitle": "Język",
+    "languageBody": "Otwórz Ustawienia, aby zmienić język interfejsu w dowolnej chwili. Twój wybór jest zapamiętywany.",
+    "commandTitle": "Paleta poleceń",
+    "commandBody": "Naciśnij Cmd+K (lub Ctrl+K), aby szybko wyszukać strony, serwery i akcje. Naciśnij ?, aby zobaczyć wszystkie skróty."
   }
 }

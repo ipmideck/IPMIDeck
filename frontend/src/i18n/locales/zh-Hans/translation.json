@@ -476,5 +476,25 @@
     "switchServer": "按索引切换服务器 (1-9)",
     "showHelp": "显示此帮助",
     "commandPalette": "打开命令面板"
+  },
+  "tour": {
+    "skip": "跳过",
+    "next": "下一步",
+    "back": "上一步",
+    "last": "完成",
+    "close": "关闭",
+    "replay": "重新观看导览",
+    "navTitle": "导航",
+    "navBody": "使用侧边栏在仪表盘、FanPilot、事件日志和硬件信息之间切换。",
+    "serverTitle": "切换服务器",
+    "serverBody": "在此选择正在查看的服务器。按 1-9 可快速切换。",
+    "widgetTitle": "添加小组件",
+    "widgetBody": "通过添加传感器、风扇和电源小组件来打造你的仪表盘。",
+    "fanpilotTitle": "FanPilot",
+    "fanpilotBody": "创建自定义风扇曲线，在散热与噪音之间取得平衡。",
+    "languageTitle": "语言",
+    "languageBody": "打开设置即可随时更改界面语言，你的选择会被记住。",
+    "commandTitle": "命令面板",
+    "commandBody": "按 Cmd+K（或 Ctrl+K）可快速搜索页面、服务器和操作。按 ? 查看所有快捷键。"
   }
 }

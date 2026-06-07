@@ -477,5 +477,25 @@
     "switchServer": "Server per Index wechseln (1-9)",
     "showHelp": "Diese Hilfe anzeigen",
     "commandPalette": "Befehlspalette öffnen"
+  },
+  "tour": {
+    "skip": "Überspringen",
+    "next": "Weiter",
+    "back": "Zurück",
+    "last": "Fertig",
+    "close": "Schließen",
+    "replay": "Tour wiederholen",
+    "navTitle": "Navigation",
+    "navBody": "Über die Seitenleiste wechselst du zwischen Dashboard, FanPilot, Ereignisprotokoll und Hardware-Infos.",
+    "serverTitle": "Server wechseln",
+    "serverBody": "Wähle hier, welchen Server du ansiehst. Drücke 1-9, um schnell zu wechseln.",
+    "widgetTitle": "Widgets hinzufügen",
+    "widgetBody": "Gestalte dein Dashboard mit Sensor-, Lüfter- und Strom-Widgets.",
+    "fanpilotTitle": "FanPilot",
+    "fanpilotBody": "Erstelle eigene Lüfterkurven, um Kühlung und Lautstärke auszubalancieren.",
+    "languageTitle": "Sprache",
+    "languageBody": "Öffne die Einstellungen, um die Sprache jederzeit zu ändern. Deine Wahl wird gespeichert.",
+    "commandTitle": "Befehlspalette",
+    "commandBody": "Drücke Cmd+K (oder Ctrl+K), um schnell Seiten, Server und Aktionen zu durchsuchen. Drücke ?, um alle Tastenkürzel zu sehen."
   }
 }
