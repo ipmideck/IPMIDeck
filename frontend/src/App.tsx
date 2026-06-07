@@ -10,6 +10,7 @@ import {
 import { Toaster } from "sonner";
 import { PageLayout } from "@/components/layout/PageLayout";
 import { CommandPalette } from "@/components/CommandPalette";
+import { ShortcutsHelp } from "@/components/ShortcutsHelp";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { applyTheme, useThemeStore } from "@/stores/theme-store";
 import { useServerStore } from "@/stores/server-store";
@@ -161,6 +162,7 @@ function AppShell() {
         </Routes>
       </Suspense>
       <CommandPalette />
+      <ShortcutsHelp />
       <Toaster
         theme="dark"
         position="bottom-right"
