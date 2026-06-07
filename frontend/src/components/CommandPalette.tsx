@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useServerStore } from "@/stores/server-store";
+import { useUIOverlayStore } from "@/stores/ui-overlay-store";
 import { put } from "@/api/client";
 import {
   LayoutDashboard,
@@ -41,6 +42,14 @@ export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const { servers, setContextServer } = useServerStore();
+  const setCommandOpen = useUIOverlayStore((s) => s.setCommandOpen);
+
+  // Mirror the palette's local open state into ui-overlay-store.commandOpen so the
+  // keyboard-shortcuts guard suppresses nav/server shortcuts while the palette is open
+  // (D-07 / REVIEWS MED #9). The palette still owns its own open state — this only syncs.
+  useEffect(() => {
+    setCommandOpen(open);
+  }, [open, setCommandOpen]);
 
   // Listen for Cmd+K / Ctrl+K
   useEffect(() => {
