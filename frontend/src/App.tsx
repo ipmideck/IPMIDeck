@@ -11,6 +11,7 @@ import { Toaster } from "sonner";
 import { PageLayout } from "@/components/layout/PageLayout";
 import { CommandPalette } from "@/components/CommandPalette";
 import { ShortcutsHelp } from "@/components/ShortcutsHelp";
+import { OnboardingTour } from "@/components/OnboardingTour";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { applyTheme, useThemeStore } from "@/stores/theme-store";
 import { useServerStore } from "@/stores/server-store";
@@ -145,6 +146,7 @@ function AppShell() {
             element={
               <AuthGate>
                 <PageLayout>
+                  <OnboardingTour />
                   <Suspense fallback={<Loading />}>
                     <Routes>
                       <Route path="/" element={<Dashboard />} />
