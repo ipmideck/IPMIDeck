@@ -46,6 +46,7 @@ export default function Dashboard() {
       <Header title={t("nav.dashboard")}>
         <button
           onClick={() => setCatalogOpen(true)}
+          data-tour="add-widget"
           className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
         >
           <Plus className="h-3.5 w-3.5" />

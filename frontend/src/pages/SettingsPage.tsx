@@ -3,6 +3,7 @@ import { useTranslation, Trans } from "react-i18next";
 import { Header } from "@/components/layout/Header";
 import { useServerStore, type Server } from "@/stores/server-store";
 import { useThemeStore } from "@/stores/theme-store";
+import { useTourStore } from "@/stores/tour-store";
 import { useAuthStore } from "@/stores/auth-store";
 import { useBackendOnline } from "@/stores/connection-store";
 import { get, post, put, del } from "@/api/client";
@@ -16,6 +17,7 @@ export default function SettingsPage() {
   const { t } = useTranslation();
   const { servers, setServers } = useServerStore();
   const { theme, setTheme } = useThemeStore();
+  const startTour = useTourStore((s) => s.start);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: "", description: "", host: "", username: "", password: "", vendor: "dell" });
   const [testing, setTesting] = useState<string | null>(null);
@@ -471,9 +473,19 @@ export default function SettingsPage() {
               ))}
             </div>
             {/* Language switcher (D-11/D-12): native names, switchable anytime, applies immediately + persists via the i18next detector. */}
-            <div className="mt-4 flex items-center justify-between gap-3">
+            <div className="mt-4 flex items-center justify-between gap-3" data-tour="language-select">
               <span className="text-sm font-medium">{t("settings.language")}</span>
               <LanguageSelect className="rounded-md border border-border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+            </div>
+            {/* Replay onboarding tour (UX-02 / D-03): re-runs the guided tour anytime. */}
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <span className="text-sm font-medium">{t("tour.replay")}</span>
+              <button
+                onClick={startTour}
+                className="rounded-md border border-border px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted"
+              >
+                {t("tour.replay")}
+              </button>
             </div>
           </div>
 
