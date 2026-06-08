@@ -9,8 +9,6 @@ asyncio_mode="auto" does not affect sync tests; these are plain `def test_*`.
 
 from __future__ import annotations
 
-import pytest
-
 from backend.modules.fanpilot.engine import FanPilotController, interpolate_curve
 
 CURVE = [{"temp": 40, "speed": 20}, {"temp": 80, "speed": 100}]
@@ -67,18 +65,10 @@ RETENTION_CURVE = [{"temp": 40, "speed": 30}, {"temp": 90, "speed": 100}]
 # interpolate_curve(RETENTION_CURVE, 83) == 90  (< 100) -> distinguishes retained safety from curve.
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "REAL ENGINE BUG (REVIEWS MED #12): compute_fan_speed does NOT retain the 100%% "
-        "safety speed once temp drops below safety_threshold but is still above "
-        "threshold - hysteresis. _safety_active stays True (it is only cleared below "
-        "threshold-hysteresis), yet the method falls through to curve interpolation and "
-        "returns the curve value (90) instead of 100. This xfail LOCKS the correct expected "
-        "behavior (retained 100) and proves the bug; it does NOT weaken the assertion. "
-        "Remove the xfail once the engine retains safety until temp < threshold-hysteresis."
-    ),
-)
+# FIXED (was REVIEWS MED #12, debug: fanpilot-safety-retention-hysteresis): compute_fan_speed
+# now RETAINS the 100% safety speed once tripped, holding through the (threshold-hysteresis,
+# threshold) band until temp clears the lower boundary. The previous xfail(strict=True) that
+# proved the latent bug has been removed now that the engine retains safety correctly.
 def test_compute_safety_retention_holds_100_until_below_hysteresis_band():
     """After safety activates at 90C, a later 83C call (in the 82..85 band) must STILL return 100.
 

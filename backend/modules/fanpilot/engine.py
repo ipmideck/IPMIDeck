@@ -63,6 +63,16 @@ class FanPilotController:
             self._safety_active = False
             logger.info("Safety override cleared on %s: temp %.1f°C", self.server_id, current_temp)
 
+        # Safety override retention — non-negotiable
+        # Once tripped, HOLD 100% all the way down through the hysteresis band until temp
+        # clears the lower boundary (safety_threshold - hysteresis); only the clear-check
+        # above releases it. Without this, fans drop to the curve value as soon as temp
+        # dips below the threshold — one band too early.
+        if self._safety_active:
+            self._last_temp = current_temp
+            self._last_speed = 100
+            return 100
+
         # Normal curve interpolation
         target_speed = interpolate_curve(curve_points, current_temp)
 
