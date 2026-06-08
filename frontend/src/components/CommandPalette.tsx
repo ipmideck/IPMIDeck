@@ -213,6 +213,11 @@ export function CommandPalette() {
               clickable. Non-modal Radix renders no overlay of its own here. */}
           <Dialog.Content
             aria-label={t("palette.label")}
+            // Stable anchor for the onboarding tour's command step (260608-7kj
+            // step-6 fix): the tour targets this element with a SIDE placement so
+            // its tooltip renders OUTSIDE the palette rectangle (not centered
+            // behind it), keeping the Next/Done/Back/Skip buttons clickable.
+            data-tour="command-palette"
             className="fixed top-[20%] left-1/2 -translate-x-1/2 w-full max-w-lg"
             style={{ zIndex: 10001 }}
             // Keep the tour in control of dismissal: don't auto-close on outside

@@ -137,9 +137,11 @@ export function OnboardingTour() {
   // Steps 1-4 anchor to data-tour attributes that ALL live on the Dashboard
   // route (Sidebar + Dashboard header). Step 5 (language) navigates to /settings
   // and spotlights the REAL lazy language selector (awaited via targetWaitTimeout);
-  // step 6 (Cmd+K) opens the REAL cmdk palette live (centered, since the palette
-  // is itself a centered modal). Both stay uncontrolled + continuous and drive
-  // their work via per-step before/after hooks (RESEARCH §3/§4).
+  // step 6 (Cmd+K) opens the REAL cmdk palette live and anchors the tooltip to the
+  // open palette ([data-tour="command-palette"]) with a SIDE placement so the
+  // tooltip sits BESIDE the palette (not behind it) and its buttons stay clickable.
+  // Both stay uncontrolled + continuous and drive their work via per-step
+  // before/after hooks (RESEARCH §3/§4).
   const steps: Step[] = [
     {
       target: '[data-tour="sidebar-nav"]',
@@ -192,18 +194,34 @@ export function OnboardingTour() {
       // Open the REAL cmdk palette live. The tour-driven open is NON-MODAL and
       // z-raised (CommandPalette branches on commandOpenRequest): the palette
       // content sits at z 10001 — ABOVE the joyride dim (overlay z 10000) so it's
-      // visible over the backdrop — while this centered tooltip's floater (also
-      // 10001, mounted AFTER the palette via this before-hook) renders on top and
-      // its Next/Done/Back/Skip buttons stay clickable. Non-modal removes the
-      // palette's focus trap + outside-inert that previously trapped the tour
-      // (BUG 2). Keep the tooltip centered (target: body) — the palette is the
-      // visual focus above the dim; do NOT spotlight it.
-      target: "body",
-      placement: "center",
+      // visible over the backdrop — while this tooltip's floater (also 10001)
+      // renders on top. Non-modal removes the palette's focus trap + outside-inert
+      // that previously trapped the tour (BUG 2).
+      //
+      // STEP-6 FIX (260608-7kj follow-up): a CENTERED tooltip (target:body /
+      // placement:center) rendered directly BEHIND the centered palette. Both sit
+      // at z 10001 and react-joyride hardcodes floater = overlay zIndex + 1, so the
+      // tie can't be broken by an integer and the palette painted on top — its
+      // Next/Done/Back/Skip buttons were unclickable. The fix is POSITIONAL: anchor
+      // the step to the open palette element ([data-tour="command-palette"] on the
+      // palette's Dialog.Content) with placement "right" so the tooltip renders in
+      // the open space BESIDE the palette, fully OUTSIDE its rectangle. The palette
+      // is centered (~505–1015px on a 1536px viewport), leaving ~520px on the right
+      // for the ~340px tooltip. The before hook opens the palette then AWAITS the
+      // element so react-joyride attaches to the real anchor before presenting.
+      target: '[data-tour="command-palette"]',
+      placement: "right",
       title: t("tour.commandTitle"),
       content: t("tour.commandBody"),
+      // Belt-and-braces: if the palette portal mounts a hair after the before hook
+      // resolves, let the engine keep polling for the anchor before giving up.
+      targetWaitTimeout: 5000,
       before: async () => {
         requestCommandOpen(true);
+        // Block the step until the non-modal palette's Dialog.Content actually
+        // exists in the DOM so react-joyride spotlights/anchors the real palette
+        // (and the side-placed tooltip lands beside it) instead of skipping.
+        await waitForEl('[data-tour="command-palette"]', 4500);
       },
       after: () => {
         requestCommandOpen(false);
