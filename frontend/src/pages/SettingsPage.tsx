@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useTranslation, Trans } from "react-i18next";
+import { useTranslation } from "react-i18next";
 import { Header } from "@/components/layout/Header";
 import { useServerStore, type Server } from "@/stores/server-store";
 import { useThemeStore } from "@/stores/theme-store";
@@ -9,7 +9,7 @@ import { useBackendOnline } from "@/stores/connection-store";
 import { get, post, put, del } from "@/api/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { Plus, Trash2, TestTube, Pencil, ExternalLink, Heart, Code2, Moon, Sun, Monitor, Server as ServerIcon, ShieldCheck, ShieldOff } from "lucide-react";
+import { Plus, Trash2, TestTube, Pencil, ExternalLink, Heart, Code2, Globe, Moon, Sun, Monitor, Server as ServerIcon, ShieldCheck, ShieldOff } from "lucide-react";
 import { EmptyState } from "@/components/common/EmptyState";
 import { LanguageSelect } from "@/components/LanguageSelect";
 
@@ -507,18 +507,15 @@ export default function SettingsPage() {
                     <a href="https://github.com/dev-luigi" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground">
                       <Code2 className="h-3 w-3" /> dev-luigi <ExternalLink className="h-2.5 w-2.5" />
                     </a>
+                    <a href="https://luigitanzillo.it/" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground">
+                      <Globe className="h-3 w-3" /> luigitanzillo.it <ExternalLink className="h-2.5 w-2.5" />
+                    </a>
                     <a href="https://github.com/sponsors/dev-luigi" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded-md border border-pink-500/30 bg-pink-500/10 px-2 py-0.5 text-[11px] font-medium text-pink-400 transition-colors hover:bg-pink-500/20">
                       <Heart className="h-3 w-3 fill-current" /> {t("settings.sponsor")} <ExternalLink className="h-2.5 w-2.5" />
                     </a>
                   </div>
                 </div>
               </div>
-              <div className="border-t border-border" />
-              <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                <Trans i18nKey="settings.about.madeWith">
-                  Made with <Heart className="h-3 w-3 text-red-500" /> for the homelab community
-                </Trans>
-              </p>
             </div>
           </div>
         </div>
