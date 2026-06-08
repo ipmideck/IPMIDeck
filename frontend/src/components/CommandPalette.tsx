@@ -94,20 +94,21 @@ export function CommandPalette() {
     setOpen(false);
   }
 
-  return (
-    <Command.Dialog
-      open={open}
-      onOpenChange={setOpen}
-      label={t("palette.label")}
-      loop
-      overlayClassName="fixed inset-0 bg-black/50 z-50"
-      contentClassName="fixed top-[20%] left-1/2 -translate-x-1/2 z-50 w-full max-w-lg"
-    >
-      {/* Visually-hidden Radix title: cmdk renders these children inside its
-          internal RadixDialog.Content, satisfying Radix's DialogTitle
-          accessibility requirement (F1). The palette has no visible title. */}
-      <Dialog.Title className="sr-only">{t("palette.label")}</Dialog.Title>
-      <div className="rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl overflow-hidden">
+  // When the onboarding tour drives the palette open (260608-7kj), it must coexist
+  // with the react-joyride overlay/tooltip instead of trapping focus underneath it.
+  // The default cmdk Command.Dialog renders a MODAL Radix dialog (focus trap +
+  // outside-inert/pointer-events:none + its own z-50 overlay) — that makes the
+  // joyride tooltip's buttons unclickable. For the tour-driven open we instead
+  // render a NON-MODAL Radix dialog (no focus trap, no inert, no Radix overlay)
+  // and raise the content ABOVE the joyride overlay (zIndex 10000) so the palette
+  // is visible over the dim while the joyride tooltip (floater = overlay+1 = 10001)
+  // still floats on top and stays interactive.
+  const tourDriven = commandOpenRequest;
+
+  // Shared inner content (input + grouped list). Identical for both modes — only
+  // the surrounding dialog (modal vs non-modal) and z-index differ.
+  const paletteInner = (
+    <div className="rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl overflow-hidden">
         <Command.Input
           placeholder={t("palette.placeholder")}
           className="w-full border-b border-border bg-transparent px-4 py-3 text-sm outline-none placeholder:text-muted-foreground"
@@ -192,6 +193,59 @@ export function CommandPalette() {
           </Command.Group>
         </Command.List>
       </div>
+  );
+
+  // Tour-driven: NON-MODAL so the joyride tooltip stays interactive (no focus
+  // trap, no outside-inert, no Radix overlay). Raise the content above the
+  // joyride overlay (z 10000) so the palette shows over the dim; the joyride
+  // floater (10001) still renders on top and its buttons remain clickable.
+  // We render Radix Dialog.Root directly (NOT cmdk's Command.Dialog) because
+  // cmdk's Command.Dialog does not forward `modal` to Dialog.Root at runtime —
+  // it only passes open/onOpenChange and spreads the rest onto Command.Root.
+  if (tourDriven) {
+    return (
+      <Dialog.Root open={open} onOpenChange={setOpen} modal={false}>
+        <Dialog.Portal>
+          {/* No own overlay: the joyride overlay (z 10000) already dims the page.
+              The palette content sits ABOVE it (10001) so it shows over the dim,
+              while the joyride floater/tooltip (also 10001, but its portal mounts
+              AFTER this one via the step `before` hook) renders on top and stays
+              clickable. Non-modal Radix renders no overlay of its own here. */}
+          <Dialog.Content
+            aria-label={t("palette.label")}
+            className="fixed top-[20%] left-1/2 -translate-x-1/2 w-full max-w-lg"
+            style={{ zIndex: 10001 }}
+            // Keep the tour in control of dismissal: don't auto-close on outside
+            // interaction (the user may click the joyride tooltip buttons).
+            onInteractOutside={(e) => e.preventDefault()}
+            onPointerDownOutside={(e) => e.preventDefault()}
+          >
+            <Dialog.Title className="sr-only">{t("palette.label")}</Dialog.Title>
+            <Command label={t("palette.label")} loop>
+              {paletteInner}
+            </Command>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+    );
+  }
+
+  // Normal Cmd+K: keep the EXISTING modal behavior (focus trap, z-50 overlay) and
+  // the commandOpen mirror intact so the `?`-suppression guard (260608-6fw) works.
+  return (
+    <Command.Dialog
+      open={open}
+      onOpenChange={setOpen}
+      label={t("palette.label")}
+      loop
+      overlayClassName="fixed inset-0 bg-black/50 z-50"
+      contentClassName="fixed top-[20%] left-1/2 -translate-x-1/2 z-50 w-full max-w-lg"
+    >
+      {/* Visually-hidden Radix title: cmdk renders these children inside its
+          internal RadixDialog.Content, satisfying Radix's DialogTitle
+          accessibility requirement (F1). The palette has no visible title. */}
+      <Dialog.Title className="sr-only">{t("palette.label")}</Dialog.Title>
+      {paletteInner}
     </Command.Dialog>
   );
 }

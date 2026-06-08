@@ -27,6 +27,30 @@ import { useUIOverlayStore } from "@/stores/ui-overlay-store";
  */
 
 /**
+ * Poll the DOM until `selector` exists (or `timeout` elapses), then resolve.
+ * Used by the Language step's `before` hook: after navigating to /settings the
+ * SettingsPage is lazy-loaded, so `[data-tour="language-select"]` is NOT in the
+ * DOM yet. Awaiting this before the step presents guarantees react-joyride finds
+ * the real anchor and does not skip the step (BUG 1). Resolves (never rejects)
+ * so the tour always continues even if the anchor never appears.
+ */
+function waitForEl(selector: string, timeout = 5000): Promise<void> {
+  return new Promise((resolve) => {
+    if (document.querySelector(selector)) {
+      resolve();
+      return;
+    }
+    const start = Date.now();
+    const id = setInterval(() => {
+      if (document.querySelector(selector) || Date.now() - start > timeout) {
+        clearInterval(id);
+        resolve();
+      }
+    }, 50);
+  });
+}
+
+/**
  * Custom themed tooltip (v2 redesign). Uses the app's Tailwind tokens so it
  * inherits light/dark for free (same tokens as CommandPalette / Sidebar). Adds a
  * step counter + dot indicators and an accent primary button. Mirrors
@@ -148,16 +172,32 @@ export function OnboardingTour() {
       title: t("tour.languageTitle"),
       content: t("tour.languageBody"),
       placement: "left", // selector sits at the right edge of the Appearance card
-      targetWaitTimeout: 4000,
+      // Backstop: even if the before-hook somehow resolves early, the engine still
+      // polls for the lazy target up to 5s before giving up (BUG 1 belt-and-braces).
+      targetWaitTimeout: 5000,
       before: async () => {
         if (location.pathname !== "/settings") navigate("/settings");
-        // Let the route swap commit before the engine starts polling.
-        await new Promise((r) => setTimeout(r, 0));
+        // The SettingsPage is lazy-loaded — block the step until the real anchor
+        // actually mounts so react-joyride attaches/spotlights it instead of
+        // skipping the step (BUG 1). The 100ms targetWaitTimeout default was too
+        // short for the lazy chunk to load + render; awaiting the element here
+        // makes the step reliable. Cap at 4500ms — just under the engine's
+        // beforeTimeout (5000ms) so this hook always resolves before the engine
+        // force-times-out the before phase; the targetWaitTimeout backstop (5000ms)
+        // then covers an anchor that mounts a hair later.
+        await waitForEl('[data-tour="language-select"]', 4500);
       },
     },
     {
-      // Open the REAL cmdk palette live; keep the tooltip centered (the palette is
-      // itself a centered modal — do NOT try to spotlight it, RESEARCH §4 note).
+      // Open the REAL cmdk palette live. The tour-driven open is NON-MODAL and
+      // z-raised (CommandPalette branches on commandOpenRequest): the palette
+      // content sits at z 10001 — ABOVE the joyride dim (overlay z 10000) so it's
+      // visible over the backdrop — while this centered tooltip's floater (also
+      // 10001, mounted AFTER the palette via this before-hook) renders on top and
+      // its Next/Done/Back/Skip buttons stay clickable. Non-modal removes the
+      // palette's focus trap + outside-inert that previously trapped the tour
+      // (BUG 2). Keep the tooltip centered (target: body) — the palette is the
+      // visual focus above the dim; do NOT spotlight it.
       target: "body",
       placement: "center",
       title: t("tour.commandTitle"),
