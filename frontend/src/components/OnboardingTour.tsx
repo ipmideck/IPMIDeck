@@ -256,8 +256,12 @@ export function OnboardingTour() {
       // Real end: force-close the palette (covers a mid-command-step skip), return
       // the user to the dashboard in a clean state, then remember it and lift the
       // overlay suppression. markSeen stays gated on this terminal branch only.
+      // navigate("/") is unconditional: a guard on `location.pathname` reads a STALE
+      // closure (captured as "/" when the tour started on the dashboard), so the
+      // return-to-dashboard never fired when the tour ended on /settings (step 6).
+      // navigate("/") is a no-op when already on "/", so dropping the guard is safe.
       requestCommandOpen(false);
-      if (location.pathname !== "/") navigate("/");
+      navigate("/");
       markSeen();
       setTourOpen(false);
     } else if (status === STATUS.IDLE) {
