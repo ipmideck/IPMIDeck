@@ -1,7 +1,13 @@
 import { useEffect } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Joyride, STATUS, type EventData, type Step } from "react-joyride";
+import {
+  Joyride,
+  STATUS,
+  type EventData,
+  type Step,
+  type TooltipRenderProps,
+} from "react-joyride";
 import { useTourStore } from "@/stores/tour-store";
 import { useUIOverlayStore } from "@/stores/ui-overlay-store";
 
@@ -16,26 +22,108 @@ import { useUIOverlayStore } from "@/stores/ui-overlay-store";
  * react-joyride 3.1.0 API: `Joyride` is a NAMED export, the callback prop is
  * `onEvent` (payload `EventData` carries `status`), the Skip button is enabled by
  * including "skip" in `options.buttons`, and the overlay z-index lives in
- * `options.zIndex`.
+ * `options.zIndex`. The tooltip is fully custom via `tooltipComponent` and the
+ * spotlight ring/glow is styled via `styles.spotlight` (an SVG <path>, NOT CSS).
  */
+
+/**
+ * Custom themed tooltip (v2 redesign). Uses the app's Tailwind tokens so it
+ * inherits light/dark for free (same tokens as CommandPalette / Sidebar). Adds a
+ * step counter + dot indicators and an accent primary button. Mirrors
+ * DefaultTooltip's button gating: skip only when !isLastStep, back only when
+ * index > 0. All button props (onClick + a11y + label `title`) come from
+ * react-joyride; labels resolve from the <Joyride locale={...}> prop.
+ */
+function TourTooltip({
+  index,
+  size,
+  isLastStep,
+  step,
+  backProps,
+  skipProps,
+  primaryProps,
+  tooltipProps,
+}: TooltipRenderProps) {
+  return (
+    <div
+      {...tooltipProps}
+      className="w-[340px] max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-popover text-popover-foreground shadow-lg"
+    >
+      <div className="p-4">
+        {step.title && <h4 className="mb-1.5 text-sm font-semibold">{step.title}</h4>}
+        <div className="text-sm text-muted-foreground">{step.content}</div>
+      </div>
+      <div className="flex items-center justify-between gap-2 border-t border-border px-4 py-3">
+        <div className="flex items-center gap-2">
+          <span className="text-xs tabular-nums text-muted-foreground">
+            {index + 1} / {size}
+          </span>
+          <div className="flex gap-1">
+            {Array.from({ length: size }).map((_, i) => (
+              <span
+                key={i}
+                className={
+                  "h-1.5 w-1.5 rounded-full " +
+                  (i === index ? "bg-primary" : "bg-muted-foreground/30")
+                }
+              />
+            ))}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {!isLastStep && (
+            <button
+              {...skipProps}
+              className="rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted"
+            >
+              {skipProps.title}
+            </button>
+          )}
+          {index > 0 && (
+            <button
+              {...backProps}
+              className="rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted"
+            >
+              {backProps.title}
+            </button>
+          )}
+          <button
+            {...primaryProps}
+            className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
+          >
+            {primaryProps.title}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function OnboardingTour() {
   const { t } = useTranslation();
   const location = useLocation();
+  const navigate = useNavigate();
   const run = useTourStore((s) => s.run);
   const seen = useTourStore((s) => s.seen);
   const markSeen = useTourStore((s) => s.markSeen);
   const start = useTourStore((s) => s.start);
   const setTourOpen = useUIOverlayStore((s) => s.setTourOpen);
+  const requestCommandOpen = useUIOverlayStore((s) => s.requestCommandOpen);
 
   // Steps 1-4 anchor to data-tour attributes that ALL live on the Dashboard
-  // route (Sidebar + Dashboard header). Steps 5 (language) and 6 (Cmd+K) are
-  // target-less centered steps: language-select lives only in Settings (lazy,
-  // unmounted on first-login Dashboard) and cmdk has no always-visible trigger.
+  // route (Sidebar + Dashboard header). Step 5 (language) navigates to /settings
+  // and spotlights the REAL lazy language selector (awaited via targetWaitTimeout);
+  // step 6 (Cmd+K) opens the REAL cmdk palette live (centered, since the palette
+  // is itself a centered modal). Both stay uncontrolled + continuous and drive
+  // their work via per-step before/after hooks (RESEARCH §3/§4).
   const steps: Step[] = [
     {
       target: '[data-tour="sidebar-nav"]',
       title: t("tour.navTitle"),
       content: t("tour.navBody"),
+      // Land the box at the lower-right of the nav column (not floating
+      // mid-menu). Orchestrator verifies this live and may adjust the value.
+      placement: "right-end",
     },
     {
       target: '[data-tour="server-switcher"]',
@@ -53,16 +141,33 @@ export function OnboardingTour() {
       content: t("tour.fanpilotBody"),
     },
     {
-      target: "body",
-      placement: "center",
+      // Real language selector lives in the lazy /settings route. Navigate there
+      // in `before`, then let targetWaitTimeout poll (every 100ms) for the anchor
+      // to mount before the step presents (RESEARCH §3).
+      target: '[data-tour="language-select"]',
       title: t("tour.languageTitle"),
       content: t("tour.languageBody"),
+      placement: "left", // selector sits at the right edge of the Appearance card
+      targetWaitTimeout: 4000,
+      before: async () => {
+        if (location.pathname !== "/settings") navigate("/settings");
+        // Let the route swap commit before the engine starts polling.
+        await new Promise((r) => setTimeout(r, 0));
+      },
     },
     {
+      // Open the REAL cmdk palette live; keep the tooltip centered (the palette is
+      // itself a centered modal — do NOT try to spotlight it, RESEARCH §4 note).
       target: "body",
       placement: "center",
       title: t("tour.commandTitle"),
       content: t("tour.commandBody"),
+      before: async () => {
+        requestCommandOpen(true);
+      },
+      after: () => {
+        requestCommandOpen(false);
+      },
     },
   ];
 
@@ -90,7 +195,11 @@ export function OnboardingTour() {
       // so pressing "?" never opens the help modal on top of the tour.
       setTourOpen(true);
     } else if (status === STATUS.FINISHED || status === STATUS.SKIPPED) {
-      // Real end: remember it and lift the overlay suppression.
+      // Real end: force-close the palette (covers a mid-command-step skip), return
+      // the user to the dashboard in a clean state, then remember it and lift the
+      // overlay suppression. markSeen stays gated on this terminal branch only.
+      requestCommandOpen(false);
+      if (location.pathname !== "/") navigate("/");
       markSeen();
       setTourOpen(false);
     } else if (status === STATUS.IDLE) {
@@ -99,12 +208,19 @@ export function OnboardingTour() {
     }
   }
 
+  // Theme-aware backdrop dim: a single overlayColor reads too dark in light mode
+  // / too light in dark mode. The app toggles theme via the `dark` class on
+  // documentElement (theme-store), so read it at render and pick a tuned alpha.
+  // The accent ring/glow use var(--primary), which is theme-correct in both.
+  const isDark = document.documentElement.classList.contains("dark");
+
   return (
     <Joyride
       steps={steps}
       run={run}
       continuous
       onEvent={handleEvent}
+      tooltipComponent={TourTooltip}
       locale={{
         skip: t("tour.skip"),
         next: t("tour.next"),
@@ -112,7 +228,29 @@ export function OnboardingTour() {
         last: t("tour.last"),
         close: t("tour.close"),
       }}
-      options={{ zIndex: 10000, buttons: ["back", "skip", "primary"], skipBeacon: true }}
+      styles={{
+        // The spotlight is an SVG <path>, so these are SVG attributes (stroke for
+        // the ring, filter for the glow) — NOT CSS box-shadow. If var(--primary)
+        // does not resolve inside the SVG paint context during live UAT, the
+        // orchestrator may swap to the computed token value.
+        spotlight: {
+          stroke: "var(--primary)",
+          strokeWidth: 2,
+          rx: 8,
+          ry: 8,
+          filter: "drop-shadow(0 0 6px var(--primary)) drop-shadow(0 0 14px var(--primary))",
+        },
+      }}
+      options={{
+        zIndex: 10000,
+        buttons: ["back", "skip", "primary"],
+        skipBeacon: true,
+        spotlightPadding: 6,
+        spotlightRadius: 8,
+        // Theme-aware backdrop dim (overlayColor lives on `options` in v3.1.0,
+        // not on `styles.options`): lighter for light theme, heavier for dark.
+        overlayColor: isDark ? "rgba(0,0,0,0.55)" : "rgba(0,0,0,0.35)",
+      }}
     />
   );
 }

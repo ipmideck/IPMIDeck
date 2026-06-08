@@ -44,6 +44,7 @@ export function CommandPalette() {
   const navigate = useNavigate();
   const { servers, setContextServer } = useServerStore();
   const setCommandOpen = useUIOverlayStore((s) => s.setCommandOpen);
+  const commandOpenRequest = useUIOverlayStore((s) => s.commandOpenRequest);
 
   // Mirror the palette's local open state into ui-overlay-store.commandOpen so the
   // keyboard-shortcuts guard suppresses nav/server shortcuts while the palette is open
@@ -51,6 +52,15 @@ export function CommandPalette() {
   useEffect(() => {
     setCommandOpen(open);
   }, [open, setCommandOpen]);
+
+  // React to the onboarding tour's inward "request open" flag (260608-7kj): the
+  // tour sets requestCommandOpen(true/false) during its command-palette step to
+  // open/close the REAL palette live. This drives local `open`, so the outward
+  // mirror above still fires (keeping the keyboard ?-guard intact). Cmd+K and the
+  // local open state remain the source of truth for normal use.
+  useEffect(() => {
+    setOpen(commandOpenRequest);
+  }, [commandOpenRequest]);
 
   // Listen for Cmd+K / Ctrl+K
   useEffect(() => {
