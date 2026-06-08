@@ -62,3 +62,39 @@ describe("useKeyboardShortcuts input-focus guard (UX-01 / D-07)", () => {
     expect(navSpy).toHaveBeenCalledWith("/fanpilot");
   });
 });
+
+describe("useKeyboardShortcuts ? help guard (F3)", () => {
+  it("DOES open help when '?' is pressed and no overlay is open", async () => {
+    const user = userEvent.setup();
+    renderHarness();
+    (document.activeElement as HTMLElement | null)?.blur();
+
+    expect(useUIOverlayStore.getState().helpOpen).toBe(false);
+    await user.keyboard("?");
+    expect(useUIOverlayStore.getState().helpOpen).toBe(true);
+  });
+
+  it("does NOT open help when '?' is pressed while the tour is open", async () => {
+    const user = userEvent.setup();
+    renderHarness();
+    (document.activeElement as HTMLElement | null)?.blur();
+
+    // Tour is running — pressing "?" must NOT stack the help modal on top of it.
+    useUIOverlayStore.setState({ tourOpen: true });
+
+    await user.keyboard("?");
+    expect(useUIOverlayStore.getState().helpOpen).toBe(false);
+  });
+
+  it("does NOT open help when '?' is pressed while the command palette is open", async () => {
+    const user = userEvent.setup();
+    renderHarness();
+    (document.activeElement as HTMLElement | null)?.blur();
+
+    // Cmd/Ctrl+K palette is open — pressing "?" must NOT stack help on top of it.
+    useUIOverlayStore.setState({ commandOpen: true });
+
+    await user.keyboard("?");
+    expect(useUIOverlayStore.getState().helpOpen).toBe(false);
+  });
+});

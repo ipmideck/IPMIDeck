@@ -27,11 +27,15 @@ export function useKeyboardShortcuts() {
       // Skip if any modifier key is held (except shift for letters — "?" = Shift+/ passes).
       if (e.ctrlKey || e.metaKey || e.altKey) return;
 
-      // "?" opens the shortcuts help modal. Always allowed so it stays re-triggerable.
-      // Placed AFTER the input guard so typing "?" in a text field does nothing.
+      // "?" opens the shortcuts help modal. Placed AFTER the input guard so typing
+      // "?" in a text field does nothing. Suppressed while the tour or the command
+      // palette is open (F3) so help never stacks on top of them; still allowed when
+      // only help itself is open so it stays re-triggerable.
       if (e.key === "?") {
+        const overlay = useUIOverlayStore.getState();
+        if (overlay.tourOpen || overlay.commandOpen) return;
         e.preventDefault();
-        useUIOverlayStore.getState().setHelpOpen(true);
+        overlay.setHelpOpen(true);
         return;
       }
 
