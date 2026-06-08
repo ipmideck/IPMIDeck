@@ -76,13 +76,25 @@ export function OnboardingTour() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seen, location.pathname]);
 
+  // Robustness (F3): clear the overlay flag whenever the tour is not running for
+  // any reason (e.g. a stop path that never emits FINISHED/SKIPPED). The RUNNING
+  // branch in handleEvent keeps it true while the tour is on screen.
+  useEffect(() => {
+    if (!run) setTourOpen(false);
+  }, [run, setTourOpen]);
+
   function handleEvent(data: EventData) {
     const { status } = data;
     if (status === STATUS.RUNNING) {
-      // Suppress nav/server keyboard shortcuts while the tour is on screen.
+      // Suppress nav/server keyboard shortcuts for the WHOLE running tour (F3),
+      // so pressing "?" never opens the help modal on top of the tour.
       setTourOpen(true);
     } else if (status === STATUS.FINISHED || status === STATUS.SKIPPED) {
+      // Real end: remember it and lift the overlay suppression.
       markSeen();
+      setTourOpen(false);
+    } else if (status === STATUS.IDLE) {
+      // Tour not running (idle/reset): clear the flag but do NOT mark seen.
       setTourOpen(false);
     }
   }
@@ -100,7 +112,7 @@ export function OnboardingTour() {
         last: t("tour.last"),
         close: t("tour.close"),
       }}
-      options={{ zIndex: 10000, buttons: ["back", "skip", "primary"] }}
+      options={{ zIndex: 10000, buttons: ["back", "skip", "primary"], skipBeacon: true }}
     />
   );
 }

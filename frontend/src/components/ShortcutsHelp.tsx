@@ -1,4 +1,5 @@
 import { Command } from "cmdk";
+import * as Dialog from "@radix-ui/react-dialog";
 import { useTranslation } from "react-i18next";
 import { useUIOverlayStore } from "@/stores/ui-overlay-store";
 
@@ -27,6 +28,10 @@ export function ShortcutsHelp() {
       overlayClassName="fixed inset-0 bg-black/50 z-50"
       contentClassName="fixed top-[20%] left-1/2 -translate-x-1/2 z-50 w-full max-w-lg"
     >
+      {/* Visually-hidden Radix title: cmdk renders these children inside its
+          internal RadixDialog.Content, so this satisfies Radix's DialogTitle
+          accessibility requirement (F1). The visible heading below stays. */}
+      <Dialog.Title className="sr-only">{t("shortcuts.title")}</Dialog.Title>
       <div className="rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl overflow-hidden">
         <div className="border-b border-border px-4 py-3 text-sm font-medium">
           {t("shortcuts.title")}

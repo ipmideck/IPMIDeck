@@ -1,4 +1,5 @@
 import { Command } from "cmdk";
+import * as Dialog from "@radix-ui/react-dialog";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -92,6 +93,10 @@ export function CommandPalette() {
       overlayClassName="fixed inset-0 bg-black/50 z-50"
       contentClassName="fixed top-[20%] left-1/2 -translate-x-1/2 z-50 w-full max-w-lg"
     >
+      {/* Visually-hidden Radix title: cmdk renders these children inside its
+          internal RadixDialog.Content, satisfying Radix's DialogTitle
+          accessibility requirement (F1). The palette has no visible title. */}
+      <Dialog.Title className="sr-only">{t("palette.label")}</Dialog.Title>
       <div className="rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl overflow-hidden">
         <Command.Input
           placeholder={t("palette.placeholder")}
