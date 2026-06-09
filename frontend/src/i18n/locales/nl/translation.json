@@ -28,7 +28,10 @@
     "settings": "Instellingen",
     "platform": "Platform",
     "system": "Systeem",
-    "selectServer": "Server selecteren"
+    "selectServer": "Server selecteren",
+    "openMenu": "Menu openen",
+    "moreActions": "Meer acties",
+    "closeMenu": "Menu sluiten"
   },
   "header": {
     "logout": "Uitloggen",
@@ -159,7 +162,27 @@
     "switchToFanCards": "Schakel naar ventilatorkaartenweergave",
     "switchToChartView": "Schakel naar grafiekweergave",
     "showFansAsCards": "Toon ventilatoren als kaarten",
-    "showChart": "Grafiek tonen"
+    "showChart": "Grafiek tonen",
+    "titleEnergyCost": "Energiekosten",
+    "titlePsuRedundancy": "PSU-redundantie",
+    "exportCsv": "CSV exporteren",
+    "psuStatusOk": "OK",
+    "psuStatusFailed": "Defect",
+    "psuStatusMissing": "Ontbreekt",
+    "psuStatusPredictiveFailure": "Voorspelde storing",
+    "psuRedundant": "Redundant",
+    "psuDegraded": "GEDEGRADEERD",
+    "psuFailed": "DEFECT",
+    "psuNoSensorsTitle": "Geen PSU-sensoren gevonden",
+    "psuNoSensorsBody": "Deze server toont geen PSU spannings-/stroomparen.",
+    "energyNoTariffTitle": "Geen tarief geconfigureerd",
+    "energyNoTariffBody": "Stel kosten per kWh in op deze server om energiekosten te zien.",
+    "energyNoSensor": "Geen vermogenssensor gedetecteerd",
+    "voltagesNoRails": "Geen niet-PSU spanningsrails om weer te geven",
+    "dragHandle": "Sleep om te herordenen",
+    "colTime": "Tijd",
+    "colSensor": "Sensor",
+    "colSeverity": "Ernst"
   },
   "power": {
     "on": "Inschakelen",
@@ -187,7 +210,14 @@
     "switchToCompact": "Schakel naar compacte weergave",
     "switchToChart": "Schakel naar grafiekweergave",
     "hideChart": "Grafiek verbergen",
-    "showChart": "Live grafiek tonen"
+    "showChart": "Live grafiek tonen",
+    "cost": "Kosten",
+    "configureTariff": "Tarief configureren",
+    "rangeLabelLive": "Live",
+    "rangeLabelHour": "Laatste uur",
+    "rangeLabelDay": "Laatste 24u",
+    "rangeLabelWeek": "Laatste 7d",
+    "energyCost": "Energiekosten"
   },
   "settings": {
     "appearance": "Weergave",
@@ -256,7 +286,82 @@
     "about": {
       "title": "Over IPMILink",
       "madeWith": "Gemaakt met <0></0> voor de homelab-gemeenschap"
-    }
+    },
+    "fanpilot": {
+      "title": "FanPilot",
+      "autoRecoverLabel": "Automatisch herstel bij BMC offline",
+      "autoRecoverHint": "Als een server offline gaat terwijl FanPilot actief is, herstel BMC-auto ventilatormodus.",
+      "saveFailed": "FanPilot-instelling kon niet worden opgeslagen"
+    },
+    "alerting": {
+      "title": "Waarschuwingen",
+      "enableNotifications": "Browsermeldingen inschakelen",
+      "enableNotificationsHint": "Meldt wanneer dit tabblad op de achtergrond staat. Vereist browsertoestemming.",
+      "permissionGranted": "Browsertoestemming: verleend",
+      "permissionDenied": "Browsertoestemming: geweigerd. Pas aan in browserinstellingen.",
+      "permissionPending": "Browsertoestemming: nog niet gevraagd",
+      "permissionUnsupported": "Browser ondersteunt geen meldingen",
+      "severityFilter": "Alleen kritieke en waarschuwingsgebeurtenissen verschijnen als toasts/meldingen. Info-gebeurtenissen blijven in het Gebeurtenissenlogboek."
+    },
+    "energy": {
+      "title": "Energiestanden",
+      "resetServer": "{{name}} resetten",
+      "resetAll": "Alle servers resetten",
+      "confirmReset": "Reset bevestigen",
+      "confirmResetAll": "Alles resetten bevestigen",
+      "confirmResetBody": "Sessie min/max/totaal voor {{name}} resetten? Dit wist de integrator.",
+      "confirmResetAllBody": "Sessiestanden voor ALLE {{count}} servers resetten? Kan niet ongedaan worden gemaakt.",
+      "lastReset": "Laatste reset: {{value}}",
+      "neverReset": "Nooit gereset",
+      "resetSuccess": "Standen gereset",
+      "resetFailed": "Resetten van standen mislukt"
+    },
+    "data": {
+      "title": "Gegevens",
+      "retentionLabel": "Bewaartermijn (dagen)",
+      "retentionHint": "Hoe lang sensorhistorie te bewaren. Oudere metingen worden 's nachts verwijderd.",
+      "dbSize": "Databasegrootte",
+      "rowCount": "Sensorwaarden",
+      "oldestReading": "Oudste meting",
+      "runCleanup": "Opschoning nu uitvoeren",
+      "confirmCleanup": "Opschoning uitvoeren",
+      "confirmCleanupBody": "Sensormetingen ouder dan {{days}} dagen nu verwijderen? Maakt DB-ruimte vrij en is onomkeerbaar.",
+      "cleanupDone": "Opschoning voltooid",
+      "retentionSaved": "Bewaartermijn opgeslagen",
+      "noReadings": "Geen metingen opgeslagen"
+    },
+    "network": {
+      "title": "Netwerk",
+      "httpsLabel": "HTTPS (TLS)",
+      "httpsHint": "Versleutel het dashboard met TLS. Vereist een herstart.",
+      "certPath": "Certificaatpad",
+      "keyPath": "Sleutelpad",
+      "genCertButton": "Genereer zelfondertekend certificaat",
+      "genCertDone": "Certificaat gegenereerd. Schakel HTTPS in en herstart.",
+      "selfSignedNote": "Na het inschakelen van HTTPS, herstart de backend. De browser zal waarschuwen voor het zelfondertekende certificaat — dat is verwacht bij alleen-LAN gebruik.",
+      "confirmHttps": "HTTPS inschakelen"
+    },
+    "backup": {
+      "title": "Back-up en Herstel",
+      "downloadBackup": "Back-up downloaden",
+      "downloadHint": "Inclusief database, configuratie en versleutelingssleutel.",
+      "uploadRestore": "Herstellen vanuit back-up",
+      "restoreHint": "Herstart vereist. De app laadt de nieuwe bestanden bij de volgende start.",
+      "confirmRestore": "Herstellen en herstarten",
+      "confirmRestoreBody": "Huidige database, configuratie en versleutelingssleutel vervangen door deze back-up? De app moet herstarten.",
+      "downloadDone": "Back-up gedownload",
+      "restoreUploaded": "Back-up geüpload. Herstart de app om toe te passen.",
+      "restoreFailed": "Herstel mislukt"
+    },
+    "currency": {
+      "label": "Valuta",
+      "hint": "Gebruikt voor energiekostenweergaven."
+    },
+    "costPerKwh": "Kosten per kWh",
+    "costSaved": "Kosten bijgewerkt",
+    "currencyChanged": "Valuta ingesteld op {{currency}}",
+    "fanpilotVendorUnsupported": "FanPilot ondersteunt {{vendor}} nog niet — ventilatoren blijven op het ingebouwde profiel van de BMC.",
+    "save": "Opslaan"
   },
   "setup": {
     "welcomeTitle": "Welkom bij IPMILink",
@@ -497,5 +602,10 @@
     "languageBody": "Open Instellingen om de interfacetaal op elk moment te wijzigen. Je keuze wordt onthouden.",
     "commandTitle": "Opdrachtenpalet",
     "commandBody": "Druk op Cmd+K (of Ctrl+K) om snel pagina's, servers en acties te zoeken. Druk op ? om alle sneltoetsen te zien."
+  },
+  "alert": {
+    "criticalTitle": "IPMILink — Kritieke gebeurtenis",
+    "warningTitle": "IPMILink — Waarschuwing",
+    "fanpilotRecovered": "FanPilot heeft BMC-auto hersteld op {{name}} (server offline)"
   }
 }

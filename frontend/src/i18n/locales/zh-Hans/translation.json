@@ -28,7 +28,10 @@
     "settings": "设置",
     "platform": "平台",
     "system": "系统",
-    "selectServer": "选择服务器"
+    "selectServer": "选择服务器",
+    "openMenu": "打开菜单",
+    "moreActions": "更多操作",
+    "closeMenu": "关闭菜单"
   },
   "header": {
     "logout": "退出登录",
@@ -159,7 +162,27 @@
     "switchToFanCards": "切换到风扇卡片视图",
     "switchToChartView": "切换到图表视图",
     "showFansAsCards": "以卡片显示风扇",
-    "showChart": "显示图表"
+    "showChart": "显示图表",
+    "titleEnergyCost": "能耗成本",
+    "titlePsuRedundancy": "PSU 冗余",
+    "exportCsv": "导出 CSV",
+    "psuStatusOk": "OK",
+    "psuStatusFailed": "故障",
+    "psuStatusMissing": "缺失",
+    "psuStatusPredictiveFailure": "预测故障",
+    "psuRedundant": "冗余",
+    "psuDegraded": "降级",
+    "psuFailed": "故障",
+    "psuNoSensorsTitle": "未找到 PSU 传感器",
+    "psuNoSensorsBody": "此服务器不报告 PSU 电压/电流对。",
+    "energyNoTariffTitle": "未配置费率",
+    "energyNoTariffBody": "在此服务器上设置每千瓦时成本以查看能耗成本。",
+    "energyNoSensor": "未检测到功率传感器",
+    "voltagesNoRails": "无可显示的非 PSU 电压轨",
+    "dragHandle": "拖动以重新排序",
+    "colTime": "时间",
+    "colSensor": "传感器",
+    "colSeverity": "严重性"
   },
   "power": {
     "on": "开机",
@@ -187,7 +210,14 @@
     "switchToCompact": "切换到紧凑视图",
     "switchToChart": "切换到图表视图",
     "hideChart": "隐藏图表",
-    "showChart": "显示实时图表"
+    "showChart": "显示实时图表",
+    "cost": "成本",
+    "configureTariff": "配置费率",
+    "rangeLabelLive": "Live",
+    "rangeLabelHour": "过去一小时",
+    "rangeLabelDay": "过去 24 小时",
+    "rangeLabelWeek": "过去 7 天",
+    "energyCost": "能耗成本"
   },
   "settings": {
     "appearance": "外观",
@@ -256,7 +286,82 @@
     "about": {
       "title": "关于 IPMILink",
       "madeWith": "用 <0></0> 为 homelab 社区打造"
-    }
+    },
+    "fanpilot": {
+      "title": "FanPilot",
+      "autoRecoverLabel": "BMC 离线时自动恢复",
+      "autoRecoverHint": "如果服务器在 FanPilot 启用时离线,恢复到 BMC 自动风扇模式。",
+      "saveFailed": "无法保存 FanPilot 设置"
+    },
+    "alerting": {
+      "title": "警报",
+      "enableNotifications": "启用浏览器通知",
+      "enableNotificationsHint": "当此选项卡在后台时通知。需要浏览器权限。",
+      "permissionGranted": "浏览器权限:已授予",
+      "permissionDenied": "浏览器权限:已拒绝。请在浏览器设置中调整。",
+      "permissionPending": "浏览器权限:尚未请求",
+      "permissionUnsupported": "浏览器不支持通知",
+      "severityFilter": "仅严重和警告事件以通知形式出现。信息事件保留在事件日志中。"
+    },
+    "energy": {
+      "title": "能耗计数器",
+      "resetServer": "重置 {{name}}",
+      "resetAll": "重置所有服务器",
+      "confirmReset": "确认重置",
+      "confirmResetAll": "确认全部重置",
+      "confirmResetBody": "重置 {{name}} 的会话最小/最大/总计?这将清除积分器。",
+      "confirmResetAllBody": "重置全部 {{count}} 台服务器的会话计数器?此操作无法撤消。",
+      "lastReset": "上次重置:{{value}}",
+      "neverReset": "从未重置",
+      "resetSuccess": "计数器已重置",
+      "resetFailed": "重置计数器失败"
+    },
+    "data": {
+      "title": "数据",
+      "retentionLabel": "保留(天)",
+      "retentionHint": "传感器历史保留多久。旧的读数会在每晚被删除。",
+      "dbSize": "数据库大小",
+      "rowCount": "传感器读数",
+      "oldestReading": "最早读数",
+      "runCleanup": "立即运行清理",
+      "confirmCleanup": "运行清理",
+      "confirmCleanupBody": "立即删除超过 {{days}} 天的传感器读数?释放数据库空间且无法撤消。",
+      "cleanupDone": "清理完成",
+      "retentionSaved": "保留期已保存",
+      "noReadings": "未存储任何读数"
+    },
+    "network": {
+      "title": "网络",
+      "httpsLabel": "HTTPS (TLS)",
+      "httpsHint": "使用 TLS 加密仪表板。需要重启。",
+      "certPath": "证书路径",
+      "keyPath": "密钥路径",
+      "genCertButton": "生成自签名证书",
+      "genCertDone": "证书已生成。启用 HTTPS 并重启。",
+      "selfSignedNote": "启用 HTTPS 后请重启后端。浏览器会针对自签名证书显示警告——这在仅限局域网的使用场景下是预期的。",
+      "confirmHttps": "启用 HTTPS"
+    },
+    "backup": {
+      "title": "备份与恢复",
+      "downloadBackup": "下载备份",
+      "downloadHint": "包含数据库、配置和加密密钥。",
+      "uploadRestore": "从备份恢复",
+      "restoreHint": "需要重启。应用将在下次启动时加载新文件。",
+      "confirmRestore": "恢复并重启",
+      "confirmRestoreBody": "用此备份替换当前数据库、配置和加密密钥?应用将需要重启。",
+      "downloadDone": "备份已下载",
+      "restoreUploaded": "备份已上传。请重启应用以应用更改。",
+      "restoreFailed": "恢复失败"
+    },
+    "currency": {
+      "label": "货币",
+      "hint": "用于能耗成本显示。"
+    },
+    "costPerKwh": "每千瓦时成本",
+    "costSaved": "成本已更新",
+    "currencyChanged": "货币已设为 {{currency}}",
+    "fanpilotVendorUnsupported": "FanPilot 暂不支持 {{vendor}}——风扇将保持在 BMC 内置的配置文件上。",
+    "save": "保存"
   },
   "setup": {
     "welcomeTitle": "欢迎使用 IPMILink",
@@ -496,5 +601,10 @@
     "languageBody": "打开设置即可随时更改界面语言，你的选择会被记住。",
     "commandTitle": "命令面板",
     "commandBody": "按 Cmd+K（或 Ctrl+K）可快速搜索页面、服务器和操作。按 ? 查看所有快捷键。"
+  },
+  "alert": {
+    "criticalTitle": "IPMILink — 严重事件",
+    "warningTitle": "IPMILink — 警告",
+    "fanpilotRecovered": "FanPilot 已在 {{name}} 上恢复 BMC-auto(服务器离线)"
   }
 }

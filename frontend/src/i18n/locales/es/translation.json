@@ -28,7 +28,10 @@
     "settings": "Ajustes",
     "platform": "Plataforma",
     "system": "Sistema",
-    "selectServer": "Seleccionar servidor"
+    "selectServer": "Seleccionar servidor",
+    "openMenu": "Abrir menú",
+    "moreActions": "Más acciones",
+    "closeMenu": "Cerrar menú"
   },
   "header": {
     "logout": "Cerrar sesión",
@@ -159,7 +162,27 @@
     "switchToFanCards": "Cambiar a la vista de tarjetas de ventiladores",
     "switchToChartView": "Cambiar a la vista de gráfico",
     "showFansAsCards": "Mostrar los ventiladores como tarjetas",
-    "showChart": "Mostrar gráfico"
+    "showChart": "Mostrar gráfico",
+    "titleEnergyCost": "Coste de energía",
+    "titlePsuRedundancy": "Redundancia PSU",
+    "exportCsv": "Exportar CSV",
+    "psuStatusOk": "OK",
+    "psuStatusFailed": "Fallida",
+    "psuStatusMissing": "Ausente",
+    "psuStatusPredictiveFailure": "Fallo predictivo",
+    "psuRedundant": "Redundante",
+    "psuDegraded": "DEGRADADO",
+    "psuFailed": "FALLIDO",
+    "psuNoSensorsTitle": "No se encontraron sensores PSU",
+    "psuNoSensorsBody": "Este servidor no expone pares de sensores tensión/corriente PSU.",
+    "energyNoTariffTitle": "Sin tarifa configurada",
+    "energyNoTariffBody": "Define un coste por kWh en este servidor para ver el coste de energía.",
+    "energyNoSensor": "No se detectó sensor de potencia",
+    "voltagesNoRails": "Sin raíles de tensión no-PSU para mostrar",
+    "dragHandle": "Arrastra para reordenar",
+    "colTime": "Hora",
+    "colSensor": "Sensor",
+    "colSeverity": "Severidad"
   },
   "power": {
     "on": "Encender",
@@ -187,7 +210,14 @@
     "switchToCompact": "Cambiar a la vista compacta",
     "switchToChart": "Cambiar a la vista de gráfico",
     "hideChart": "Ocultar gráfico",
-    "showChart": "Mostrar gráfico en vivo"
+    "showChart": "Mostrar gráfico en vivo",
+    "cost": "Coste",
+    "configureTariff": "Configurar tarifa",
+    "rangeLabelLive": "Live",
+    "rangeLabelHour": "Última hora",
+    "rangeLabelDay": "Últimas 24h",
+    "rangeLabelWeek": "Últimos 7d",
+    "energyCost": "Coste de energía"
   },
   "settings": {
     "appearance": "Apariencia",
@@ -256,7 +286,82 @@
     "about": {
       "title": "Acerca de IPMILink",
       "madeWith": "Hecho con <0></0> para la comunidad homelab"
-    }
+    },
+    "fanpilot": {
+      "title": "FanPilot",
+      "autoRecoverLabel": "Recuperación automática si el BMC se desconecta",
+      "autoRecoverHint": "Si un servidor se desconecta mientras FanPilot está activo, restaurar el modo de ventiladores BMC-auto.",
+      "saveFailed": "No se pudo guardar el ajuste de FanPilot"
+    },
+    "alerting": {
+      "title": "Alertas",
+      "enableNotifications": "Habilitar notificaciones del navegador",
+      "enableNotificationsHint": "Notifica cuando esta pestaña está en segundo plano. Requiere permiso del navegador.",
+      "permissionGranted": "Permiso del navegador: concedido",
+      "permissionDenied": "Permiso del navegador: denegado. Ajusta en la configuración del navegador.",
+      "permissionPending": "Permiso del navegador: aún no solicitado",
+      "permissionUnsupported": "El navegador no admite notificaciones",
+      "severityFilter": "Solo los eventos críticos y de advertencia aparecen como toasts/notificaciones. Los eventos informativos quedan en el Registro de eventos."
+    },
+    "energy": {
+      "title": "Contadores de energía",
+      "resetServer": "Reiniciar {{name}}",
+      "resetAll": "Reiniciar todos los servidores",
+      "confirmReset": "Confirmar reinicio",
+      "confirmResetAll": "Confirmar reiniciar todos",
+      "confirmResetBody": "¿Reiniciar mín/máx/total de sesión para {{name}}? Esto borra el integrador.",
+      "confirmResetAllBody": "¿Reiniciar los contadores de sesión para TODOS los {{count}} servidores? No se puede deshacer.",
+      "lastReset": "Último reinicio: {{value}}",
+      "neverReset": "Nunca reiniciado",
+      "resetSuccess": "Contadores reiniciados",
+      "resetFailed": "No se pudieron reiniciar los contadores"
+    },
+    "data": {
+      "title": "Datos",
+      "retentionLabel": "Retención (días)",
+      "retentionHint": "Cuánto tiempo conservar el historial de sensores. Las lecturas antiguas se eliminan cada noche.",
+      "dbSize": "Tamaño de la base de datos",
+      "rowCount": "Lecturas de sensores",
+      "oldestReading": "Lectura más antigua",
+      "runCleanup": "Ejecutar limpieza ahora",
+      "confirmCleanup": "Ejecutar limpieza",
+      "confirmCleanupBody": "¿Eliminar lecturas de sensores con más de {{days}} días? Libera espacio en la BD y no se puede deshacer.",
+      "cleanupDone": "Limpieza completada",
+      "retentionSaved": "Retención guardada",
+      "noReadings": "Sin lecturas almacenadas"
+    },
+    "network": {
+      "title": "Red",
+      "httpsLabel": "HTTPS (TLS)",
+      "httpsHint": "Cifra el panel con TLS. Requiere un reinicio.",
+      "certPath": "Ruta del certificado",
+      "keyPath": "Ruta de la clave",
+      "genCertButton": "Generar certificado autofirmado",
+      "genCertDone": "Certificado generado. Habilita HTTPS y reinicia.",
+      "selfSignedNote": "Tras habilitar HTTPS, reinicia el backend. El navegador avisará sobre el certificado autofirmado — es lo esperado para uso solo en LAN.",
+      "confirmHttps": "Habilitar HTTPS"
+    },
+    "backup": {
+      "title": "Copia de seguridad y restauración",
+      "downloadBackup": "Descargar copia",
+      "downloadHint": "Incluye base de datos, configuración y clave de cifrado.",
+      "uploadRestore": "Restaurar desde copia",
+      "restoreHint": "Se requiere reinicio. La app cargará los nuevos archivos en el próximo arranque.",
+      "confirmRestore": "Restaurar y reiniciar",
+      "confirmRestoreBody": "¿Reemplazar la base, la configuración y la clave de cifrado actuales por esta copia? La app debe reiniciarse.",
+      "downloadDone": "Copia descargada",
+      "restoreUploaded": "Copia cargada. Reinicia la app para aplicar.",
+      "restoreFailed": "Restauración fallida"
+    },
+    "currency": {
+      "label": "Moneda",
+      "hint": "Se usa en la visualización de coste de energía."
+    },
+    "costPerKwh": "Coste por kWh",
+    "costSaved": "Coste actualizado",
+    "currencyChanged": "Moneda establecida en {{currency}}",
+    "fanpilotVendorUnsupported": "FanPilot aún no admite {{vendor}} — los ventiladores se quedarán en el perfil integrado del BMC.",
+    "save": "Guardar"
   },
   "setup": {
     "welcomeTitle": "Bienvenido a IPMILink",
@@ -497,5 +602,10 @@
     "languageBody": "Abre Ajustes para cambiar el idioma de la interfaz en cualquier momento. Se recuerda tu elección.",
     "commandTitle": "Paleta de comandos",
     "commandBody": "Pulsa Cmd+K (o Ctrl+K) para buscar rápidamente páginas, servidores y acciones. Pulsa ? para ver todos los atajos."
+  },
+  "alert": {
+    "criticalTitle": "IPMILink — Evento crítico",
+    "warningTitle": "IPMILink — Aviso",
+    "fanpilotRecovered": "FanPilot ha restaurado BMC-auto en {{name}} (servidor sin conexión)"
   }
 }

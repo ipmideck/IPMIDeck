@@ -59,6 +59,8 @@ const ALLOW_IDENTICAL = new Set([
   "IPMILink", "IPMI", "BMC", "FRU", "SEL", "FanPilot", "iDRAC", "iLO",
   "OK", "ID", "CSV", "RAM", "CPU", "DIMM", "PSU", "LAN", "Redfish",
   "Dell", "HP", "HPE", "Supermicro", "Host", "IP", "Backplane",
+  // Phase 4: universally-identical networking/crypto/protocol acronyms.
+  "HTTPS", "HTTP", "TLS", "SSL", "kWh", "TCP", "UDP", "DNS", "URL", "API",
 ]);
 
 // Tokens stripped before the per-word allow-list check (punctuation/separators

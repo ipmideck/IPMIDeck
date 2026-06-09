@@ -28,7 +28,10 @@
     "settings": "설정",
     "platform": "플랫폼",
     "system": "시스템",
-    "selectServer": "서버 선택"
+    "selectServer": "서버 선택",
+    "openMenu": "메뉴 열기",
+    "moreActions": "추가 작업",
+    "closeMenu": "메뉴 닫기"
   },
   "header": {
     "logout": "로그아웃",
@@ -159,7 +162,27 @@
     "switchToFanCards": "팬 카드 보기로 전환",
     "switchToChartView": "차트 보기로 전환",
     "showFansAsCards": "팬을 카드로 표시",
-    "showChart": "차트 표시"
+    "showChart": "차트 표시",
+    "titleEnergyCost": "에너지 비용",
+    "titlePsuRedundancy": "PSU 이중화",
+    "exportCsv": "CSV 내보내기",
+    "psuStatusOk": "OK",
+    "psuStatusFailed": "고장",
+    "psuStatusMissing": "없음",
+    "psuStatusPredictiveFailure": "예측 고장",
+    "psuRedundant": "이중화",
+    "psuDegraded": "성능 저하",
+    "psuFailed": "고장",
+    "psuNoSensorsTitle": "PSU 센서를 찾을 수 없음",
+    "psuNoSensorsBody": "이 서버는 PSU 전압/전류 쌍을 보고하지 않습니다.",
+    "energyNoTariffTitle": "요금이 구성되지 않음",
+    "energyNoTariffBody": "이 서버의 kWh당 비용을 설정하면 에너지 비용이 표시됩니다.",
+    "energyNoSensor": "전력 센서가 감지되지 않음",
+    "voltagesNoRails": "표시할 비-PSU 전압 레일이 없음",
+    "dragHandle": "끌어서 재정렬",
+    "colTime": "시간",
+    "colSensor": "센서",
+    "colSeverity": "중요도"
   },
   "power": {
     "on": "전원 켜기",
@@ -187,7 +210,14 @@
     "switchToCompact": "간략 보기로 전환",
     "switchToChart": "차트 보기로 전환",
     "hideChart": "차트 숨기기",
-    "showChart": "실시간 차트 표시"
+    "showChart": "실시간 차트 표시",
+    "cost": "비용",
+    "configureTariff": "요금 구성",
+    "rangeLabelLive": "Live",
+    "rangeLabelHour": "지난 1시간",
+    "rangeLabelDay": "지난 24시간",
+    "rangeLabelWeek": "지난 7일",
+    "energyCost": "에너지 비용"
   },
   "settings": {
     "appearance": "모양",
@@ -256,7 +286,82 @@
     "about": {
       "title": "IPMILink 정보",
       "madeWith": "homelab 커뮤니티를 위해 <0></0>으로 제작"
-    }
+    },
+    "fanpilot": {
+      "title": "FanPilot",
+      "autoRecoverLabel": "BMC 오프라인 시 자동 복구",
+      "autoRecoverHint": "FanPilot 활성 중 서버가 오프라인이 되면 BMC 자동 팬 모드로 복구합니다.",
+      "saveFailed": "FanPilot 설정을 저장할 수 없습니다"
+    },
+    "alerting": {
+      "title": "알림",
+      "enableNotifications": "브라우저 알림 사용",
+      "enableNotificationsHint": "이 탭이 백그라운드일 때 알립니다. 브라우저 권한이 필요합니다.",
+      "permissionGranted": "브라우저 권한: 허용됨",
+      "permissionDenied": "브라우저 권한: 거부됨. 브라우저 설정에서 조정하세요.",
+      "permissionPending": "브라우저 권한: 아직 요청하지 않음",
+      "permissionUnsupported": "브라우저가 알림을 지원하지 않습니다",
+      "severityFilter": "중요 및 경고 이벤트만 토스트/알림으로 표시됩니다. 정보 이벤트는 이벤트 로그에 남습니다."
+    },
+    "energy": {
+      "title": "에너지 카운터",
+      "resetServer": "{{name}} 재설정",
+      "resetAll": "모든 서버 재설정",
+      "confirmReset": "재설정 확인",
+      "confirmResetAll": "모두 재설정 확인",
+      "confirmResetBody": "{{name}}의 세션 최소/최대/합계를 재설정할까요? 적분기가 초기화됩니다.",
+      "confirmResetAllBody": "전체 {{count}}대의 세션 카운터를 재설정할까요? 되돌릴 수 없습니다.",
+      "lastReset": "마지막 재설정: {{value}}",
+      "neverReset": "재설정한 적 없음",
+      "resetSuccess": "카운터가 재설정되었습니다",
+      "resetFailed": "카운터 재설정 실패"
+    },
+    "data": {
+      "title": "데이터",
+      "retentionLabel": "보존 기간(일)",
+      "retentionHint": "센서 이력을 얼마나 보존할지. 오래된 측정값은 매일 밤 삭제됩니다.",
+      "dbSize": "데이터베이스 크기",
+      "rowCount": "센서 측정값",
+      "oldestReading": "가장 오래된 측정값",
+      "runCleanup": "지금 정리 실행",
+      "confirmCleanup": "정리 실행",
+      "confirmCleanupBody": "지금 {{days}}일보다 오래된 센서 측정값을 삭제할까요? DB 공간이 확보되며 되돌릴 수 없습니다.",
+      "cleanupDone": "정리 완료",
+      "retentionSaved": "보존 기간이 저장되었습니다",
+      "noReadings": "저장된 측정값이 없습니다"
+    },
+    "network": {
+      "title": "네트워크",
+      "httpsLabel": "HTTPS (TLS)",
+      "httpsHint": "TLS로 대시보드를 암호화합니다. 재시작이 필요합니다.",
+      "certPath": "인증서 경로",
+      "keyPath": "키 경로",
+      "genCertButton": "자체 서명 인증서 생성",
+      "genCertDone": "인증서가 생성되었습니다. HTTPS를 활성화하고 재시작하세요.",
+      "selfSignedNote": "HTTPS 활성화 후 백엔드를 재시작하세요. 브라우저는 자체 서명 인증서에 대해 경고하지만, LAN 전용 사용에서는 예상되는 동작입니다.",
+      "confirmHttps": "HTTPS 활성화"
+    },
+    "backup": {
+      "title": "백업 및 복원",
+      "downloadBackup": "백업 다운로드",
+      "downloadHint": "데이터베이스, 설정, 암호화 키를 포함합니다.",
+      "uploadRestore": "백업에서 복원",
+      "restoreHint": "재시작이 필요합니다. 앱은 다음 시작 시 새 파일을 불러옵니다.",
+      "confirmRestore": "복원 후 재시작",
+      "confirmRestoreBody": "현재 데이터베이스, 설정, 암호화 키를 이 백업으로 교체할까요? 앱을 재시작해야 합니다.",
+      "downloadDone": "백업이 다운로드되었습니다",
+      "restoreUploaded": "백업이 업로드되었습니다. 앱을 재시작하여 적용하세요.",
+      "restoreFailed": "복원에 실패했습니다"
+    },
+    "currency": {
+      "label": "통화",
+      "hint": "에너지 비용 표시에 사용됩니다."
+    },
+    "costPerKwh": "kWh당 비용",
+    "costSaved": "비용이 업데이트되었습니다",
+    "currencyChanged": "통화가 {{currency}}(으)로 설정되었습니다",
+    "fanpilotVendorUnsupported": "FanPilot은 아직 {{vendor}}을(를) 지원하지 않습니다 — 팬은 BMC의 내장 프로파일로 유지됩니다.",
+    "save": "저장"
   },
   "setup": {
     "welcomeTitle": "IPMILink에 오신 것을 환영합니다",
@@ -496,5 +601,10 @@
     "languageBody": "설정을 열면 언제든 인터페이스 언어를 변경할 수 있습니다. 선택한 언어는 기억됩니다.",
     "commandTitle": "명령 팔레트",
     "commandBody": "Cmd+K(또는 Ctrl+K)를 눌러 페이지, 서버, 작업을 빠르게 검색하세요. ? 를 누르면 모든 단축키를 볼 수 있습니다."
+  },
+  "alert": {
+    "criticalTitle": "IPMILink — 중요 이벤트",
+    "warningTitle": "IPMILink — 경고",
+    "fanpilotRecovered": "FanPilot이 {{name}}에서 BMC-auto를 복구했습니다 (서버 오프라인)"
   }
 }

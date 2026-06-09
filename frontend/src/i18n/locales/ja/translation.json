@@ -28,7 +28,10 @@
     "settings": "設定",
     "platform": "プラットフォーム",
     "system": "システム",
-    "selectServer": "サーバーを選択"
+    "selectServer": "サーバーを選択",
+    "openMenu": "メニューを開く",
+    "moreActions": "その他の操作",
+    "closeMenu": "メニューを閉じる"
   },
   "header": {
     "logout": "ログアウト",
@@ -159,7 +162,27 @@
     "switchToFanCards": "ファンカードビューに切り替え",
     "switchToChartView": "チャートビューに切り替え",
     "showFansAsCards": "ファンをカードで表示",
-    "showChart": "チャートを表示"
+    "showChart": "チャートを表示",
+    "titleEnergyCost": "エネルギーコスト",
+    "titlePsuRedundancy": "PSU 冗長性",
+    "exportCsv": "CSV エクスポート",
+    "psuStatusOk": "OK",
+    "psuStatusFailed": "故障",
+    "psuStatusMissing": "なし",
+    "psuStatusPredictiveFailure": "故障予測",
+    "psuRedundant": "冗長",
+    "psuDegraded": "劣化",
+    "psuFailed": "故障",
+    "psuNoSensorsTitle": "PSU センサーが見つかりません",
+    "psuNoSensorsBody": "このサーバーは PSU の電圧/電流ペアを報告しません。",
+    "energyNoTariffTitle": "料金が未設定です",
+    "energyNoTariffBody": "このサーバーで kWh あたりのコストを設定するとエネルギーコストが表示されます。",
+    "energyNoSensor": "電力センサーが検出されません",
+    "voltagesNoRails": "表示できる非 PSU 電圧レールがありません",
+    "dragHandle": "ドラッグして並べ替え",
+    "colTime": "時刻",
+    "colSensor": "センサー",
+    "colSeverity": "重要度"
   },
   "power": {
     "on": "電源オン",
@@ -187,7 +210,14 @@
     "switchToCompact": "コンパクトビューに切り替え",
     "switchToChart": "チャートビューに切り替え",
     "hideChart": "チャートを非表示",
-    "showChart": "ライブチャートを表示"
+    "showChart": "ライブチャートを表示",
+    "cost": "コスト",
+    "configureTariff": "料金を設定",
+    "rangeLabelLive": "Live",
+    "rangeLabelHour": "過去 1 時間",
+    "rangeLabelDay": "過去 24 時間",
+    "rangeLabelWeek": "過去 7 日間",
+    "energyCost": "エネルギーコスト"
   },
   "settings": {
     "appearance": "外観",
@@ -256,7 +286,82 @@
     "about": {
       "title": "IPMILink について",
       "madeWith": "homelab コミュニティのために <0></0> を込めて作成"
-    }
+    },
+    "fanpilot": {
+      "title": "FanPilot",
+      "autoRecoverLabel": "BMC オフライン時に自動復旧",
+      "autoRecoverHint": "FanPilot が有効中にサーバーがオフラインになった場合、BMC オートのファンモードに復旧します。",
+      "saveFailed": "FanPilot 設定を保存できませんでした"
+    },
+    "alerting": {
+      "title": "アラート",
+      "enableNotifications": "ブラウザ通知を有効にする",
+      "enableNotificationsHint": "このタブがバックグラウンドの時に通知します。ブラウザの権限が必要です。",
+      "permissionGranted": "ブラウザの権限:許可済み",
+      "permissionDenied": "ブラウザの権限:拒否。ブラウザの設定で変更してください。",
+      "permissionPending": "ブラウザの権限:未確認",
+      "permissionUnsupported": "ブラウザは通知をサポートしていません",
+      "severityFilter": "重大および警告イベントのみがトーストや通知として表示されます。情報イベントはイベントログに残ります。"
+    },
+    "energy": {
+      "title": "エネルギーカウンター",
+      "resetServer": "{{name}} をリセット",
+      "resetAll": "すべてのサーバーをリセット",
+      "confirmReset": "リセットを確認",
+      "confirmResetAll": "すべてリセットを確認",
+      "confirmResetBody": "{{name}} のセッション最小/最大/合計をリセットしますか?インテグレーターがクリアされます。",
+      "confirmResetAllBody": "全 {{count}} 台のセッションカウンターをリセットしますか?元に戻せません。",
+      "lastReset": "前回のリセット:{{value}}",
+      "neverReset": "リセットなし",
+      "resetSuccess": "カウンターをリセットしました",
+      "resetFailed": "カウンターのリセットに失敗"
+    },
+    "data": {
+      "title": "データ",
+      "retentionLabel": "保持期間(日)",
+      "retentionHint": "センサー履歴をどれだけ保持するか。古いデータは毎晩削除されます。",
+      "dbSize": "データベースサイズ",
+      "rowCount": "センサー読み取り",
+      "oldestReading": "最古の読み取り",
+      "runCleanup": "今すぐクリーンアップを実行",
+      "confirmCleanup": "クリーンアップを実行",
+      "confirmCleanupBody": "{{days}} 日より古いセンサー読み取りを今すぐ削除しますか?DB 容量が解放され、元には戻せません。",
+      "cleanupDone": "クリーンアップ完了",
+      "retentionSaved": "保持期間を保存しました",
+      "noReadings": "保存された読み取りはありません"
+    },
+    "network": {
+      "title": "ネットワーク",
+      "httpsLabel": "HTTPS (TLS)",
+      "httpsHint": "ダッシュボードを TLS で暗号化します。再起動が必要です。",
+      "certPath": "証明書のパス",
+      "keyPath": "キーのパス",
+      "genCertButton": "自己署名証明書を生成",
+      "genCertDone": "証明書を生成しました。HTTPS を有効化し再起動してください。",
+      "selfSignedNote": "HTTPS を有効にした後、バックエンドを再起動してください。ブラウザは自己署名証明書について警告しますが、LAN 専用利用では想定された動作です。",
+      "confirmHttps": "HTTPS を有効化"
+    },
+    "backup": {
+      "title": "バックアップと復元",
+      "downloadBackup": "バックアップをダウンロード",
+      "downloadHint": "データベース、設定、暗号化キーを含みます。",
+      "uploadRestore": "バックアップから復元",
+      "restoreHint": "再起動が必要です。アプリは次回起動時に新しいファイルを読み込みます。",
+      "confirmRestore": "復元して再起動",
+      "confirmRestoreBody": "現在のデータベース、設定、暗号化キーをこのバックアップで置き換えますか?アプリは再起動が必要です。",
+      "downloadDone": "バックアップをダウンロードしました",
+      "restoreUploaded": "バックアップをアップロードしました。アプリを再起動して適用してください。",
+      "restoreFailed": "復元に失敗しました"
+    },
+    "currency": {
+      "label": "通貨",
+      "hint": "エネルギーコスト表示に使用されます。"
+    },
+    "costPerKwh": "kWh あたりのコスト",
+    "costSaved": "コストを更新しました",
+    "currencyChanged": "通貨を {{currency}} に設定しました",
+    "fanpilotVendorUnsupported": "FanPilot は {{vendor}} にまだ対応していません — ファンは BMC の内蔵プロファイルで動作します。",
+    "save": "保存"
   },
   "setup": {
     "welcomeTitle": "IPMILink へようこそ",
@@ -496,5 +601,10 @@
     "languageBody": "設定を開けばいつでも表示言語を変更できます。選択は記憶されます。",
     "commandTitle": "コマンドパレット",
     "commandBody": "Cmd+K（または Ctrl+K）でページ、サーバー、操作をすばやく検索できます。? を押すとすべてのショートカットを表示します。"
+  },
+  "alert": {
+    "criticalTitle": "IPMILink — 重大イベント",
+    "warningTitle": "IPMILink — 警告",
+    "fanpilotRecovered": "FanPilot は {{name}} で BMC-auto を復旧しました(サーバーオフライン)"
   }
 }

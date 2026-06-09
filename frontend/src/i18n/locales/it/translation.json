@@ -28,7 +28,10 @@
     "settings": "Impostazioni",
     "platform": "Piattaforma",
     "system": "Sistema",
-    "selectServer": "Seleziona server"
+    "selectServer": "Seleziona server",
+    "openMenu": "Apri menu",
+    "moreActions": "Altre azioni",
+    "closeMenu": "Chiudi menu"
   },
   "header": {
     "logout": "Esci",
@@ -159,7 +162,27 @@
     "switchToFanCards": "Passa alla vista schede ventole",
     "switchToChartView": "Passa alla vista grafico",
     "showFansAsCards": "Mostra le ventole come schede",
-    "showChart": "Mostra grafico"
+    "showChart": "Mostra grafico",
+    "titleEnergyCost": "Costo energia",
+    "titlePsuRedundancy": "Ridondanza PSU",
+    "exportCsv": "Esporta CSV",
+    "psuStatusOk": "OK",
+    "psuStatusFailed": "Guasto",
+    "psuStatusMissing": "Assente",
+    "psuStatusPredictiveFailure": "Guasto previsto",
+    "psuRedundant": "Ridondante",
+    "psuDegraded": "DEGRADATO",
+    "psuFailed": "GUASTO",
+    "psuNoSensorsTitle": "Nessun sensore PSU rilevato",
+    "psuNoSensorsBody": "Questo server non espone coppie di sensori tensione/corrente PSU.",
+    "energyNoTariffTitle": "Nessuna tariffa configurata",
+    "energyNoTariffBody": "Imposta un costo per kWh su questo server per vedere il costo energia.",
+    "energyNoSensor": "Nessun sensore di potenza rilevato",
+    "voltagesNoRails": "Nessuna linea di tensione non-PSU da mostrare",
+    "dragHandle": "Trascina per riordinare",
+    "colTime": "Ora",
+    "colSensor": "Sensore",
+    "colSeverity": "Severità"
   },
   "power": {
     "on": "Accendi",
@@ -187,7 +210,14 @@
     "switchToCompact": "Passa alla vista compatta",
     "switchToChart": "Passa alla vista grafico",
     "hideChart": "Nascondi grafico",
-    "showChart": "Mostra grafico live"
+    "showChart": "Mostra grafico live",
+    "cost": "Costo",
+    "configureTariff": "Configura tariffa",
+    "rangeLabelLive": "Live",
+    "rangeLabelHour": "Ultima ora",
+    "rangeLabelDay": "Ultime 24h",
+    "rangeLabelWeek": "Ultimi 7g",
+    "energyCost": "Costo energia"
   },
   "settings": {
     "appearance": "Aspetto",
@@ -256,7 +286,82 @@
     "about": {
       "title": "Informazioni su IPMILink",
       "madeWith": "Fatto con <0></0> per la comunità homelab"
-    }
+    },
+    "fanpilot": {
+      "title": "FanPilot",
+      "autoRecoverLabel": "Ripristino automatico se il BMC va offline",
+      "autoRecoverHint": "Se un server va offline mentre FanPilot è attivo, ripristina la modalità ventole BMC-auto.",
+      "saveFailed": "Impossibile salvare l'impostazione FanPilot"
+    },
+    "alerting": {
+      "title": "Avvisi",
+      "enableNotifications": "Abilita le notifiche del browser",
+      "enableNotificationsHint": "Avvisa quando questa scheda è in secondo piano. Richiede il permesso del browser.",
+      "permissionGranted": "Permesso del browser: concesso",
+      "permissionDenied": "Permesso del browser: negato. Modifica nelle impostazioni del browser.",
+      "permissionPending": "Permesso del browser: non ancora richiesto",
+      "permissionUnsupported": "Il browser non supporta le notifiche",
+      "severityFilter": "Solo gli eventi critici e di avviso compaiono come toast/notifiche. Gli eventi informativi restano nel Registro Eventi."
+    },
+    "energy": {
+      "title": "Contatori energia",
+      "resetServer": "Azzera {{name}}",
+      "resetAll": "Azzera tutti i server",
+      "confirmReset": "Conferma azzeramento",
+      "confirmResetAll": "Conferma azzeramento di tutti",
+      "confirmResetBody": "Azzerare min/max/totale di sessione per {{name}}? Questo cancella l'integratore.",
+      "confirmResetAllBody": "Azzerare i contatori di sessione per TUTTI i {{count}} server? Operazione irreversibile.",
+      "lastReset": "Ultimo azzeramento: {{value}}",
+      "neverReset": "Mai azzerato",
+      "resetSuccess": "Contatori azzerati",
+      "resetFailed": "Azzeramento dei contatori non riuscito"
+    },
+    "data": {
+      "title": "Dati",
+      "retentionLabel": "Conservazione (giorni)",
+      "retentionHint": "Per quanto tempo conservare lo storico dei sensori. Le letture più vecchie vengono eliminate ogni notte.",
+      "dbSize": "Dimensione database",
+      "rowCount": "Letture sensori",
+      "oldestReading": "Lettura più vecchia",
+      "runCleanup": "Esegui pulizia ora",
+      "confirmCleanup": "Esegui pulizia",
+      "confirmCleanupBody": "Eliminare le letture dei sensori più vecchie di {{days}} giorni? Libera spazio sul DB e non è reversibile.",
+      "cleanupDone": "Pulizia completata",
+      "retentionSaved": "Conservazione salvata",
+      "noReadings": "Nessuna lettura memorizzata"
+    },
+    "network": {
+      "title": "Rete",
+      "httpsLabel": "HTTPS (TLS)",
+      "httpsHint": "Cifra la dashboard con TLS. Richiede un riavvio.",
+      "certPath": "Percorso certificato",
+      "keyPath": "Percorso chiave",
+      "genCertButton": "Genera certificato autofirmato",
+      "genCertDone": "Certificato generato. Abilita HTTPS e riavvia.",
+      "selfSignedNote": "Dopo aver abilitato HTTPS, riavvia il backend. Il browser segnalerà il certificato autofirmato — è previsto per uso solo LAN.",
+      "confirmHttps": "Abilita HTTPS"
+    },
+    "backup": {
+      "title": "Backup e Ripristino",
+      "downloadBackup": "Scarica backup",
+      "downloadHint": "Include database, configurazione e chiave di cifratura.",
+      "uploadRestore": "Ripristina da backup",
+      "restoreHint": "Richiede riavvio. L'app caricherà i nuovi file al prossimo avvio.",
+      "confirmRestore": "Ripristina e riavvia",
+      "confirmRestoreBody": "Sostituire database, configurazione e chiave di cifratura attuali con questo backup? L'app dovrà riavviarsi.",
+      "downloadDone": "Backup scaricato",
+      "restoreUploaded": "Backup caricato. Riavvia l'app per applicare.",
+      "restoreFailed": "Ripristino non riuscito"
+    },
+    "currency": {
+      "label": "Valuta",
+      "hint": "Usata per la visualizzazione dei costi energia."
+    },
+    "costPerKwh": "Costo per kWh",
+    "costSaved": "Costo aggiornato",
+    "currencyChanged": "Valuta impostata su {{currency}}",
+    "fanpilotVendorUnsupported": "FanPilot non supporta ancora {{vendor}} — le ventole resteranno sul profilo predefinito del BMC.",
+    "save": "Salva"
   },
   "setup": {
     "welcomeTitle": "Benvenuto in IPMILink",
@@ -497,5 +602,10 @@
     "languageBody": "Apri le Impostazioni per cambiare la lingua dell'interfaccia in qualsiasi momento. La tua scelta viene ricordata.",
     "commandTitle": "Tavolozza comandi",
     "commandBody": "Premi Cmd+K (o Ctrl+K) per cercare rapidamente pagine, server e azioni. Premi ? per vedere tutte le scorciatoie."
+  },
+  "alert": {
+    "criticalTitle": "IPMILink — Evento critico",
+    "warningTitle": "IPMILink — Avviso",
+    "fanpilotRecovered": "FanPilot ha ripristinato BMC-auto su {{name}} (server offline)"
   }
 }

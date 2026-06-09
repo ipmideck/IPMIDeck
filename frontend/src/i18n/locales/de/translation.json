@@ -28,7 +28,10 @@
     "settings": "Einstellungen",
     "platform": "Plattform",
     "system": "System",
-    "selectServer": "Server auswählen"
+    "selectServer": "Server auswählen",
+    "openMenu": "Menü öffnen",
+    "moreActions": "Weitere Aktionen",
+    "closeMenu": "Menü schließen"
   },
   "header": {
     "logout": "Abmelden",
@@ -159,7 +162,27 @@
     "switchToFanCards": "Zur Lüfterkartenansicht wechseln",
     "switchToChartView": "Zur Diagrammansicht wechseln",
     "showFansAsCards": "Lüfter als Karten anzeigen",
-    "showChart": "Diagramm anzeigen"
+    "showChart": "Diagramm anzeigen",
+    "titleEnergyCost": "Energiekosten",
+    "titlePsuRedundancy": "PSU-Redundanz",
+    "exportCsv": "CSV exportieren",
+    "psuStatusOk": "OK",
+    "psuStatusFailed": "Ausgefallen",
+    "psuStatusMissing": "Fehlt",
+    "psuStatusPredictiveFailure": "Vorhergesagter Ausfall",
+    "psuRedundant": "Redundant",
+    "psuDegraded": "BEEINTRÄCHTIGT",
+    "psuFailed": "AUSGEFALLEN",
+    "psuNoSensorsTitle": "Keine PSU-Sensoren gefunden",
+    "psuNoSensorsBody": "Dieser Server meldet keine PSU-Spannungs-/Strom-Paare.",
+    "energyNoTariffTitle": "Kein Tarif konfiguriert",
+    "energyNoTariffBody": "Setze Kosten pro kWh für diesen Server, um Energiekosten anzuzeigen.",
+    "energyNoSensor": "Kein Leistungssensor erkannt",
+    "voltagesNoRails": "Keine Nicht-PSU-Spannungsschienen anzuzeigen",
+    "dragHandle": "Zum Sortieren ziehen",
+    "colTime": "Zeit",
+    "colSensor": "Sensor",
+    "colSeverity": "Schweregrad"
   },
   "power": {
     "on": "Einschalten",
@@ -187,7 +210,14 @@
     "switchToCompact": "Zur kompakten Ansicht wechseln",
     "switchToChart": "Zur Diagrammansicht wechseln",
     "hideChart": "Diagramm ausblenden",
-    "showChart": "Live-Diagramm anzeigen"
+    "showChart": "Live-Diagramm anzeigen",
+    "cost": "Kosten",
+    "configureTariff": "Tarif konfigurieren",
+    "rangeLabelLive": "Live",
+    "rangeLabelHour": "Letzte Stunde",
+    "rangeLabelDay": "Letzte 24h",
+    "rangeLabelWeek": "Letzte 7T",
+    "energyCost": "Energiekosten"
   },
   "settings": {
     "appearance": "Darstellung",
@@ -256,7 +286,82 @@
     "about": {
       "title": "Über IPMILink",
       "madeWith": "Erstellt mit <0></0> für die Homelab-Community"
-    }
+    },
+    "fanpilot": {
+      "title": "FanPilot",
+      "autoRecoverLabel": "Automatische Wiederherstellung bei BMC-Offline",
+      "autoRecoverHint": "Wenn ein Server offline geht, während FanPilot aktiv ist, BMC-Auto-Lüftermodus wiederherstellen.",
+      "saveFailed": "FanPilot-Einstellung konnte nicht gespeichert werden"
+    },
+    "alerting": {
+      "title": "Warnungen",
+      "enableNotifications": "Browser-Benachrichtigungen aktivieren",
+      "enableNotificationsHint": "Benachrichtigen, wenn dieser Tab im Hintergrund ist. Browser-Berechtigung erforderlich.",
+      "permissionGranted": "Browser-Berechtigung: erteilt",
+      "permissionDenied": "Browser-Berechtigung: verweigert. In den Browsereinstellungen ändern.",
+      "permissionPending": "Browser-Berechtigung: noch nicht angefragt",
+      "permissionUnsupported": "Browser unterstützt keine Benachrichtigungen",
+      "severityFilter": "Nur kritische und Warn-Ereignisse erscheinen als Toasts/Benachrichtigungen. Info-Ereignisse bleiben im Ereignisprotokoll."
+    },
+    "energy": {
+      "title": "Energiezähler",
+      "resetServer": "{{name}} zurücksetzen",
+      "resetAll": "Alle Server zurücksetzen",
+      "confirmReset": "Zurücksetzen bestätigen",
+      "confirmResetAll": "Alle zurücksetzen bestätigen",
+      "confirmResetBody": "Sitzungs-Min/Max/Gesamt für {{name}} zurücksetzen? Der Integrator wird geleert.",
+      "confirmResetAllBody": "Sitzungszähler für ALLE {{count}} Server zurücksetzen? Dies kann nicht rückgängig gemacht werden.",
+      "lastReset": "Zuletzt zurückgesetzt: {{value}}",
+      "neverReset": "Nie zurückgesetzt",
+      "resetSuccess": "Zähler zurückgesetzt",
+      "resetFailed": "Zähler konnten nicht zurückgesetzt werden"
+    },
+    "data": {
+      "title": "Daten",
+      "retentionLabel": "Aufbewahrung (Tage)",
+      "retentionHint": "Wie lange Sensorverlauf aufbewahrt wird. Ältere Messwerte werden nächtlich gelöscht.",
+      "dbSize": "Datenbankgröße",
+      "rowCount": "Sensormesswerte",
+      "oldestReading": "Ältester Messwert",
+      "runCleanup": "Bereinigung jetzt ausführen",
+      "confirmCleanup": "Bereinigung ausführen",
+      "confirmCleanupBody": "Sensormesswerte älter als {{days}} Tage jetzt löschen? Gibt DB-Speicher frei und ist nicht rückgängig zu machen.",
+      "cleanupDone": "Bereinigung abgeschlossen",
+      "retentionSaved": "Aufbewahrung gespeichert",
+      "noReadings": "Keine Messwerte gespeichert"
+    },
+    "network": {
+      "title": "Netzwerk",
+      "httpsLabel": "HTTPS (TLS)",
+      "httpsHint": "Dashboard mit TLS verschlüsseln. Erfordert einen Neustart.",
+      "certPath": "Zertifikatspfad",
+      "keyPath": "Schlüsselpfad",
+      "genCertButton": "Selbstsigniertes Zertifikat erzeugen",
+      "genCertDone": "Zertifikat erzeugt. HTTPS aktivieren und neu starten.",
+      "selfSignedNote": "Nach Aktivierung von HTTPS das Backend neu starten. Der Browser wird vor dem selbstsignierten Zertifikat warnen — bei LAN-Betrieb ist das erwartet.",
+      "confirmHttps": "HTTPS aktivieren"
+    },
+    "backup": {
+      "title": "Sicherung & Wiederherstellung",
+      "downloadBackup": "Sicherung herunterladen",
+      "downloadHint": "Enthält Datenbank, Konfiguration und Verschlüsselungsschlüssel.",
+      "uploadRestore": "Aus Sicherung wiederherstellen",
+      "restoreHint": "Neustart erforderlich. Die App lädt die neuen Dateien beim nächsten Start.",
+      "confirmRestore": "Wiederherstellen und neu starten",
+      "confirmRestoreBody": "Aktuelle Datenbank, Konfiguration und Verschlüsselungsschlüssel durch diese Sicherung ersetzen? Die App muss neu starten.",
+      "downloadDone": "Sicherung heruntergeladen",
+      "restoreUploaded": "Sicherung hochgeladen. App neu starten, um anzuwenden.",
+      "restoreFailed": "Wiederherstellung fehlgeschlagen"
+    },
+    "currency": {
+      "label": "Währung",
+      "hint": "Wird für Energie-Kosten-Anzeigen verwendet."
+    },
+    "costPerKwh": "Kosten pro kWh",
+    "costSaved": "Kosten aktualisiert",
+    "currencyChanged": "Währung auf {{currency}} gesetzt",
+    "fanpilotVendorUnsupported": "FanPilot unterstützt {{vendor}} noch nicht — Lüfter bleiben auf dem eingebauten Profil des BMC.",
+    "save": "Speichern"
   },
   "setup": {
     "welcomeTitle": "Willkommen bei IPMILink",
@@ -497,5 +602,10 @@
     "languageBody": "Öffne die Einstellungen, um die Sprache jederzeit zu ändern. Deine Wahl wird gespeichert.",
     "commandTitle": "Befehlspalette",
     "commandBody": "Drücke Cmd+K (oder Ctrl+K), um schnell Seiten, Server und Aktionen zu durchsuchen. Drücke ?, um alle Tastenkürzel zu sehen."
+  },
+  "alert": {
+    "criticalTitle": "IPMILink — Kritisches Ereignis",
+    "warningTitle": "IPMILink — Warnung",
+    "fanpilotRecovered": "FanPilot hat BMC-Auto auf {{name}} wiederhergestellt (Server offline)"
   }
 }

@@ -28,7 +28,10 @@
     "settings": "Paramètres",
     "platform": "Plateforme",
     "system": "Système",
-    "selectServer": "Sélectionner un serveur"
+    "selectServer": "Sélectionner un serveur",
+    "openMenu": "Ouvrir le menu",
+    "moreActions": "Autres actions",
+    "closeMenu": "Fermer le menu"
   },
   "header": {
     "logout": "Déconnexion",
@@ -159,7 +162,27 @@
     "switchToFanCards": "Passer à la vue cartes de ventilateurs",
     "switchToChartView": "Passer à la vue graphique",
     "showFansAsCards": "Afficher les ventilateurs en cartes",
-    "showChart": "Afficher le graphique"
+    "showChart": "Afficher le graphique",
+    "titleEnergyCost": "Coût d'énergie",
+    "titlePsuRedundancy": "Redondance PSU",
+    "exportCsv": "Exporter en CSV",
+    "psuStatusOk": "OK",
+    "psuStatusFailed": "Défaillant",
+    "psuStatusMissing": "Manquant",
+    "psuStatusPredictiveFailure": "Défaillance prévue",
+    "psuRedundant": "Redondant",
+    "psuDegraded": "DÉGRADÉ",
+    "psuFailed": "DÉFAILLANT",
+    "psuNoSensorsTitle": "Aucun capteur PSU trouvé",
+    "psuNoSensorsBody": "Ce serveur n'expose pas de paires tension/courant PSU.",
+    "energyNoTariffTitle": "Aucun tarif configuré",
+    "energyNoTariffBody": "Définissez un coût par kWh sur ce serveur pour voir le coût d'énergie.",
+    "energyNoSensor": "Aucun capteur de puissance détecté",
+    "voltagesNoRails": "Aucun rail de tension non-PSU à afficher",
+    "dragHandle": "Glisser pour réorganiser",
+    "colTime": "Heure",
+    "colSensor": "Capteur",
+    "colSeverity": "Gravité"
   },
   "power": {
     "on": "Allumer",
@@ -187,7 +210,14 @@
     "switchToCompact": "Passer à la vue compacte",
     "switchToChart": "Passer à la vue graphique",
     "hideChart": "Masquer le graphique",
-    "showChart": "Afficher le graphique live"
+    "showChart": "Afficher le graphique live",
+    "cost": "Coût",
+    "configureTariff": "Configurer le tarif",
+    "rangeLabelLive": "Live",
+    "rangeLabelHour": "Dernière heure",
+    "rangeLabelDay": "Dernières 24h",
+    "rangeLabelWeek": "Derniers 7j",
+    "energyCost": "Coût d'énergie"
   },
   "settings": {
     "appearance": "Apparence",
@@ -256,7 +286,82 @@
     "about": {
       "title": "À propos d'IPMILink",
       "madeWith": "Fait avec <0></0> pour la communauté homelab"
-    }
+    },
+    "fanpilot": {
+      "title": "FanPilot",
+      "autoRecoverLabel": "Récupération automatique si le BMC est hors ligne",
+      "autoRecoverHint": "Si un serveur passe hors ligne pendant que FanPilot est actif, rétablir le mode ventilateur BMC-auto.",
+      "saveFailed": "Impossible d'enregistrer le réglage FanPilot"
+    },
+    "alerting": {
+      "title": "Alertes",
+      "enableNotifications": "Activer les notifications du navigateur",
+      "enableNotificationsHint": "Avertit quand cet onglet est en arrière-plan. Nécessite une autorisation du navigateur.",
+      "permissionGranted": "Autorisation navigateur : accordée",
+      "permissionDenied": "Autorisation navigateur : refusée. Ajustez dans les réglages du navigateur.",
+      "permissionPending": "Autorisation navigateur : pas encore demandée",
+      "permissionUnsupported": "Le navigateur ne prend pas en charge les notifications",
+      "severityFilter": "Seuls les événements critiques et d'avertissement apparaissent comme toasts/notifications. Les événements info restent dans le Journal d'événements."
+    },
+    "energy": {
+      "title": "Compteurs d'énergie",
+      "resetServer": "Réinitialiser {{name}}",
+      "resetAll": "Réinitialiser tous les serveurs",
+      "confirmReset": "Confirmer la réinitialisation",
+      "confirmResetAll": "Confirmer tout réinitialiser",
+      "confirmResetBody": "Réinitialiser min/max/total de session pour {{name}} ? Cela vide l'intégrateur.",
+      "confirmResetAllBody": "Réinitialiser les compteurs de session pour TOUS les {{count}} serveurs ? Action irréversible.",
+      "lastReset": "Dernière réinitialisation : {{value}}",
+      "neverReset": "Jamais réinitialisé",
+      "resetSuccess": "Compteurs réinitialisés",
+      "resetFailed": "Échec de la réinitialisation des compteurs"
+    },
+    "data": {
+      "title": "Données",
+      "retentionLabel": "Conservation (jours)",
+      "retentionHint": "Durée de conservation de l'historique des capteurs. Les anciennes lectures sont supprimées chaque nuit.",
+      "dbSize": "Taille de la base",
+      "rowCount": "Lectures de capteurs",
+      "oldestReading": "Lecture la plus ancienne",
+      "runCleanup": "Exécuter le nettoyage maintenant",
+      "confirmCleanup": "Exécuter le nettoyage",
+      "confirmCleanupBody": "Supprimer les lectures de capteurs de plus de {{days}} jours maintenant ? Libère de l'espace BD et n'est pas réversible.",
+      "cleanupDone": "Nettoyage terminé",
+      "retentionSaved": "Conservation enregistrée",
+      "noReadings": "Aucune lecture stockée"
+    },
+    "network": {
+      "title": "Réseau",
+      "httpsLabel": "HTTPS (TLS)",
+      "httpsHint": "Chiffrer le tableau de bord avec TLS. Nécessite un redémarrage.",
+      "certPath": "Chemin du certificat",
+      "keyPath": "Chemin de la clé",
+      "genCertButton": "Générer un certificat auto-signé",
+      "genCertDone": "Certificat généré. Activez HTTPS et redémarrez.",
+      "selfSignedNote": "Après activation d'HTTPS, redémarrez le backend. Le navigateur affichera un avertissement pour le certificat auto-signé — c'est attendu en usage LAN uniquement.",
+      "confirmHttps": "Activer HTTPS"
+    },
+    "backup": {
+      "title": "Sauvegarde & Restauration",
+      "downloadBackup": "Télécharger la sauvegarde",
+      "downloadHint": "Inclut la base de données, la configuration et la clé de chiffrement.",
+      "uploadRestore": "Restaurer depuis une sauvegarde",
+      "restoreHint": "Redémarrage requis. L'application chargera les nouveaux fichiers au prochain démarrage.",
+      "confirmRestore": "Restaurer et redémarrer",
+      "confirmRestoreBody": "Remplacer la base, la configuration et la clé de chiffrement actuelles par cette sauvegarde ? L'application devra redémarrer.",
+      "downloadDone": "Sauvegarde téléchargée",
+      "restoreUploaded": "Sauvegarde envoyée. Redémarrez l'application pour appliquer.",
+      "restoreFailed": "Échec de la restauration"
+    },
+    "currency": {
+      "label": "Devise",
+      "hint": "Utilisée pour les affichages de coût d'énergie."
+    },
+    "costPerKwh": "Coût par kWh",
+    "costSaved": "Coût mis à jour",
+    "currencyChanged": "Devise réglée sur {{currency}}",
+    "fanpilotVendorUnsupported": "FanPilot ne prend pas encore en charge {{vendor}} — les ventilateurs resteront sur le profil intégré du BMC.",
+    "save": "Enregistrer"
   },
   "setup": {
     "welcomeTitle": "Bienvenue sur IPMILink",
@@ -497,5 +602,10 @@
     "languageBody": "Ouvrez les Réglages pour changer la langue de l'interface à tout moment. Votre choix est mémorisé.",
     "commandTitle": "Palette de commandes",
     "commandBody": "Appuyez sur Cmd+K (ou Ctrl+K) pour rechercher rapidement pages, serveurs et actions. Appuyez sur ? pour voir tous les raccourcis."
+  },
+  "alert": {
+    "criticalTitle": "IPMILink — Événement critique",
+    "warningTitle": "IPMILink — Avertissement",
+    "fanpilotRecovered": "FanPilot a rétabli BMC-auto sur {{name}} (serveur hors ligne)"
   }
 }

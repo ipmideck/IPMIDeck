@@ -28,7 +28,10 @@
     "settings": "Settings",
     "platform": "Platform",
     "system": "System",
-    "selectServer": "Select server"
+    "selectServer": "Select server",
+    "openMenu": "Open menu",
+    "moreActions": "More actions",
+    "closeMenu": "Close menu"
   },
   "header": {
     "logout": "Logout",
@@ -159,7 +162,27 @@
     "switchToFanCards": "Switch to fan cards view",
     "switchToChartView": "Switch to chart view",
     "showFansAsCards": "Show fans as cards",
-    "showChart": "Show chart"
+    "showChart": "Show chart",
+    "titleEnergyCost": "Energy Cost",
+    "titlePsuRedundancy": "PSU Redundancy",
+    "exportCsv": "Export CSV",
+    "psuStatusOk": "OK",
+    "psuStatusFailed": "Failed",
+    "psuStatusMissing": "Missing",
+    "psuStatusPredictiveFailure": "Predictive failure",
+    "psuRedundant": "Redundant",
+    "psuDegraded": "DEGRADED",
+    "psuFailed": "FAILED",
+    "psuNoSensorsTitle": "No PSU sensors found",
+    "psuNoSensorsBody": "This server doesn't report PSU voltage/current pairs.",
+    "energyNoTariffTitle": "No tariff configured",
+    "energyNoTariffBody": "Set a cost per kWh on this server to see energy cost.",
+    "energyNoSensor": "No power sensor detected",
+    "voltagesNoRails": "No non-PSU voltage rails to display",
+    "dragHandle": "Drag to reorder",
+    "colTime": "Time",
+    "colSensor": "Sensor",
+    "colSeverity": "Severity"
   },
   "power": {
     "on": "Power On",
@@ -187,7 +210,14 @@
     "switchToCompact": "Switch to compact view",
     "switchToChart": "Switch to chart view",
     "hideChart": "Hide chart",
-    "showChart": "Show live chart"
+    "showChart": "Show live chart",
+    "cost": "Cost",
+    "configureTariff": "Configure tariff",
+    "rangeLabelLive": "Live",
+    "rangeLabelHour": "Last hour",
+    "rangeLabelDay": "Last 24h",
+    "rangeLabelWeek": "Last 7d",
+    "energyCost": "Energy Cost"
   },
   "settings": {
     "appearance": "Appearance",
@@ -256,7 +286,82 @@
     "about": {
       "title": "About IPMILink",
       "madeWith": "Made with <0></0> for the homelab community"
-    }
+    },
+    "fanpilot": {
+      "title": "FanPilot",
+      "autoRecoverLabel": "Auto-recover on BMC offline",
+      "autoRecoverHint": "If a server goes offline while FanPilot is active, restore BMC-auto fan mode.",
+      "saveFailed": "Could not save FanPilot setting"
+    },
+    "alerting": {
+      "title": "Alerts",
+      "enableNotifications": "Enable browser notifications",
+      "enableNotificationsHint": "Notify when this tab is in the background. Requires browser permission.",
+      "permissionGranted": "Browser permission: granted",
+      "permissionDenied": "Browser permission: denied. Adjust in browser settings.",
+      "permissionPending": "Browser permission: not yet asked",
+      "permissionUnsupported": "Browser does not support notifications",
+      "severityFilter": "Only critical and warning events appear as toasts/notifications. Info events stay in the Event Log."
+    },
+    "energy": {
+      "title": "Energy Counters",
+      "resetServer": "Reset {{name}}",
+      "resetAll": "Reset all servers",
+      "confirmReset": "Confirm reset",
+      "confirmResetAll": "Confirm reset all",
+      "confirmResetBody": "Reset session min/max/total for {{name}}? This clears the integrator.",
+      "confirmResetAllBody": "Reset session counters for ALL {{count}} servers? This cannot be undone.",
+      "lastReset": "Last reset: {{value}}",
+      "neverReset": "Never reset",
+      "resetSuccess": "Counters reset",
+      "resetFailed": "Failed to reset counters"
+    },
+    "data": {
+      "title": "Data",
+      "retentionLabel": "Retention (days)",
+      "retentionHint": "How long to keep sensor history. Older readings are deleted nightly.",
+      "dbSize": "Database size",
+      "rowCount": "Sensor readings",
+      "oldestReading": "Oldest reading",
+      "runCleanup": "Run cleanup now",
+      "confirmCleanup": "Run cleanup",
+      "confirmCleanupBody": "Delete sensor readings older than {{days}} days now? This frees DB space and cannot be undone.",
+      "cleanupDone": "Cleanup complete",
+      "retentionSaved": "Retention saved",
+      "noReadings": "No readings stored"
+    },
+    "network": {
+      "title": "Network",
+      "httpsLabel": "HTTPS (TLS)",
+      "httpsHint": "Encrypt the dashboard with TLS. Requires a restart.",
+      "certPath": "Certificate path",
+      "keyPath": "Key path",
+      "genCertButton": "Generate self-signed certificate",
+      "genCertDone": "Certificate generated. Enable HTTPS and restart.",
+      "selfSignedNote": "After enabling HTTPS, restart the backend. Your browser will warn about the self-signed certificate — this is expected for LAN-only use.",
+      "confirmHttps": "Enable HTTPS"
+    },
+    "backup": {
+      "title": "Backup & Restore",
+      "downloadBackup": "Download backup",
+      "downloadHint": "Includes database, config, and encryption key.",
+      "uploadRestore": "Restore from backup",
+      "restoreHint": "Restart required. The app will reload the new files on next startup.",
+      "confirmRestore": "Restore and restart",
+      "confirmRestoreBody": "Replace the current database, config, and encryption key with this backup? The app will need to restart.",
+      "downloadDone": "Backup downloaded",
+      "restoreUploaded": "Backup uploaded. Restart the app to apply.",
+      "restoreFailed": "Restore failed"
+    },
+    "currency": {
+      "label": "Currency",
+      "hint": "Used for energy-cost displays."
+    },
+    "costPerKwh": "Cost per kWh",
+    "costSaved": "Cost updated",
+    "currencyChanged": "Currency set to {{currency}}",
+    "fanpilotVendorUnsupported": "FanPilot doesn't support {{vendor}} yet — fans will stay on the BMC's built-in profile.",
+    "save": "Save"
   },
   "setup": {
     "welcomeTitle": "Welcome to IPMILink",
@@ -497,5 +602,10 @@
     "languageBody": "Open Settings to change the interface language anytime. Your choice is remembered.",
     "commandTitle": "Command palette",
     "commandBody": "Press Cmd+K (or Ctrl+K) to quickly search pages, servers, and actions. Press ? to see all shortcuts."
+  },
+  "alert": {
+    "criticalTitle": "IPMILink — Critical event",
+    "warningTitle": "IPMILink — Warning",
+    "fanpilotRecovered": "FanPilot restored BMC-auto on {{name}} (server offline)"
   }
 }
