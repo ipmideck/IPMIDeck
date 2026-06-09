@@ -1,14 +1,77 @@
-"""System routes — health, config, command log."""
+"""System routes — health, config, command log, app-config key/value."""
 
 from __future__ import annotations
 
 from datetime import datetime
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 
 from backend.core.auth import require_auth
 
 router = APIRouter()
+
+
+# 04-W1-01 (Plan 04-01, Task 2): generic app_config K/V endpoints.
+# Mounted at prefix="/api" (see backend/main.py:159), so the route paths
+# below resolve to /api/system/app-config/{key} (Decision B).
+# Uses current globals pattern (Decision A1): `from backend.main import db`
+# inside the handler body — no app.state.bm container exists in this repo.
+
+class AppConfigValueBody(BaseModel):
+    """PUT body for app-config endpoint. Bool / str / float / null accepted."""
+    value: bool | str | float | None
+
+
+# Allow-list of writable app_config keys. Prevents the endpoint from being
+# abused to write arbitrary config rows. Extend in later plans as new
+# Settings cards land (Plan 04 alerting toggle, Plan 05 retention days,
+# Plan 02 currency).
+_ALLOWED_APP_CONFIG_KEYS = {
+    "fanpilot.auto_recover_on_offline",
+    "currency",
+    "alerting.notifications_enabled",
+    "data.retention_days",
+}
+
+
+@router.get("/system/app-config/{key}", dependencies=[Depends(require_auth)])
+async def get_app_config_value(key: str):
+    """Read a single app_config value. Returns {success, key, value}.
+
+    Bool-shaped storage convention: values stored as 'true'/'false' strings are
+    coerced back to JSON booleans in the response so the frontend can use
+    them directly. Missing rows return value=None (not an error).
+    """
+    from backend.main import db
+    raw = await db.get_config(key, default=None)
+    if raw is None:
+        return {"success": True, "key": key, "value": None}
+    # Bool-shaped values stored as 'true'/'false'
+    if isinstance(raw, str) and raw.lower() in ("true", "false"):
+        return {"success": True, "key": key, "value": raw.lower() == "true"}
+    return {"success": True, "key": key, "value": raw}
+
+
+@router.put("/system/app-config/{key}", dependencies=[Depends(require_auth)])
+async def put_app_config_value(key: str, body: AppConfigValueBody):
+    """Write a single app_config value. Key must be in the allow-list.
+
+    Booleans are coerced to 'true'/'false' strings (Phase 1 convention used by
+    auth_enabled). None becomes empty string. Everything else is str()'d.
+    """
+    if key not in _ALLOWED_APP_CONFIG_KEYS:
+        return {"success": False, "error": "key_not_allowed"}
+    from backend.main import db
+    v = body.value
+    if isinstance(v, bool):
+        stored = "true" if v else "false"
+    elif v is None:
+        stored = ""
+    else:
+        stored = str(v)
+    await db.set_config(key, stored)
+    return {"success": True, "key": key, "value": body.value}
 
 
 @router.get("/health")

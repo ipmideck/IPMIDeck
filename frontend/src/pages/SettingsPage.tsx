@@ -9,7 +9,7 @@ import { useBackendOnline } from "@/stores/connection-store";
 import { get, post, put, del } from "@/api/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { Plus, Trash2, TestTube, Pencil, ExternalLink, Heart, Code2, Globe, Moon, Sun, Monitor, Server as ServerIcon, ShieldCheck, ShieldOff } from "lucide-react";
+import { Plus, Trash2, TestTube, Pencil, ExternalLink, Heart, Code2, Globe, Moon, Sun, Monitor, Server as ServerIcon, ShieldCheck, ShieldOff, Fan } from "lucide-react";
 import { EmptyState } from "@/components/common/EmptyState";
 import { LanguageSelect } from "@/components/LanguageSelect";
 
@@ -44,6 +44,42 @@ export default function SettingsPage() {
   // while offline can't leave the user locked out of an unreachable backend).
   const online = useBackendOnline();
   const offlineTip = online ? undefined : t("header.backendDisconnected");
+
+  // 04-W1-01 (Plan 04-01, Task 2): FanPilot card — auto-recover on BMC offline.
+  // Persisted in app_config via /api/system/app-config/fanpilot.auto_recover_on_offline
+  // (Decision A1: backend uses current globals; Decision B: /system/* prefix).
+  // Default ON (safety-first) — applies if the row is missing.
+  const [autoRecover, setAutoRecover] = useState(true);
+  const [fanpilotSaving, setFanpilotSaving] = useState(false);
+
+  useEffect(() => {
+    // GET via NAMED imports get/put (Decision D — no `apiClient` exists).
+    get<{ success: boolean; key: string; value: boolean | null }>(
+      "/api/system/app-config/fanpilot.auto_recover_on_offline"
+    )
+      .then((r) => {
+        if (r.value !== null && r.value !== undefined) {
+          setAutoRecover(Boolean(r.value));
+        }
+        // value === null means the row hasn't been written yet — keep default ON.
+      })
+      .catch(() => { /* default ON; backend may be down (offline indicator handles it) */ });
+  }, []);
+
+  const toggleAutoRecover = async () => {
+    const next = !autoRecover;
+    // Optimistic flip rolled back on failure to avoid a stuck toggle.
+    setAutoRecover(next);
+    setFanpilotSaving(true);
+    try {
+      await put("/api/system/app-config/fanpilot.auto_recover_on_offline", { value: next });
+    } catch {
+      setAutoRecover(!next);
+      toast.error(t("settings.fanpilot.saveFailed"));
+    } finally {
+      setFanpilotSaving(false);
+    }
+  };
 
   const loadServers = async () => {
     try {
@@ -342,6 +378,53 @@ export default function SettingsPage() {
               </div>
             )}
           </div>
+
+          {/* FanPilot (04-W1-01) — auto-recover on BMC offline. Placed between
+              Servers and Security per UI-SPEC card placement order. */}
+          <section className="rounded-lg border border-border bg-card p-5">
+            <div className="mb-4 flex items-center gap-2">
+              <Fan className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                {t("settings.fanpilot.title")}
+              </h2>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex-1">
+                <label
+                  id="fanpilot-auto-recover-label"
+                  className="text-sm font-medium text-foreground"
+                >
+                  {t("settings.fanpilot.autoRecoverLabel")}
+                </label>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {t("settings.fanpilot.autoRecoverHint")}
+                </p>
+              </div>
+              {/* Toggle switch (UI-SPEC: introduced in Phase 4; will be the
+                  canonical toggle going forward). 44×44 tap-floor below md:
+                  for mobile per UI-SPEC Mobile Contract. */}
+              <button
+                type="button"
+                role="switch"
+                aria-checked={autoRecover}
+                aria-labelledby="fanpilot-auto-recover-label"
+                onClick={toggleAutoRecover}
+                disabled={fanpilotSaving || !online}
+                title={offlineTip}
+                className={cn(
+                  "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors min-h-11 min-w-11 md:min-h-5 md:min-w-9 items-center disabled:cursor-not-allowed disabled:opacity-50",
+                  autoRecover ? "bg-emerald-500" : "bg-muted",
+                )}
+              >
+                <span
+                  className={cn(
+                    "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-background shadow ring-0 transition",
+                    autoRecover ? "translate-x-4" : "translate-x-0",
+                  )}
+                />
+              </button>
+            </div>
+          </section>
 
           {/* Security */}
           <div className="rounded-lg border border-border bg-card p-5">
