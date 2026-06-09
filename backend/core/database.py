@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS servers (
     fanpilot_enabled INTEGER DEFAULT 0,
     is_online INTEGER DEFAULT 0,
     last_seen DATETIME,
+    cost_per_kwh REAL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -82,6 +83,18 @@ class Database:
         await self._db.execute("PRAGMA foreign_keys=ON")
         await self._db.executescript(CORE_SCHEMA)
         await self._db.commit()
+        # 04-W2-02 (Decision E): cost_per_kwh as a CORE column so disabling the power module
+        # doesn't break server routes that SELECT this field. ALTER is idempotent for
+        # existing DBs; SQLite raises if the column exists, which we catch+ignore.
+        # CREATE TABLE IF NOT EXISTS skips re-running for existing DBs, so this ALTER
+        # is the migration path for pre-existing databases.
+        try:
+            await self._db.execute("ALTER TABLE servers ADD COLUMN cost_per_kwh REAL")
+            await self._db.commit()
+        except Exception as e:
+            msg = str(e).lower()
+            if "duplicate column" not in msg and "already exists" not in msg:
+                raise
         logger.info("Database connected: %s", self.db_path)
 
     async def close(self) -> None:

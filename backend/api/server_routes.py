@@ -24,6 +24,8 @@ class ServerCreate(BaseModel):
     password: str
     vendor: str = "dell"
     color: str = ""
+    # 04-W2-02: per-server energy tariff (€/kWh, USD/kWh, etc.). NULL = not configured.
+    cost_per_kwh: float | None = None
 
 
 class ServerUpdate(BaseModel):
@@ -35,6 +37,9 @@ class ServerUpdate(BaseModel):
     password: str | None = None
     vendor: str | None = None
     color: str | None = None
+    # 04-W2-02: per-server energy tariff. Explicit null clears; omitted leaves unchanged
+    # (handled via model_dump(exclude_unset=True) in update_server).
+    cost_per_kwh: float | None = None
 
 
 @router.get("")
@@ -42,7 +47,8 @@ async def list_servers():
     from backend.main import db
     servers = await db.fetchall(
         "SELECT id, name, description, host, port, vendor, color, poll_interval, "
-        "fanpilot_enabled, is_online, last_seen, created_at FROM servers ORDER BY created_at"
+        "fanpilot_enabled, is_online, last_seen, cost_per_kwh, created_at "
+        "FROM servers ORDER BY created_at"
     )
     return {"servers": servers}
 
@@ -51,6 +57,11 @@ async def list_servers():
 async def create_server(body: ServerCreate):
     from backend.main import db, auth
     from backend.core.crypto import encrypt
+
+    # 04-W2-02: light validation on the tariff field. Negative values are nonsense;
+    # 0.0 is allowed (hypothetical free electricity); null = not configured.
+    if body.cost_per_kwh is not None and body.cost_per_kwh < 0:
+        return {"success": False, "error": "cost_per_kwh_negative"}
 
     server_id = str(uuid.uuid4())
     key = auth.get_encryption_key()
@@ -65,9 +76,13 @@ async def create_server(body: ServerCreate):
         color = SERVER_COLORS[idx]
 
     await db.execute(
-        "INSERT INTO servers (id, name, description, host, port, username_enc, password_enc, vendor, color) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (server_id, body.name, body.description, body.host, body.port, username_enc, password_enc, body.vendor, color),
+        "INSERT INTO servers (id, name, description, host, port, username_enc, password_enc, "
+        "vendor, color, cost_per_kwh) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            server_id, body.name, body.description, body.host, body.port,
+            username_enc, password_enc, body.vendor, color, body.cost_per_kwh,
+        ),
     )
     await db.commit()
     return {"success": True, "server_id": server_id}
@@ -78,7 +93,8 @@ async def get_server(server_id: str, lang: str = Depends(get_lang)):
     from backend.main import db
     server = await db.fetchone(
         "SELECT id, name, description, host, port, vendor, color, poll_interval, "
-        "fanpilot_enabled, is_online, last_seen, created_at FROM servers WHERE id = ?",
+        "fanpilot_enabled, is_online, last_seen, cost_per_kwh, created_at "
+        "FROM servers WHERE id = ?",
         (server_id,),
     )
     if not server:
@@ -90,6 +106,15 @@ async def get_server(server_id: str, lang: str = Depends(get_lang)):
 async def update_server(server_id: str, body: ServerUpdate, lang: str = Depends(get_lang)):
     from backend.main import db, auth
     from backend.core.crypto import encrypt
+
+    # 04-W2-02: payload tracking. model_dump(exclude_unset=True) preserves the
+    # explicit-vs-omitted distinction so the frontend can set cost_per_kwh = null
+    # (clear tariff) OR set it to 0.0 OR omit it entirely (leave unchanged).
+    payload = body.model_dump(exclude_unset=True)
+
+    # 04-W2-02: light validation on the tariff field.
+    if "cost_per_kwh" in payload and payload["cost_per_kwh"] is not None and payload["cost_per_kwh"] < 0:
+        return {"success": False, "error": "cost_per_kwh_negative"}
 
     updates = []
     params = []
@@ -108,6 +133,14 @@ async def update_server(server_id: str, body: ServerUpdate, lang: str = Depends(
         key = auth.get_encryption_key()
         updates.append("password_enc = ?")
         params.append(encrypt(body.password, key))
+
+    # 04-W2-02 (Decision E + omitted-vs-null): only touch cost_per_kwh if the key
+    # was EXPLICITLY in the request body. Frontend always sends it (including null)
+    # from the Edit Server save handler; legacy callers that omit the field leave
+    # the column unchanged.
+    if "cost_per_kwh" in payload:
+        updates.append("cost_per_kwh = ?")
+        params.append(payload["cost_per_kwh"])  # may be None — clears the tariff
 
     if not updates:
         return {"success": False, "error": t("no_fields_to_update", lang)}
