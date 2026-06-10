@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Header } from "@/components/layout/Header";
 import { useServerStore, type Server } from "@/stores/server-store";
+import { useCurrencyStore } from "@/stores/currency-store";
+import { SUPPORTED_CURRENCIES, currencyOptionLabel, type CurrencyCode } from "@/lib/currency";
 import { useThemeStore } from "@/stores/theme-store";
 import { useTourStore } from "@/stores/tour-store";
 import { useAuthStore } from "@/stores/auth-store";
@@ -22,7 +24,16 @@ export default function SettingsPage() {
   const [form, setForm] = useState({ name: "", description: "", host: "", username: "", password: "", vendor: "dell" });
   const [testing, setTesting] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState({ name: "", description: "", host: "", username: "", password: "", vendor: "dell" });
+  const [editForm, setEditForm] = useState({ name: "", description: "", host: "", username: "", password: "", vendor: "dell", cost_per_kwh: null as number | null });
+  // 04-W2-02: ref on the cost input — reused by 04-03's "Configura tariffa" CTA
+  // (hash navigation /settings#server-{id}-cost scrolls + focuses this field).
+  const costInputRef = useRef<HTMLInputElement>(null);
+
+  // 04-W2-03: global currency selector (Appearance card, below Language).
+  const currency = useCurrencyStore((s) => s.currency);
+  const setCurrency = useCurrencyStore((s) => s.setCurrency);
+  const hydrateCurrency = useCurrencyStore((s) => s.hydrate);
+  useEffect(() => { hydrateCurrency(); }, [hydrateCurrency]);
 
   // Security card (D-08..D-10): enable -> /configure (fresh creds), disable -> /toggle {enabled:false}.
   const authEnabled = useAuthStore((s) => s.authEnabled);
@@ -152,6 +163,7 @@ export default function SettingsPage() {
       username: "",
       password: "",
       vendor: s.vendor ?? "dell",
+      cost_per_kwh: s.cost_per_kwh ?? null,
     });
     setEditingId(s.id);
     setShowForm(false);
@@ -172,6 +184,9 @@ export default function SettingsPage() {
     };
     if (editForm.username.trim()) payload.username = editForm.username;
     if (editForm.password.trim()) payload.password = editForm.password;
+    // 04-W2-02: ALWAYS include cost_per_kwh — explicit null clears the tariff
+    // (backend distinguishes omitted vs null via exclude_unset).
+    payload.cost_per_kwh = editForm.cost_per_kwh;
     try {
       await put(`/api/servers/${id}`, payload);
       toast.success(t("settings.serverUpdated"));
@@ -359,6 +374,27 @@ export default function SettingsPage() {
                           </select>
                           <input placeholder={t("settings.editUsernamePlaceholder")} value={editForm.username} onChange={(e) => setEditForm({ ...editForm, username: e.target.value })} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm" />
                           <input type="password" placeholder={t("settings.editPasswordPlaceholder")} value={editForm.password} onChange={(e) => setEditForm({ ...editForm, password: e.target.value })} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-mono" />
+                        </div>
+                        {/* 04-W2-02: per-server energy tariff. Id + ref are the anchor target
+                            for 04-03's "Configura tariffa" CTA (#server-{id}-cost). */}
+                        <div>
+                          <label htmlFor={`server-${s.id}-cost`} className="mb-1 block text-xs font-medium text-muted-foreground">
+                            {t("settings.costPerKwh")}
+                          </label>
+                          <input
+                            id={`server-${s.id}-cost`}
+                            ref={costInputRef}
+                            type="number"
+                            step="0.001"
+                            min="0"
+                            placeholder="0.350"
+                            value={editForm.cost_per_kwh ?? ""}
+                            onChange={(e) => setEditForm({
+                              ...editForm,
+                              cost_per_kwh: e.target.value === "" ? null : Number(e.target.value),
+                            })}
+                            className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm font-mono"
+                          />
                         </div>
                         <div className="flex justify-end gap-2">
                           <button onClick={() => setEditingId(null)} className="rounded-md px-3 py-1.5 text-xs hover:bg-muted">{t("settings.discardChanges")}</button>
@@ -559,6 +595,23 @@ export default function SettingsPage() {
             <div className="mt-4 flex items-center justify-between gap-3" data-tour="language-select">
               <span className="text-sm font-medium">{t("settings.language")}</span>
               <LanguageSelect className="rounded-md border border-border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+            </div>
+            {/* 04-W2-03: global currency — auto-derived from language once on first run,
+                then user-controlled. Native <select> with "€ EUR" labels per UI-SPEC. */}
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <label htmlFor="currency-select" className="text-sm font-medium">
+                {t("settings.currency.label")}
+              </label>
+              <select
+                id="currency-select"
+                value={currency}
+                onChange={(e) => setCurrency(e.target.value as CurrencyCode)}
+                className="rounded-md border border-border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+              >
+                {SUPPORTED_CURRENCIES.map((c) => (
+                  <option key={c} value={c}>{currencyOptionLabel(c)}</option>
+                ))}
+              </select>
             </div>
             {/* Replay onboarding tour (UX-02 / D-03): re-runs the guided tour anytime. */}
             <div className="mt-4 flex items-center justify-between gap-3">

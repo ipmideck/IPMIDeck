@@ -12,6 +12,7 @@ export interface Server {
   fanpilot_enabled: boolean;
   is_online: boolean;
   last_seen: string | null;
+  cost_per_kwh: number | null;
 }
 
 interface ServerState {
