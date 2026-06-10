@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Header } from "@/components/layout/Header";
 import { useServerStore, type Server } from "@/stores/server-store";
 import { useCurrencyStore } from "@/stores/currency-store";
@@ -28,6 +29,32 @@ export default function SettingsPage() {
   // 04-W2-02: ref on the cost input — reused by 04-03's "Configura tariffa" CTA
   // (hash navigation /settings#server-{id}-cost scrolls + focuses this field).
   const costInputRef = useRef<HTMLInputElement>(null);
+
+  // 04-W2-04: respond to the "Configure tariff" CTA hash (#server-{id}-cost).
+  // Server IDs are STRINGS (UUIDs) — the regex captures any non-`#` suffix without
+  // int coercion (Decision C). Expand the matching server's edit form, scroll the
+  // cost input into view, focus it, then clear the hash so it doesn't persist.
+  const location = useLocation();
+  const navigate = useNavigate();
+  useEffect(() => {
+    const match = location.hash.match(/^#server-(.+)-cost$/);
+    if (!match) return;
+    const targetId = match[1]; // string — Decision C, no Number()/parseInt
+    if (!targetId || targetId === "undefined" || targetId === "new") return;
+    // Expand the edit form for this server (the form renders when editingId === s.id).
+    setEditingId(targetId);
+    // Wait for the form to render, then scroll + focus the cost input.
+    const tick = requestAnimationFrame(() => {
+      const el = document.getElementById(`server-${targetId}-cost`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        (el as HTMLInputElement).focus();
+      }
+      // Clear the hash so it doesn't persist in history.
+      navigate(location.pathname + location.search, { replace: true });
+    });
+    return () => cancelAnimationFrame(tick);
+  }, [location.hash, location.pathname, location.search, navigate]);
 
   // 04-W2-03: global currency selector (Appearance card, below Language).
   const currency = useCurrencyStore((s) => s.currency);

@@ -1,7 +1,11 @@
-import { Zap, RefreshCw, WifiOff } from "lucide-react";
+import { Zap, RefreshCw, WifiOff, Settings } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { useBackendOnline } from "@/stores/connection-store";
+import { useServerStore } from "@/stores/server-store";
+import { useCurrencyStore } from "@/stores/currency-store";
+import { formatCurrency } from "@/lib/currency";
 import { usePowerStats, PowerLiveChart, formatKwh } from "@/modules/power/powerShared";
 
 interface PowerStatsWidgetProps {
@@ -13,9 +17,15 @@ interface PowerStatsWidgetProps {
  * chart, no power buttons. Useful for monitoring-only dashboards.
  */
 export function PowerStatsWidget({ serverId }: PowerStatsWidgetProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const navigate = useNavigate();
   const online = useBackendOnline();
   const { live, unit, min, max, totalWh, sensorName, reset } = usePowerStats(serverId);
+  // 04-W2-05 / 04-W2-04: cost line next to Min/Max/Total, OR "Configure tariff" CTA.
+  // serverId is a STRING (Decision C) — match Server.id by string equality, no cast.
+  const currency = useCurrencyStore((s) => s.currency);
+  const locale = i18n.resolvedLanguage || "en";
+  const server = useServerStore((s) => s.servers.find((srv) => srv.id === serverId));
 
   if (!serverId) {
     return <div className="flex h-full items-center justify-center text-muted-foreground">—</div>;
@@ -46,6 +56,28 @@ export function PowerStatsWidget({ serverId }: PowerStatsWidgetProps) {
             <span>{t("power.max")} <span className="font-mono text-sm text-foreground">{online && max != null ? `${Math.round(max)} ${unit}` : "—"}</span></span>
             <span>{t("power.total")} <span className="font-mono text-sm text-foreground">{online ? formatKwh(totalWh) : "—"}</span></span>
           </div>
+          {/* Cost line OR Configure tariff CTA — Decision O: null-server guard so we
+              never navigate to /settings#server-undefined-cost. */}
+          {server == null ? null : (
+            server.cost_per_kwh != null ? (
+              <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
+                <span className="w-10 uppercase tracking-wider text-[10px]">{t("power.cost")}</span>
+                <span className="font-mono text-sm text-foreground tabular-nums">
+                  {online ? formatCurrency((totalWh / 1000) * server.cost_per_kwh, currency, locale) : "—"}
+                </span>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => navigate(`/settings#server-${server.id}-cost`)}
+                className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-border px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground min-h-9 md:min-h-7"
+                aria-label={t("power.configureTariff")}
+              >
+                <Settings className="h-3 w-3" aria-hidden="true" />
+                {t("power.configureTariff")}
+              </button>
+            )
+          )}
           {sensorName != null && (
             <button
               type="button"
