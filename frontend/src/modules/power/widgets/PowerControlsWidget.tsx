@@ -1,10 +1,14 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { get, post } from "@/api/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { Power, PowerOff, RotateCcw, RefreshCw, Zap, LayoutGrid, LineChart as LineChartIcon } from "lucide-react";
+import { Power, PowerOff, RotateCcw, RefreshCw, Zap, Settings, LayoutGrid, LineChart as LineChartIcon } from "lucide-react";
 import { useBackendOnline } from "@/stores/connection-store";
+import { useServerStore } from "@/stores/server-store";
+import { useCurrencyStore } from "@/stores/currency-store";
+import { formatCurrency } from "@/lib/currency";
 import { usePowerStats, PowerLiveChart, formatKwh } from "@/modules/power/powerShared";
 
 interface PowerControlsWidgetProps {
@@ -25,12 +29,18 @@ const DESTRUCTIVE = [
 ] as const;
 
 export function PowerControlsWidget({ serverId, view = "compact", onViewChange }: PowerControlsWidgetProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const navigate = useNavigate();
   const [status, setStatus] = useState("unknown");
   const [loading, setLoading] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<string | null>(null);
   const online = useBackendOnline();
   const { live, unit, min, max, totalWh, sensorName, reset } = usePowerStats(serverId);
+  // 04-W2-05 / 04-W2-04: cost row OR "Configure tariff" CTA in the compact view.
+  // serverId is a STRING (Decision C) — match Server.id by string equality, no cast.
+  const currency = useCurrencyStore((s) => s.currency);
+  const locale = i18n.resolvedLanguage || "en";
+  const server = useServerStore((s) => s.servers.find((srv) => srv.id === serverId));
 
   useEffect(() => {
     if (!serverId) return;
@@ -76,15 +86,6 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
   const isOff = online && status === "off";
   const busy = loading !== null || !online;
   const isChart = view === "chart" && sensorName != null;
-
-  // Reusable stats sub-block. Inline-3-values format works in both header (chart view)
-  // and below the big number (compact view) without restyling.
-  const StatBlock = ({ label, value }: { label: string; value: string }) => (
-    <div className="flex flex-col">
-      <span className="text-xs uppercase tracking-wider text-muted-foreground">{label}</span>
-      <span className="font-mono text-sm text-foreground">{value}</span>
-    </div>
-  );
 
   return (
     <div
@@ -141,24 +142,71 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
           </div>
         </>
       ) : isOn && live != null ? (
-        // Top-aligned, left-aligned column: wattage -> "Power draw" label ->
-        // Min/Max/Total row. No vertical centering so the Power On button below
-        // (in its own shrink-0 wrapper) never overlaps the stats at 2x2.
+        // Compact view — W2-01 relayout. Top-aligned column so the Power On button
+        // below (its own shrink-0 wrapper) never overlaps the stats at 2x2.
+        // Wattage block LEFT, Min/Max/Total stacked RIGHT (was: stats stacked below).
         <div className="flex min-h-0 flex-1 flex-col gap-0.5">
-          <div className="flex items-baseline gap-1">
-            <Zap className="h-4 w-4 self-center text-violet-400" />
-            <span className="font-mono text-2xl font-bold tabular-nums">{Math.round(live)}</span>
-            <span className="text-sm text-muted-foreground">{unit}</span>
-          </div>
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-            {t("power.powerDraw")}
-          </span>
-          {sensorName != null && (
-            <div className="mt-auto flex items-center gap-4">
-              <StatBlock label={t("power.min")} value={min != null ? `${Math.round(min)} ${unit}` : "—"} />
-              <StatBlock label={t("power.max")} value={max != null ? `${Math.round(max)} ${unit}` : "—"} />
-              <StatBlock label={t("power.total")} value={formatKwh(totalWh)} />
+          {/* Compact view — W2-01 relayout: two-column wattage | Min/Max/Total */}
+          <div className="flex flex-row items-start gap-4">
+            {/* Left block — wattage */}
+            <div className="flex flex-col">
+              <div className="flex items-baseline gap-1.5">
+                <Zap className="h-4 w-4 text-violet-400 shrink-0" aria-hidden="true" />
+                <span className="font-mono text-2xl font-bold tabular-nums text-foreground">
+                  {`${Math.round(live)} ${unit}`}
+                </span>
+              </div>
+              <span className="mt-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                {t("power.powerDraw")}
+              </span>
             </div>
+
+            {/* Right block — Min / Max / Total stacked */}
+            {sensorName != null && (
+              <div className="ml-auto flex flex-col gap-1">
+                <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
+                  <span className="w-10 uppercase tracking-wider text-[10px]">{t("power.min")}</span>
+                  <span className="font-mono text-sm text-foreground tabular-nums">
+                    {min != null ? `${Math.round(min)} ${unit}` : "—"}
+                  </span>
+                </div>
+                <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
+                  <span className="w-10 uppercase tracking-wider text-[10px]">{t("power.max")}</span>
+                  <span className="font-mono text-sm text-foreground tabular-nums">
+                    {max != null ? `${Math.round(max)} ${unit}` : "—"}
+                  </span>
+                </div>
+                <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
+                  <span className="w-10 uppercase tracking-wider text-[10px]">{t("power.total")}</span>
+                  <span className="font-mono text-sm text-foreground tabular-nums">
+                    {formatKwh(totalWh)}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Cost row OR Configure tariff CTA — Decision O: null-server guard so we
+              never navigate to /settings#server-undefined-cost. */}
+          {server == null ? null : (
+            server.cost_per_kwh != null ? (
+              <div className="mt-3 flex items-baseline gap-2">
+                <span className="text-xs text-muted-foreground uppercase tracking-wider">{t("power.cost")}</span>
+                <span className="font-mono text-sm text-foreground tabular-nums">
+                  {formatCurrency((totalWh / 1000) * server.cost_per_kwh, currency, locale)}
+                </span>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => navigate(`/settings#server-${server.id}-cost`)}
+                className="mt-3 inline-flex items-center gap-1.5 self-start rounded-md border border-dashed border-border px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground min-h-9 md:min-h-7"
+                aria-label={t("power.configureTariff")}
+              >
+                <Settings className="h-3 w-3" aria-hidden="true" />
+                {t("power.configureTariff")}
+              </button>
+            )
           )}
         </div>
       ) : (
