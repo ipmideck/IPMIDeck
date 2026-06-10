@@ -26,10 +26,18 @@ module = ModuleManifest(
         {
             "id": "power-controls",
             "name": "Power Controls",
-            "description": "Power on/off/reset/cycle buttons with status",
-            "sizes": ["2x2"],
+            "description": "Power state + draw + min/max/kWh + remote control buttons (toggle to a live chart view)",
+            "sizes": ["2x2", "3x2"],
             "default_size": "2x2",
             "category": "control",
+        },
+        {
+            "id": "power-stats",
+            "name": "Power Stats",
+            "description": "Live wattage with sparkline and session min/max/kWh — no control buttons",
+            "sizes": ["2x2", "3x2"],
+            "default_size": "2x2",
+            "category": "monitoring",
         },
     ],
 )

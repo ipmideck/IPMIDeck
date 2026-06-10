@@ -11,7 +11,7 @@
 #   3. COPY: copy frontend/dist/* into backend/static/.
 $ErrorActionPreference = "Stop"
 
-$repoRoot = (Resolve-Path "C:/path/to/IPMI-FanPilot").Path
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $staticDir = Join-Path $repoRoot "backend/static"
 $staticResolved = (Resolve-Path $staticDir).Path
 

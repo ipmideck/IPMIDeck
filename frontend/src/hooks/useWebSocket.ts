@@ -1,22 +1,63 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useSensorStore } from "@/stores/sensor-store";
+import { useConnectionStore, type WSStatus } from "@/stores/connection-store";
 
-export type WSStatus = "connecting" | "connected" | "disconnected";
+// Re-export so existing call sites that import WSStatus from this module keep working.
+export type { WSStatus };
 
-export function useWebSocket() {
-  const [status, setStatus] = useState<WSStatus>("disconnected");
+// Direct store write — no local React state, no return value. PageLayout is the only
+// caller and only invokes the hook for its side effect (open + maintain the socket).
+const setStatus = (s: WSStatus) => useConnectionStore.getState().setWsStatus(s);
+
+/**
+ * Single global WebSocket. Mounted exactly once at the PageLayout shell.
+ *
+ * Status transitions are written straight to the connection store; every component
+ * that needs the value (Header badge, ConnectionBanner, widgets via useBackendOnline)
+ * subscribes to the store instead of calling this hook. This avoids opening multiple
+ * sockets and avoids re-rendering PageLayout on every transition.
+ */
+export function useWebSocket(): void {
   const wsRef = useRef<WebSocket | null>(null);
-  const updateSensors = useSensorStore((s) => s.updateSensors);
   const retryRef = useRef(0);
 
   useEffect(() => {
+    let cancelled = false;
+    let retryTimeout: ReturnType<typeof setTimeout> | undefined;
+
+    // Reset the store on mount so a remount (e.g. logout→login, or React StrictMode's
+    // dev-time double-mount) never leaks the previous session's "connected" state into
+    // the first paint of the new shell.
+    setStatus("connecting");
+
+    function scheduleRetry() {
+      if (cancelled) return;
+      const delays = [1000, 3000, 5000, 10000];
+      const delay = delays[Math.min(retryRef.current, delays.length - 1)];
+      retryRef.current++;
+      retryTimeout = setTimeout(connect, delay);
+    }
+
     function connect() {
+      if (cancelled) return;
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+
+      // new WebSocket(...) can throw synchronously on malformed URLs or in sandboxed
+      // contexts (SecurityError). If it does, no onclose ever fires — we have to
+      // schedule the retry ourselves, otherwise the UI is stuck.
+      let ws: WebSocket;
+      try {
+        ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+      } catch {
+        setStatus("disconnected");
+        scheduleRetry();
+        return;
+      }
       wsRef.current = ws;
       setStatus("connecting");
 
       ws.onopen = () => {
+        if (cancelled) { ws.close(); return; }
         setStatus("connected");
         retryRef.current = 0;
       };
@@ -25,22 +66,18 @@ export function useWebSocket() {
         try {
           const msg = JSON.parse(event.data);
           if (msg.type === "sensor_update") {
-            updateSensors(msg.server_id, msg.sensors);
+            useSensorStore.getState().updateSensors(msg.server_id, msg.sensors);
           }
-          // Other message types can be handled here
         } catch {
           // ignore parse errors
         }
       };
 
       ws.onclose = () => {
+        if (cancelled) return;
         setStatus("disconnected");
         wsRef.current = null;
-        // Reconnect with linear backoff: 1s, 3s, 5s, 10s, then every 10s
-        const delays = [1000, 3000, 5000, 10000];
-        const delay = delays[Math.min(retryRef.current, delays.length - 1)];
-        retryRef.current++;
-        setTimeout(connect, delay);
+        scheduleRetry();
       };
 
       ws.onerror = () => {
@@ -51,12 +88,15 @@ export function useWebSocket() {
     connect();
 
     return () => {
+      cancelled = true;
+      if (retryTimeout) clearTimeout(retryTimeout);
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;
       }
+      // Don't leak "connected" across remounts.
+      setStatus("disconnected");
     };
-  }, [updateSensors]);
-
-  return { status };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // No dependencies — runs once
 }

@@ -1,6 +1,6 @@
 """Tests for the `ipmitool sdr elist` parser — vendor-agnostic typing + duplicate-name dedup.
 
-Fixture is the real value-bearing output from a Dell R720 (server "test", 192.0.2.10).
+Fixture is representative ipmitool output from a Dell R720 (synthetic values).
 The full dump also contains ~140 discrete/PG/presence sensors with no numeric reading; a
 representative discrete line is included to assert those are excluded from numeric output.
 """
