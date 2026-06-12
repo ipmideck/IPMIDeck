@@ -135,8 +135,11 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
             <PowerLiveChart serverId={serverId} sensorName={sensorName} />
           </div>
         </>
-      ) : isOn && live != null ? (
-        // Compact view — W2-01 relayout. Top-aligned column so the Power On button
+      ) : live != null ? (
+        // Compact view — W2-01 relayout. Gated on `live != null` ALONE (GAP-1 fix):
+        // the body shows wattage/Min/Max/Total/cost from usePowerStats.live, not the
+        // action-only `power_status` broadcast. PowerStatsWidget already gates this way.
+        // Top-aligned column so the Power On button
         // below (its own shrink-0 wrapper) never overlaps the stats at 2x2.
         // Wattage block LEFT, Min/Max/Total stacked RIGHT (was: stats stacked below).
         <div className="flex min-h-0 flex-1 flex-col gap-0.5">
