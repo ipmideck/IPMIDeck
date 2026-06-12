@@ -9,11 +9,12 @@ import { SUPPORTED_CURRENCIES, currencyOptionLabel, type CurrencyCode } from "@/
 import { useThemeStore } from "@/stores/theme-store";
 import { useTourStore } from "@/stores/tour-store";
 import { useAuthStore } from "@/stores/auth-store";
+import { useAlertingStore } from "@/stores/alerting-store";
 import { useBackendOnline } from "@/stores/connection-store";
 import { get, post, put, del } from "@/api/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { Plus, Trash2, TestTube, Pencil, ExternalLink, Heart, Code2, Globe, Moon, Sun, Monitor, Server as ServerIcon, ShieldCheck, ShieldOff, Fan, Zap } from "lucide-react";
+import { Plus, Trash2, TestTube, Pencil, ExternalLink, Heart, Code2, Globe, Moon, Sun, Monitor, Server as ServerIcon, ShieldCheck, ShieldOff, Fan, Zap, Bell } from "lucide-react";
 import { EmptyState } from "@/components/common/EmptyState";
 import { LanguageSelect } from "@/components/LanguageSelect";
 
@@ -131,6 +132,18 @@ export default function SettingsPage() {
       setFanpilotSaving(false);
     }
   };
+
+  // 04-W3-01: Alerting card — browser-notifications opt-in. The store owns the
+  // permission request flow (Notification.requestPermission() runs inside enable(),
+  // which is invoked from the toggle onClick) + persists alerting.notifications_enabled
+  // in app_config (Decision B: /api/system/...). Severity filter (critical/warning only)
+  // is enforced in useWebSocket.ts.
+  const notificationsEnabled = useAlertingStore((s) => s.notificationsEnabled);
+  const permission = useAlertingStore((s) => s.permission);
+  const enableAlerting = useAlertingStore((s) => s.enable);
+  const disableAlerting = useAlertingStore((s) => s.disable);
+  const hydrateAlerting = useAlertingStore((s) => s.hydrate);
+  useEffect(() => { hydrateAlerting(); }, [hydrateAlerting]);
 
   const loadServers = async () => {
     try {
@@ -608,6 +621,70 @@ export default function SettingsPage() {
               </div>
             )}
           </div>
+
+          {/* Alerting (04-W3-01) — browser-notifications opt-in. Placed between
+              Security and Energy Counters per UI-SPEC card placement order. */}
+          <section className="rounded-lg border border-border bg-card p-5">
+            <div className="mb-4 flex items-center gap-2">
+              <Bell className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                {t("settings.alerting.title")}
+              </h2>
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex-1">
+                <label id="alerting-notif-label" className="text-sm font-medium text-foreground">
+                  {t("settings.alerting.enableNotifications")}
+                </label>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {t("settings.alerting.enableNotificationsHint")}
+                </p>
+              </div>
+              {/* requestPermission MUST run inside this click handler (store.enable()) —
+                  44×44 tap-floor below md: per UI-SPEC Mobile Contract. */}
+              <button
+                type="button"
+                role="switch"
+                aria-checked={notificationsEnabled}
+                aria-labelledby="alerting-notif-label"
+                onClick={async () => {
+                  if (notificationsEnabled) {
+                    await disableAlerting();
+                  } else {
+                    const perm = await enableAlerting();
+                    if (perm === "denied") {
+                      toast.error(t("settings.alerting.permissionDenied"));
+                    } else if (perm === "granted") {
+                      toast.success(t("settings.alerting.permissionGranted"));
+                    }
+                  }
+                }}
+                className={cn(
+                  "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors min-h-11 min-w-11 md:min-h-5 md:min-w-9 items-center",
+                  notificationsEnabled ? "bg-emerald-500" : "bg-muted",
+                )}
+              >
+                <span
+                  className={cn(
+                    "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-background shadow ring-0 transition",
+                    notificationsEnabled ? "translate-x-4" : "translate-x-0",
+                  )}
+                />
+              </button>
+            </div>
+
+            <p className="mt-3 text-xs text-muted-foreground">
+              {permission === "granted" && t("settings.alerting.permissionGranted")}
+              {permission === "denied" && t("settings.alerting.permissionDenied")}
+              {permission === "default" && t("settings.alerting.permissionPending")}
+              {permission === "unsupported" && t("settings.alerting.permissionUnsupported")}
+            </p>
+
+            <p className="mt-2 text-xs text-muted-foreground">
+              {t("settings.alerting.severityFilter")}
+            </p>
+          </section>
 
           {/* Energy Counters (04-W2-07) — per-server + reset-all energy counters.
               Placed after Security per UI-SPEC card order (Alerting/Data land in
