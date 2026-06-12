@@ -142,7 +142,12 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
         // Top-aligned column so the Power On button
         // below (its own shrink-0 wrapper) never overlaps the stats at 2x2.
         // Wattage block LEFT, Min/Max/Total stacked RIGHT (was: stats stacked below).
-        <div className="flex min-h-0 flex-1 flex-col gap-0.5">
+        // GAP-A (04-13): `overflow-y-auto` makes the body clip/scroll its OWN overflow
+        // instead of spilling the always-on cost/CTA row down onto the shrink-0 action
+        // block below it. With `min-h-0 flex-1 overflow-y-auto` the cost row / CTA and
+        // the "Accendi" button get distinct, non-overlapping rects at the 2x2 size; the
+        // root container's `overflow-hidden` keeps anything from escaping the card.
+        <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
           {/* Compact view — W2-01 relayout: two-column wattage | Min/Max/Total */}
           <div className="flex flex-row items-start gap-4">
             {/* Left block — wattage */}
@@ -187,7 +192,7 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
               never navigate to /settings#server-undefined-cost. */}
           {server == null ? null : (
             server.cost_per_kwh != null ? (
-              <div className="mt-3 flex items-baseline gap-2">
+              <div className="mt-1.5 flex items-baseline gap-2">
                 <span className="text-xs text-muted-foreground uppercase tracking-wider">{t("power.cost")}</span>
                 <span className="font-mono text-sm text-foreground tabular-nums">
                   {formatCurrency((totalWh / 1000) * server.cost_per_kwh, currency, locale)}
@@ -197,7 +202,7 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
               <button
                 type="button"
                 onClick={() => navigate(`/settings#server-${server.id}-cost`)}
-                className="mt-3 inline-flex items-center gap-1.5 self-start rounded-md border border-dashed border-border px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground min-h-9 md:min-h-7"
+                className="mt-1.5 inline-flex items-center gap-1.5 self-start rounded-md border border-dashed border-border px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground min-h-9 md:min-h-7"
                 aria-label={t("power.configureTariff")}
               >
                 <Settings className="h-3 w-3" aria-hidden="true" />
