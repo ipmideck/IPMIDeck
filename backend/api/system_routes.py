@@ -130,6 +130,72 @@ async def energy_resets():
     return {"success": True, "resets": out}
 
 
+# 04-W5-01 (Plan 04-08, Task 1): data-retention UI endpoints.
+# Mounted at prefix="/api" so paths resolve to /api/system/db-stats,
+# /api/system/retention-days, /api/system/retention-cleanup-now (Decision B).
+# Current-globals pattern (Decision A1: `from backend.main import db, config`).
+# Retention preference is persisted in app_config under "data.retention_days"
+# (RESEARCH Pitfall 8 — avoid YAML comment stomping); the cleanup loop reads from
+# app_config first, falling back to config.data.retention_days. All require auth.
+
+
+class RetentionBody(BaseModel):
+    """PUT body for /system/retention-days. Range-checked 7..365 in the handler."""
+    days: int
+
+
+@router.get("/system/db-stats", dependencies=[Depends(require_auth)])
+async def db_stats():
+    """Return DB file size + sensor_readings row count + oldest reading timestamp."""
+    from pathlib import Path
+
+    from backend.main import config, db
+
+    db_path = Path(config.data.db_path)
+    db_size_bytes = db_path.stat().st_size if db_path.exists() else 0
+    rows_result = await db.fetchone("SELECT COUNT(*) AS n FROM sensor_readings")
+    rows = rows_result["n"] if rows_result else 0
+    oldest_result = await db.fetchone("SELECT MIN(timestamp) AS ts FROM sensor_readings")
+    oldest = oldest_result["ts"] if oldest_result and oldest_result["ts"] else None
+    return {
+        "success": True,
+        "db_size_bytes": db_size_bytes,
+        "sensor_readings_rows": rows,
+        "oldest_reading_timestamp": oldest,
+    }
+
+
+@router.get("/system/retention-days", dependencies=[Depends(require_auth)])
+async def get_retention_days():
+    """Read the effective retention window — app_config override or config default."""
+    from backend.main import config, db
+
+    override = await db.get_config("data.retention_days", default=None)
+    days = int(override) if override else int(config.data.retention_days)
+    return {"success": True, "days": days}
+
+
+@router.put("/system/retention-days", dependencies=[Depends(require_auth)])
+async def put_retention_days(body: RetentionBody):
+    """Persist the retention window to app_config (preferred over YAML — Pitfall 8)."""
+    if body.days < 7 or body.days > 365:
+        return {"success": False, "error": "out_of_range"}
+    from backend.main import db
+
+    await db.set_config("data.retention_days", str(body.days))
+    return {"success": True, "days": body.days}
+
+
+@router.post("/system/retention-cleanup-now", dependencies=[Depends(require_auth)])
+async def retention_cleanup_now():
+    """Trigger the shared retention cleanup pass immediately. Returns rows deleted."""
+    from backend.main import config, db
+    from backend.modules.sensors.tasks import retention_cleanup_once
+
+    deleted = await retention_cleanup_once(db, config)
+    return {"success": True, "deleted_rows": deleted}
+
+
 # 04-W4-03 (Plan 04-07): HTTPS/cert management. Routes use the /system/ prefix
 # (Decision B → /api/system/...) and current globals (Decision A1: `from backend.main
 # import config`). YAML writeback via config.update_server_yaml (full read-mutate-dump;

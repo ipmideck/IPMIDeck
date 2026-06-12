@@ -14,9 +14,17 @@ import { useBackendOnline } from "@/stores/connection-store";
 import { get, post, put, del } from "@/api/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { Plus, Trash2, TestTube, Pencil, ExternalLink, Heart, Code2, Globe, Moon, Sun, Monitor, Server as ServerIcon, ShieldCheck, ShieldOff, Fan, Zap, Bell, Lock } from "lucide-react";
+import { Plus, Trash2, TestTube, Pencil, ExternalLink, Heart, Code2, Globe, Moon, Sun, Monitor, Server as ServerIcon, ShieldCheck, ShieldOff, Fan, Zap, Bell, Lock, Database } from "lucide-react";
 import { EmptyState } from "@/components/common/EmptyState";
 import { LanguageSelect } from "@/components/LanguageSelect";
+
+/** Human-readable byte size for the Data card DB-size readout (04-W5-01). */
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} MB`;
+  return `${(n / 1024 ** 3).toFixed(1)} GB`;
+}
 
 export default function SettingsPage() {
   const { t, i18n } = useTranslation();
@@ -130,6 +138,81 @@ export default function SettingsPage() {
       toast.error(t("settings.fanpilot.saveFailed"));
     } finally {
       setFanpilotSaving(false);
+    }
+  };
+
+  // 04-W5-01: Data card — retention slider + DB stats + immediate cleanup. Persists
+  // the retention window to app_config via PUT /api/system/retention-days (Decision B,
+  // /system/* prefix; Decision A1 current globals on the backend); the cleanup loop reads
+  // it back. Named client imports get/post/put (Decision D). "Run cleanup now" deletes
+  // sensor_readings older than the window NOW — gated behind an inline confirm.
+  const [retentionDays, setRetentionDays] = useState(30);
+  const [retentionSaved, setRetentionSaved] = useState(30);
+  const [dbStats, setDbStats] = useState({
+    db_size_bytes: 0,
+    sensor_readings_rows: 0,
+    oldest_reading_timestamp: null as string | null,
+  });
+  const [cleanupConfirm, setCleanupConfirm] = useState(false);
+  const [cleanupBusy, setCleanupBusy] = useState(false);
+  const dataLocale = i18n.resolvedLanguage || "en";
+
+  const refreshDbStats = async () => {
+    try {
+      const r = await get<{
+        success: boolean;
+        db_size_bytes: number;
+        sensor_readings_rows: number;
+        oldest_reading_timestamp: string | null;
+      }>("/api/system/db-stats");
+      if (r.success) {
+        setDbStats({
+          db_size_bytes: r.db_size_bytes,
+          sensor_readings_rows: r.sensor_readings_rows,
+          oldest_reading_timestamp: r.oldest_reading_timestamp,
+        });
+      }
+    } catch { /* offline indicator handles connectivity */ }
+  };
+
+  useEffect(() => {
+    get<{ success: boolean; days: number }>("/api/system/retention-days")
+      .then((r) => {
+        if (r.success) {
+          setRetentionDays(r.days);
+          setRetentionSaved(r.days);
+        }
+      })
+      .catch(() => { /* keep default 30 */ });
+    void refreshDbStats();
+  }, []);
+
+  const onSaveRetention = async () => {
+    try {
+      await put("/api/system/retention-days", { days: retentionDays });
+      setRetentionSaved(retentionDays);
+      toast.success(t("settings.data.retentionSaved"));
+    } catch (e: any) {
+      toast.error(String(e?.message ?? e));
+    }
+  };
+
+  const onRunCleanup = async () => {
+    setCleanupBusy(true);
+    try {
+      const r = await post<{ success: boolean; deleted_rows: number }>(
+        "/api/system/retention-cleanup-now"
+      );
+      if (r.success) {
+        toast.success(t("settings.data.cleanupDone"));
+        setCleanupConfirm(false);
+        await refreshDbStats();
+      }
+    } catch (e: any) {
+      toast.error(String(e?.message ?? e));
+      setCleanupConfirm(false);
+    } finally {
+      setCleanupBusy(false);
     }
   };
 
@@ -865,6 +948,108 @@ export default function SettingsPage() {
                 ))}
               </div>
             )}
+          </section>
+
+          {/* Data (04-W5-01) — retention slider + DB stats + immediate cleanup. Placed
+              between Energy Counters and Network per UI-SPEC card placement order. */}
+          <section className="rounded-lg border border-border bg-card p-5">
+            <div className="mb-4 flex items-center gap-2">
+              <Database className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                {t("settings.data.title")}
+              </h2>
+            </div>
+
+            <div className="space-y-4">
+              {/* Retention slider */}
+              <div>
+                <div className="mb-2 flex items-center justify-between">
+                  <label htmlFor="retention-days" className="text-sm font-medium text-foreground">
+                    {t("settings.data.retentionLabel")}
+                  </label>
+                  <span className="font-mono text-sm tabular-nums">{retentionDays}</span>
+                </div>
+                <input
+                  id="retention-days"
+                  type="range"
+                  min={7}
+                  max={365}
+                  step={1}
+                  value={retentionDays}
+                  onChange={(e) => setRetentionDays(Number(e.target.value))}
+                  disabled={!online}
+                  className="h-2 w-full appearance-none rounded-lg bg-muted accent-foreground disabled:opacity-50"
+                />
+                <p className="mt-1 text-xs text-muted-foreground">{t("settings.data.retentionHint")}</p>
+                <button
+                  type="button"
+                  onClick={onSaveRetention}
+                  disabled={retentionDays === retentionSaved || !online}
+                  title={offlineTip}
+                  className="mt-2 min-h-9 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
+                >
+                  {t("settings.save")}
+                </button>
+              </div>
+
+              {/* DB stats readout */}
+              <div className="space-y-1.5 border-t border-border pt-4">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">{t("settings.data.dbSize")}</span>
+                  <span className="font-mono">{formatBytes(dbStats.db_size_bytes)}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">{t("settings.data.rowCount")}</span>
+                  <span className="font-mono">{dbStats.sensor_readings_rows.toLocaleString(dataLocale)}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">{t("settings.data.oldestReading")}</span>
+                  <span className="font-mono">
+                    {dbStats.oldest_reading_timestamp
+                      ? new Date(dbStats.oldest_reading_timestamp).toLocaleString(dataLocale)
+                      : "—"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Run cleanup now — inline confirm (destructive, red treatment) */}
+              <div className="border-t border-border pt-4">
+                {cleanupConfirm ? (
+                  <div className="space-y-3 rounded-md border border-red-500/30 bg-red-500/5 p-3">
+                    <p className="text-xs text-muted-foreground">
+                      {t("settings.data.confirmCleanupBody", { days: retentionDays })}
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setCleanupConfirm(false)}
+                        className="min-h-11 flex-1 rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground md:min-h-9"
+                      >
+                        {t("settings.cancel")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={onRunCleanup}
+                        disabled={cleanupBusy || !online}
+                        className="min-h-11 flex-1 rounded-md bg-red-500 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-600 disabled:opacity-50 md:min-h-9"
+                      >
+                        {t("settings.data.confirmCleanup")}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setCleanupConfirm(true)}
+                    disabled={!online}
+                    title={offlineTip}
+                    className="min-h-9 rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
+                  >
+                    {t("settings.data.runCleanup")}
+                  </button>
+                )}
+              </div>
+            </div>
           </section>
 
           {/* Network (04-W4-03) — HTTPS toggle + self-signed cert generation. Placed

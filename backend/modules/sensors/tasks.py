@@ -182,6 +182,39 @@ async def sensor_polling_loop():
         _wake_event.clear()
 
 
+async def _resolved_retention_days(db, config) -> int:
+    """Effective retention window — app_config override first, config default fallback.
+
+    04-W5-01 (Plan 04-08): the Data Settings card persists `data.retention_days` to
+    app_config (RESEARCH Pitfall 8 — avoids YAML comment stomping), so an OFF→ON change
+    takes effect at the next cleanup pass without a restart or YAML rewrite.
+    """
+    override = await db.get_config("data.retention_days", default=None)
+    if override:
+        try:
+            return int(override)
+        except ValueError:
+            pass
+    return int(config.data.retention_days)
+
+
+async def retention_cleanup_once(db, config) -> int:
+    """Single retention cleanup pass. Returns the number of rows deleted.
+
+    Extracted so POST /api/system/retention-cleanup-now can trigger an immediate pass
+    (04-W5-01) and the daily loop can reuse the exact same logic. Reads the retention
+    window from app_config first (see _resolved_retention_days).
+    """
+    days = await _resolved_retention_days(db, config)
+    cursor = await db.execute(
+        "DELETE FROM sensor_readings WHERE timestamp < datetime('now', ?)",
+        (f"-{days} days",),
+    )
+    deleted = cursor.rowcount if cursor.rowcount is not None and cursor.rowcount >= 0 else 0
+    await db.commit()
+    return deleted
+
+
 async def retention_cleanup_loop():
     """Daily cleanup of old sensor data beyond retention period."""
     import backend.modules as ctx
@@ -189,13 +222,8 @@ async def retention_cleanup_loop():
     while True:
         try:
             await asyncio.sleep(3600)  # Check every hour
-            retention = ctx.config.data.retention_days
-            await ctx.db.execute(
-                "DELETE FROM sensor_readings WHERE timestamp < datetime('now', ?)",
-                (f"-{retention} days",),
-            )
-            await ctx.db.commit()
-            logger.info("Retention cleanup: removed old sensor data (retention: %d days)", retention)
+            deleted = await retention_cleanup_once(ctx.db, ctx.config)
+            logger.info("Retention cleanup: removed %d old sensor reading(s)", deleted)
         except asyncio.CancelledError:
             return
         except Exception:
