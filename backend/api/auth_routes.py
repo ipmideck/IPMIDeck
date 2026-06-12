@@ -11,6 +11,25 @@ from backend.core.i18n import get_lang, t
 router = APIRouter()
 
 
+def _set_session_cookie(response: Response, request: Request, token: str) -> None:
+    """Issue the session cookie, setting secure=True when the request arrived over HTTPS.
+
+    Decision R (04-W4-03): all three cookie issuers (login / setup / configure) route through
+    this single helper so the secure flag is set consistently. Detection uses
+    request.url.scheme == "https" — true when uvicorn terminates TLS (config.server.https on)
+    or a TLS-terminating reverse proxy forwards the scheme. On plain HTTP it stays False so
+    LAN-only HTTP deployments keep working.
+    """
+    response.set_cookie(
+        key="session",
+        value=token,
+        httponly=True,
+        samesite="lax",
+        max_age=86400,
+        secure=request.url.scheme == "https",
+    )
+
+
 class LoginRequest(BaseModel):
     username: str
     password: str
@@ -70,7 +89,7 @@ async def get_me(request: Request):
 
 
 @router.post("/login")
-async def login(body: LoginRequest, response: Response, lang: str = Depends(get_lang)):
+async def login(body: LoginRequest, request: Request, response: Response, lang: str = Depends(get_lang)):
     """Authenticate and issue session cookie.
 
     SEC-03 lockout flow (D-03):
@@ -103,13 +122,7 @@ async def login(body: LoginRequest, response: Response, lang: str = Depends(get_
     # 3. Success: clear any prior failure counter, issue session.
     await auth.reset_failures(body.username)
     token = auth.create_session_token(body.username)
-    response.set_cookie(
-        key="session",
-        value=token,
-        httponly=True,
-        samesite="lax",
-        max_age=86400,
-    )
+    _set_session_cookie(response, request, token)
     return {"success": True, "username": body.username}
 
 
@@ -120,19 +133,13 @@ async def logout(response: Response):
 
 
 @router.post("/setup")
-async def setup(body: SetupRequest, response: Response, lang: str = Depends(get_lang)):
+async def setup(body: SetupRequest, request: Request, response: Response, lang: str = Depends(get_lang)):
     from backend.main import auth
     if await auth.has_user():
         return {"success": False, "error": t("user_already_exists", lang)}
     await auth.create_user(body.username, body.password)
     token = auth.create_session_token(body.username)
-    response.set_cookie(
-        key="session",
-        value=token,
-        httponly=True,
-        samesite="lax",
-        max_age=86400,
-    )
+    _set_session_cookie(response, request, token)
     return {"success": True, "username": body.username}
 
 
@@ -154,13 +161,7 @@ async def configure_auth(body: ConfigureRequest, request: Request, response: Res
         return {"success": False, "error": str(e)}
     await auth.set_auth_enabled(True)
     token = auth.create_session_token(body.username)
-    response.set_cookie(
-        key="session",
-        value=token,
-        httponly=True,
-        samesite="lax",
-        max_age=86400,
-    )
+    _set_session_cookie(response, request, token)
     return {"success": True, "username": body.username}
 
 

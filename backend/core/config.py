@@ -132,6 +132,39 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
     return config
 
 
+def _config_yaml_path(config_path: str | Path | None = None) -> Path:
+    """Resolve the active config.yaml path the same way load_config() does."""
+    if config_path is not None:
+        return Path(config_path)
+    env_path = os.environ.get("IPMILINK_CONFIG_PATH")
+    return Path(env_path) if env_path else (_data_dir() / "config.yaml")
+
+
+def update_server_yaml(updates: dict, config_path: str | Path | None = None) -> Path:
+    """Merge ``updates`` into the ``server:`` section of config.yaml and write it back.
+
+    04-W4-03 YAML writeback for HTTPS toggle + cert/key paths. Full read-mutate-dump:
+    per RESEARCH Pitfall 8 we accept that YAML comments/ordering are NOT preserved here
+    (the alternative, ruamel.yaml, is a new dependency we explicitly avoid). Only the
+    ``server`` block is touched; other top-level sections pass through untouched. Returns
+    the path written. Creates the file (with the current server defaults merged) if absent.
+    """
+    path = _config_yaml_path(config_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    raw: dict = {}
+    if path.exists():
+        with open(path, encoding="utf-8") as f:
+            raw = yaml.safe_load(f) or {}
+    server = raw.get("server")
+    if not isinstance(server, dict):
+        server = {}
+    server.update(updates)
+    raw["server"] = server
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.dump(raw, f, default_flow_style=False, sort_keys=False)
+    return path
+
+
 def save_default_config(config_path: str | Path) -> None:
     """Write a default config.yaml if it doesn't exist."""
     path = Path(config_path)

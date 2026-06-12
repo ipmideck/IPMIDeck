@@ -14,7 +14,7 @@ import { useBackendOnline } from "@/stores/connection-store";
 import { get, post, put, del } from "@/api/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { Plus, Trash2, TestTube, Pencil, ExternalLink, Heart, Code2, Globe, Moon, Sun, Monitor, Server as ServerIcon, ShieldCheck, ShieldOff, Fan, Zap, Bell } from "lucide-react";
+import { Plus, Trash2, TestTube, Pencil, ExternalLink, Heart, Code2, Globe, Moon, Sun, Monitor, Server as ServerIcon, ShieldCheck, ShieldOff, Fan, Zap, Bell, Lock } from "lucide-react";
 import { EmptyState } from "@/components/common/EmptyState";
 import { LanguageSelect } from "@/components/LanguageSelect";
 
@@ -144,6 +144,59 @@ export default function SettingsPage() {
   const disableAlerting = useAlertingStore((s) => s.disable);
   const hydrateAlerting = useAlertingStore((s) => s.hydrate);
   useEffect(() => { hydrateAlerting(); }, [hydrateAlerting]);
+
+  // 04-W4-03: Network card — HTTPS toggle + self-signed cert generation. Backend
+  // persists to config.yaml (PUT /api/system/https, POST /api/system/gen-cert) via the
+  // /system/* prefix (Decision B) using current globals (Decision A1). Named client
+  // imports get/post/put (Decision D). HTTPS only takes effect after a restart, so the
+  // toggle is informational + gated behind a confirm; the yellow banner explains it.
+  const [https, setHttps] = useState(false);
+  const [certPath, setCertPath] = useState("");
+  const [keyPath, setKeyPath] = useState("");
+  const [httpsConfirm, setHttpsConfirm] = useState(false);
+  const [networkBusy, setNetworkBusy] = useState(false);
+
+  const onGenCert = async () => {
+    setNetworkBusy(true);
+    try {
+      const r = await post<{ success: boolean; cert_path?: string; key_path?: string; error?: string }>(
+        "/api/system/gen-cert"
+      );
+      if (r.success && r.cert_path && r.key_path) {
+        setCertPath(r.cert_path);
+        setKeyPath(r.key_path);
+        toast.success(t("settings.network.genCertDone"));
+      } else {
+        toast.error(r.error || t("settings.network.genCertDone"));
+      }
+    } catch {
+      toast.error(t("settings.network.genCertDone"));
+    } finally {
+      setNetworkBusy(false);
+    }
+  };
+
+  const applyHttps = async (next: boolean) => {
+    setNetworkBusy(true);
+    try {
+      await put("/api/system/https", { https: next });
+      setHttps(next);
+      setHttpsConfirm(false);
+    } catch {
+      toast.error(t("settings.network.genCertDone"));
+    } finally {
+      setNetworkBusy(false);
+    }
+  };
+
+  const onToggleHttps = async () => {
+    // Enabling HTTPS expands the confirm banner first (restart + self-signed warning).
+    if (!https && !httpsConfirm) {
+      setHttpsConfirm(true);
+      return;
+    }
+    await applyHttps(!https);
+  };
 
   const loadServers = async () => {
     try {
@@ -812,6 +865,119 @@ export default function SettingsPage() {
                 ))}
               </div>
             )}
+          </section>
+
+          {/* Network (04-W4-03) — HTTPS toggle + self-signed cert generation. Placed
+              among the infra Settings cards (after Energy Counters; Data/Backup land in
+              later plans) per UI-SPEC card placement order. */}
+          <section className="rounded-lg border border-border bg-card p-5">
+            <div className="mb-4 flex items-center gap-2">
+              <Lock className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                {t("settings.network.title")}
+              </h2>
+            </div>
+
+            {/* HTTPS toggle row */}
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div className="flex-1">
+                <label id="https-label" className="text-sm font-medium text-foreground">
+                  {t("settings.network.httpsLabel")}
+                </label>
+                <p className="mt-1 text-xs text-muted-foreground">{t("settings.network.httpsHint")}</p>
+              </div>
+              {/* 44×44 tap-floor below md: per UI-SPEC Mobile Contract. */}
+              <button
+                type="button"
+                role="switch"
+                aria-checked={https}
+                aria-labelledby="https-label"
+                onClick={onToggleHttps}
+                disabled={networkBusy || !online}
+                title={offlineTip}
+                className={cn(
+                  "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors min-h-11 min-w-11 md:min-h-5 md:min-w-9 disabled:cursor-not-allowed disabled:opacity-50",
+                  https ? "bg-emerald-500" : "bg-muted",
+                )}
+              >
+                <span
+                  className={cn(
+                    "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-background shadow ring-0 transition",
+                    https ? "translate-x-4" : "translate-x-0",
+                  )}
+                />
+              </button>
+            </div>
+
+            {/* Confirm banner when enabling (restart + self-signed warning). */}
+            {httpsConfirm && !https && (
+              <div className="mb-4 space-y-3 rounded-md border border-yellow-500/30 bg-yellow-500/5 p-3">
+                <p className="text-xs text-muted-foreground">{t("settings.network.selfSignedNote")}</p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setHttpsConfirm(false)}
+                    className="flex-1 rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground min-h-11 md:min-h-9"
+                  >
+                    {t("settings.cancel")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onToggleHttps}
+                    disabled={networkBusy || !online}
+                    title={offlineTip}
+                    className="flex-1 rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground min-h-11 md:min-h-9 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {t("settings.network.confirmHttps")}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Cert + key paths (read-only — populated by the generate action). */}
+            <div className="mb-4 space-y-3">
+              <div>
+                <label htmlFor="cert-path" className="mb-1 block text-xs font-medium text-muted-foreground">
+                  {t("settings.network.certPath")}
+                </label>
+                <input
+                  id="cert-path"
+                  type="text"
+                  value={certPath}
+                  readOnly
+                  placeholder="data/certs/server.crt"
+                  className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm font-mono min-h-11 md:min-h-9"
+                />
+              </div>
+              <div>
+                <label htmlFor="key-path" className="mb-1 block text-xs font-medium text-muted-foreground">
+                  {t("settings.network.keyPath")}
+                </label>
+                <input
+                  id="key-path"
+                  type="text"
+                  value={keyPath}
+                  readOnly
+                  placeholder="data/certs/server.key"
+                  className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm font-mono min-h-11 md:min-h-9"
+                />
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={onGenCert}
+              disabled={networkBusy || !online}
+              title={offlineTip}
+              className="rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted min-h-11 md:min-h-9 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {t("settings.network.genCertButton")}
+            </button>
+
+            {/* Yellow warning banner (always visible — UI-SPEC contract). */}
+            <div className="mt-4 rounded-md border border-yellow-500/30 bg-yellow-500/5 p-3 text-xs text-yellow-600 dark:text-yellow-500">
+              {t("settings.network.selfSignedNote")}
+            </div>
           </section>
 
           {/* Appearance */}

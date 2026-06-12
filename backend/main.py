@@ -17,7 +17,7 @@ from fastapi import Cookie, Depends, FastAPI, WebSocket, WebSocketDisconnect, st
 from fastapi.staticfiles import StaticFiles
 
 from backend.core.auth import AuthManager, require_auth
-from backend.core.config import AppConfig, load_config, save_default_config
+from backend.core.config import AppConfig, load_config, save_default_config, update_server_yaml
 from backend.core.database import Database
 from backend.core.events import EventBus
 from backend.core.modules import ModuleLoader
@@ -240,6 +240,12 @@ def cli():
     parser.add_argument("--demo", action="store_true", help="Run in demo mode with simulated data")
     parser.add_argument("--config", type=str, help="Path to config.yaml")
     parser.add_argument("--reload", action="store_true", help="Enable auto-reload (dev)")
+    parser.add_argument(
+        "--gen-cert",
+        action="store_true",
+        help="Generate a self-signed cert+key pair under data/certs/, write the paths to "
+             "config.yaml, and exit. Set server.https=true to enable HTTPS.",
+    )
 
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("serve", help="Start the server (default)")
@@ -257,6 +263,21 @@ def cli():
 
     if args.command == "reset-password":
         _reset_password()
+        return
+
+    if args.gen_cert:
+        # 04-W4-03: generate a self-signed pair under data/certs/, persist the paths to
+        # config.yaml's server section, then exit. The operator flips server.https=true
+        # (here in config.yaml or via the Settings Network card) and restarts.
+        from backend.core.certs import generate_self_signed
+        cfg = load_config()
+        cert_dir = Path(cfg.data.db_path).parent / "certs"
+        cert_path, key_path = generate_self_signed(cert_dir)
+        update_server_yaml({"cert_file": str(cert_path), "key_file": str(key_path)})
+        print(f"Generated: {cert_path}")
+        print(f"Generated: {key_path}")
+        print("Wrote cert_file/key_file to config.yaml. Set server.https=true and restart "
+              "to serve over HTTPS.")
         return
 
     # === FIX-02 gap closure: load config BEFORE uvicorn.run() ===
@@ -304,13 +325,27 @@ def cli():
     signal.signal(signal.SIGTERM, _emergency_shutdown)
     signal.signal(signal.SIGINT, _emergency_shutdown)
 
-    uvicorn.run(
-        "backend.main:app",
+    # 04-W4-03: when config.server.https is on, hand uvicorn the configured cert/key so it
+    # terminates TLS. Paths come from early_cfg (env > yaml). Missing files surface as a
+    # uvicorn startup error rather than silently falling back to HTTP.
+    uvicorn_kwargs = dict(
         host=effective_host,
         port=effective_port,
         reload=args.reload,
         log_level="info",
     )
+    if early_cfg is not None and early_cfg.server.https:
+        if not early_cfg.server.cert_file or not early_cfg.server.key_file:
+            print(
+                "WARNING: server.https=true but cert_file/key_file are not set in config.yaml; "
+                "run `ipmilink --gen-cert` first. Starting over plain HTTP.",
+                file=sys.stderr,
+            )
+        else:
+            uvicorn_kwargs["ssl_certfile"] = early_cfg.server.cert_file
+            uvicorn_kwargs["ssl_keyfile"] = early_cfg.server.key_file
+
+    uvicorn.run("backend.main:app", **uvicorn_kwargs)
 
 
 def _reset_password():

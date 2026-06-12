@@ -130,6 +130,56 @@ async def energy_resets():
     return {"success": True, "resets": out}
 
 
+# 04-W4-03 (Plan 04-07): HTTPS/cert management. Routes use the /system/ prefix
+# (Decision B → /api/system/...) and current globals (Decision A1: `from backend.main
+# import config`). YAML writeback via config.update_server_yaml (full read-mutate-dump;
+# comment-stripping tradeoff accepted per RESEARCH Pitfall 8). Both require auth.
+
+
+class HttpsBody(BaseModel):
+    """PUT body for /system/https — flips the persisted HTTPS toggle."""
+    https: bool
+
+
+@router.post("/system/gen-cert", dependencies=[Depends(require_auth)])
+async def gen_cert():
+    """Generate a self-signed cert+key under data/certs/, persist the paths to config.yaml.
+
+    Returns {success, cert_path, key_path}. HTTPS still requires server.https=true + a
+    restart to take effect (the cookie secure flag and uvicorn TLS bind both read it).
+    """
+    from pathlib import Path
+
+    from backend.core.certs import generate_self_signed
+    from backend.core.config import update_server_yaml
+    from backend.main import config
+
+    try:
+        cert_dir = Path(config.data.db_path).parent / "certs"
+        cert_path, key_path = generate_self_signed(cert_dir)
+        update_server_yaml({"cert_file": str(cert_path), "key_file": str(key_path)})
+        # Reflect in the in-memory config so a later https toggle persists the paths too.
+        config.server.cert_file = str(cert_path)
+        config.server.key_file = str(key_path)
+        return {"success": True, "cert_path": str(cert_path), "key_path": str(key_path)}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@router.put("/system/https", dependencies=[Depends(require_auth)])
+async def toggle_https(body: HttpsBody):
+    """Persist the HTTPS on/off toggle to config.yaml. Requires a restart to take effect."""
+    from backend.core.config import update_server_yaml
+    from backend.main import config
+
+    try:
+        update_server_yaml({"https": body.https})
+        config.server.https = body.https  # in-memory mirror; bind/cookie read it at boot
+        return {"success": True, "https": body.https, "restart_required": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 @router.get("/health")
 async def health():
     from backend.main import config, ws_manager, module_loader
