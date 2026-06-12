@@ -79,7 +79,8 @@ export default function Dashboard() {
               key={value}
               onClick={() => setRange(value)}
               className={cn(
-                "rounded-sm px-2.5 py-1 text-xs font-semibold",
+                // 44px tap floor below md: (Wave 7 — 04-W7-01); compact on desktop.
+                "min-h-11 min-w-11 md:min-h-0 md:min-w-0 rounded-sm px-3 py-1 text-xs font-semibold md:px-2.5",
                 range === value
                   ? "bg-background shadow-sm text-foreground"
                   : "text-muted-foreground hover:text-foreground"

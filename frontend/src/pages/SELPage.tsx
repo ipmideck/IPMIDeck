@@ -69,7 +69,7 @@ export default function SELPage() {
           <select
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            className="rounded-md border border-border bg-background px-2 py-1 text-xs"
+            className="min-h-11 rounded-md border border-border bg-background px-2 py-1 text-base md:min-h-0 md:text-xs"
           >
             <option value="all">{t("sel.filterAll")}</option>
             <option value="critical">{t("sel.filterCritical")}</option>
@@ -78,7 +78,7 @@ export default function SELPage() {
           </select>
           <a
             href={contextServerId ? `/api/modules/sel/${contextServerId}/export?format=csv` : "#"}
-            className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-muted"
+            className="flex min-h-11 items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-muted md:min-h-0"
           >
             <Download className="h-3 w-3" /> {t("sel.exportCsv")}
           </a>
@@ -86,7 +86,7 @@ export default function SELPage() {
             onClick={refresh}
             disabled={loading || !online}
             title={!online ? t("header.backendDisconnected") : undefined}
-            className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex min-h-11 items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 md:min-h-0"
           >
             <RefreshCw className={cn("h-3 w-3", loading && "animate-spin")} /> {t("sel.refresh")}
           </button>
@@ -108,30 +108,57 @@ export default function SELPage() {
             />
           )
         ) : (
-          <div className="rounded-lg border border-border">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-muted/50">
-                  <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">{t("sel.colSeverity")}</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">{t("sel.colTimestamp")}</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">{t("sel.colSensor")}</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">{t("sel.colEvent")}</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">{t("sel.colDescription")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((ev, i) => (
-                  <tr key={i} className="border-b border-border/50 hover:bg-muted/30">
-                    <td className="px-4 py-2">{severityBadge(ev.severity)}</td>
-                    <td className="px-4 py-2 font-mono text-xs text-muted-foreground">{ev.timestamp}</td>
-                    <td className="px-4 py-2 text-xs">{ev.sensor_name}</td>
-                    <td className="px-4 py-2 text-xs">{ev.event_type}</td>
-                    <td className="px-4 py-2 text-xs text-muted-foreground">{ev.description}</td>
+          <>
+            {/* Desktop (>= md): table */}
+            <div className="hidden rounded-lg border border-border md:block">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-muted/50">
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">{t("sel.colSeverity")}</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">{t("sel.colTimestamp")}</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">{t("sel.colSensor")}</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">{t("sel.colEvent")}</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">{t("sel.colDescription")}</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {filtered.map((ev, i) => (
+                    <tr key={i} className="border-b border-border/50 hover:bg-muted/30">
+                      <td className="px-4 py-2">{severityBadge(ev.severity)}</td>
+                      <td className="px-4 py-2 font-mono text-xs text-muted-foreground">{ev.timestamp}</td>
+                      <td className="px-4 py-2 text-xs">{ev.sensor_name}</td>
+                      <td className="px-4 py-2 text-xs">{ev.event_type}</td>
+                      <td className="px-4 py-2 text-xs text-muted-foreground">{ev.description}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile (< md): card list — severity dot leftmost in the primary row. */}
+            <div className="space-y-2 md:hidden">
+              {filtered.map((ev, i) => (
+                <div key={i} className="rounded-lg border border-border bg-card p-3 space-y-1">
+                  <div className="flex items-center gap-2">
+                    {severityBadge(ev.severity)}
+                    <span className="text-sm font-medium">{ev.sensor_name}</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    <span className="font-medium">{t("sel.colEvent")}:</span> {ev.event_type}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    <span className="font-medium">{t("sel.colTimestamp")}:</span>{" "}
+                    <span className="font-mono">{ev.timestamp}</span>
+                  </div>
+                  {ev.description && (
+                    <div className="text-xs text-muted-foreground">
+                      <span className="font-medium">{t("sel.colDescription")}:</span> {ev.description}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </div>
     </>

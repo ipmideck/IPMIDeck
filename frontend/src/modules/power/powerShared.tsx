@@ -25,6 +25,7 @@ import { useSensorStore, type SensorReading } from "@/stores/sensor-store";
 import { sensorNamesForType } from "@/modules/sensors/sensorUtils";
 import { useRangeStore } from "@/stores/range-store";
 import { useEnergyResetStore } from "@/stores/energy-reset-store";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { get } from "@/api/client";
 import i18n from "@/i18n";
 import { intlLocale } from "@/i18n/languages";
@@ -175,6 +176,8 @@ export function PowerLiveChart({
   color?: string;
 }) {
   const range = useRangeStore((s) => s.range);
+  // Below md: tooltips are tap-triggered (no hover on touch); hover above md (Wave 7).
+  const isMobile = useMediaQuery("(max-width: 767px)");
   const [liveData, setLiveData] = useState<ChartPoint[]>([]);
   const [historyData, setHistoryData] = useState<ChartPoint[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -315,6 +318,7 @@ export function PowerLiveChart({
           width={48}
         />
         <Tooltip
+          trigger={isMobile ? "click" : "hover"}
           contentStyle={{
             background: "var(--color-card)",
             border: "1px solid var(--color-border)",
@@ -460,6 +464,8 @@ export function EnergyKwhChart({ serverId }: { serverId: string }) {
   const readings = useSensorStore((s) => s.readings[serverId]);
   const sensorName = useMemo(() => pickPowerSensorName(readings), [readings]);
   const watts = usePowerWattsHistory(serverId, sensorName);
+  // Tap-triggered tooltip on touch (Wave 7); hover on desktop.
+  const isMobile = useMediaQuery("(max-width: 767px)");
 
   const kwhSeries = useMemo(() => {
     let acc = 0;
@@ -496,6 +502,7 @@ export function EnergyKwhChart({ serverId }: { serverId: string }) {
         <XAxis dataKey="time" hide />
         <YAxis hide domain={["auto", "auto"]} />
         <Tooltip
+          trigger={isMobile ? "click" : "hover"}
           contentStyle={{
             background: "var(--color-card)",
             border: "1px solid var(--color-border)",

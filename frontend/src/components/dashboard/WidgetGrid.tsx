@@ -8,6 +8,7 @@ import { useModuleStore } from "@/stores/module-store";
 import { useEditModeStore } from "@/stores/edit-mode-store";
 import { useWidgetRender, getWidgetTitle } from "@/modules/registry";
 import { ErrorBoundary, WidgetErrorFallback } from "@/components/ErrorBoundary";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { X, ChevronDown } from "lucide-react";
 import { put } from "@/api/client";
 import { cn } from "@/lib/utils";
@@ -22,6 +23,10 @@ export function WidgetGrid() {
   const [openTagId, setOpenTagId] = useState<string | null>(null);
   const showIdentity = servers.length > 1;
   const editMode = useEditModeStore((s) => s.editMode);
+  const setEditMode = useEditModeStore((s) => s.setEditMode);
+  // Below md: (< 768px) the grid stacks to a single column and resize is disabled;
+  // a 600ms long-press on a widget body enters edit mode (Wave 7 — 04-W7-01).
+  const isMobile = useMediaQuery("(max-width: 767px)");
 
   // Hydrate the module-enabled map once on mount so useWidgetRender can gate
   // disabled-module widgets (MOD-01 D-14). Done here, not in Dashboard.tsx.
@@ -117,14 +122,14 @@ export function WidgetGrid() {
       <ResponsiveGridLayout
         className="react-grid-layout"
         width={width}
-        layouts={{ lg: gridLayout, sm: stackedLayout }}
-        breakpoints={{ lg: 1024, sm: 0 }}
-        cols={{ lg: 6, sm: 1 }}
+        layouts={{ lg: gridLayout, md: gridLayout, sm: stackedLayout, xs: stackedLayout, xxs: stackedLayout }}
+        breakpoints={{ lg: 1024, md: 768, sm: 414, xs: 375, xxs: 320 }}
+        cols={{ lg: 6, md: 6, sm: 1, xs: 1, xxs: 1 }}
         rowHeight={120}
         margin={[16, 16] as const}
         containerPadding={[0, 0] as const}
         dragConfig={{ enabled: editMode, handle: ".widget-drag-handle" }}
-        resizeConfig={{ enabled: editMode }}
+        resizeConfig={{ enabled: !isMobile && editMode }}
         onLayoutChange={handleLayoutChange}
       >
         {layout.map((item) => {
@@ -138,6 +143,8 @@ export function WidgetGrid() {
                 servers={servers}
                 accentServer={showIdentity ? widgetServer : undefined}
                 editMode={editMode}
+                isMobile={isMobile}
+                onLongPress={() => setEditMode(true)}
                 openTagId={openTagId}
                 setOpenTagId={setOpenTagId}
                 onRemove={handleRemove}
@@ -163,6 +170,8 @@ function WidgetCard({
   servers,
   accentServer,
   editMode,
+  isMobile,
+  onLongPress,
   openTagId,
   setOpenTagId,
   onRemove,
@@ -174,6 +183,8 @@ function WidgetCard({
   servers: Server[];
   accentServer: Server | undefined;
   editMode: boolean;
+  isMobile: boolean;
+  onLongPress: () => void;
   openTagId: string | null;
   setOpenTagId: (id: string | null) => void;
   onRemove: (id: string) => void;
@@ -188,6 +199,22 @@ function WidgetCard({
   );
   const accent = !!accentServer;
 
+  // Long-press (600ms) to enter edit mode — mobile only, when not already editing.
+  // Attached to the card wrapper, NOT the drag handle (the handle owns its own touch
+  // behaviour once edit mode is on). Any move/end/cancel clears the pending timer.
+  const touchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearTouchTimer = useCallback(() => {
+    if (touchTimer.current) {
+      clearTimeout(touchTimer.current);
+      touchTimer.current = null;
+    }
+  }, []);
+  const onTouchStart = useCallback(() => {
+    if (!isMobile || editMode) return;
+    clearTouchTimer();
+    touchTimer.current = setTimeout(() => onLongPress(), 600);
+  }, [isMobile, editMode, onLongPress, clearTouchTimer]);
+
   return (
     <div
       className={cn(
@@ -196,12 +223,19 @@ function WidgetCard({
         accent && "border-l-[3px]"
       )}
       style={accent && accentServer ? { borderLeftColor: accentServer.color } : undefined}
+      onTouchStart={onTouchStart}
+      onTouchMove={clearTouchTimer}
+      onTouchEnd={clearTouchTimer}
+      onTouchCancel={clearTouchTimer}
     >
       <div
         className={cn(
           "widget-drag-handle flex items-center justify-between border-b border-border/50 px-3 py-2",
           editMode ? "cursor-grab active:cursor-grabbing" : "cursor-default"
         )}
+        // touch-action: none ONLY on the handle, ONLY in edit mode (RESEARCH Pitfall 6).
+        // Outside edit mode the user must be able to scroll the page past the header.
+        style={editMode ? { touchAction: "none" } : undefined}
       >
         <span className="text-[11px] font-semibold text-muted-foreground select-none">
           {getWidgetTitle(item, t)}
