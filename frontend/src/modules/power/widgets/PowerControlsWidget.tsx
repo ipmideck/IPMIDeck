@@ -84,7 +84,7 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
   return (
     <div
       className={cn(
-        "flex h-full flex-col gap-1 overflow-hidden transition-[filter,opacity]",
+        "flex h-full flex-col gap-0.5 overflow-hidden transition-[filter,opacity]",
         !online && "opacity-50 grayscale"
       )}
     >
@@ -170,22 +170,22 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
                 stats to show (sensorName) OR a server to show cost/CTA for (Decision O:
                 null-server guard so we never navigate to /settings#server-undefined-cost). */}
             {(sensorName != null || server != null) && (
-              <div className="ml-auto flex flex-col gap-1">
+              <div className="ml-auto flex flex-col gap-0">
                 {sensorName != null && (
                   <>
-                    <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
+                    <div className="flex items-baseline gap-2 text-xs leading-none text-muted-foreground">
                       <span className="w-10 uppercase tracking-wider text-[10px]">{t("power.min")}</span>
                       <span className="font-mono text-sm text-foreground tabular-nums">
                         {min != null ? `${Math.round(min)} ${unit}` : "—"}
                       </span>
                     </div>
-                    <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
+                    <div className="flex items-baseline gap-2 text-xs leading-none text-muted-foreground">
                       <span className="w-10 uppercase tracking-wider text-[10px]">{t("power.max")}</span>
                       <span className="font-mono text-sm text-foreground tabular-nums">
                         {max != null ? `${Math.round(max)} ${unit}` : "—"}
                       </span>
                     </div>
-                    <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
+                    <div className="flex items-baseline gap-2 text-xs leading-none text-muted-foreground">
                       <span className="w-10 uppercase tracking-wider text-[10px]">{t("power.total")}</span>
                       <span className="font-mono text-sm text-foreground tabular-nums">
                         {formatKwh(totalWh)}
@@ -197,14 +197,14 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
                     "Configura tariffa" link affordance (still deep-links to settings). */}
                 {server != null && (
                   server.cost_per_kwh != null ? (
-                    <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
+                    <div className="flex items-baseline gap-2 text-xs leading-none text-muted-foreground">
                       <span className="w-10 uppercase tracking-wider text-[10px]">{t("power.cost")}</span>
                       <span className="font-mono text-sm text-foreground tabular-nums">
                         {formatCurrency((totalWh / 1000) * server.cost_per_kwh, currency, locale)}
                       </span>
                     </div>
                   ) : (
-                    <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
+                    <div className="flex items-baseline gap-2 text-xs leading-none text-muted-foreground">
                       <span className="w-10 uppercase tracking-wider text-[10px]">{t("power.cost")}</span>
                       <button
                         type="button"
