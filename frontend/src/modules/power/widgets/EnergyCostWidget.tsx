@@ -1,17 +1,41 @@
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { Settings, Zap } from "lucide-react";
+import { Settings, Zap, Download } from "lucide-react";
 import { useServerStore } from "@/stores/server-store";
 import { useCurrencyStore } from "@/stores/currency-store";
 import { useRangeStore } from "@/stores/range-store";
 import { formatCurrency } from "@/lib/currency";
 import { usePowerStats, EnergyKwhChart, formatKwh } from "@/modules/power/powerShared";
+import { exportSensorCsv } from "@/modules/power/exportCsv";
 
 interface Props {
   /** Server IDs are STRINGS end-to-end (Decision C). */
   serverId: string;
   w: number;
   h: number;
+}
+
+/**
+ * Header toolbar action — Export CSV button (04-W6-03). Downloads the picked power
+ * sensor's history for the current useRangeStore range from /api/system/history-csv.
+ * Rendered in the card header via the registry's headerActions slot.
+ */
+export function EnergyCostHeaderActions({ serverId }: { serverId: string }) {
+  const { t } = useTranslation();
+  const { sensorName } = usePowerStats(serverId);
+  const range = useRangeStore((s) => s.range);
+  return (
+    <button
+      type="button"
+      onClick={() => exportSensorCsv(serverId, sensorName, range)}
+      disabled={!sensorName}
+      aria-label={t("widget.exportCsv")}
+      title={t("widget.exportCsv")}
+      className="rounded-md p-1 text-muted-foreground min-h-9 md:min-h-7 hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      <Download className="h-3.5 w-3.5" aria-hidden="true" />
+    </button>
+  );
 }
 
 /**

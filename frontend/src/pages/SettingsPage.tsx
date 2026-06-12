@@ -14,7 +14,7 @@ import { useBackendOnline } from "@/stores/connection-store";
 import { get, post, put, del } from "@/api/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { Plus, Trash2, TestTube, Pencil, ExternalLink, Heart, Code2, Globe, Moon, Sun, Monitor, Server as ServerIcon, ShieldCheck, ShieldOff, Fan, Zap, Bell, Lock, Database } from "lucide-react";
+import { Plus, Trash2, TestTube, Pencil, ExternalLink, Heart, Code2, Globe, Moon, Sun, Monitor, Server as ServerIcon, ShieldCheck, ShieldOff, Fan, Zap, Bell, Lock, Database, Archive } from "lucide-react";
 import { EmptyState } from "@/components/common/EmptyState";
 import { LanguageSelect } from "@/components/LanguageSelect";
 
@@ -279,6 +279,60 @@ export default function SettingsPage() {
       return;
     }
     await applyHttps(!https);
+  };
+
+  // 04-W6-03: Backup & Restore card. Backup POSTs to /api/system/backup and streams a
+  // zip (ipmilink.db + config.yaml + encryption.key) — use the native fetch + blob path,
+  // NOT the @/api/client wrapper, because the body is a binary stream. Restore uploads the
+  // zip as a RAW application/zip body to /api/system/restore (staged + applied on next
+  // restart) — no python-multipart dep. The restore CTA is gated behind an inline red
+  // confirm, same pattern as disableAuth.
+  const [restoreFile, setRestoreFile] = useState<File | null>(null);
+  const [restoreConfirm, setRestoreConfirm] = useState(false);
+  const restoreInputRef = useRef<HTMLInputElement>(null);
+
+  const onDownloadBackup = async () => {
+    try {
+      const res = await fetch("/api/system/backup", { method: "POST", credentials: "include" });
+      if (!res.ok) throw new Error("backup_failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `ipmilink-backup-${new Date().toISOString().replace(/[:.]/g, "-")}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success(t("settings.backup.downloadDone"));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const onRestore = async () => {
+    if (!restoreFile) return;
+    try {
+      // Send the zip as the RAW body (application/zip) — the backend reads
+      // request.body() so we avoid the python-multipart dependency.
+      const res = await fetch("/api/system/restore", {
+        method: "POST",
+        headers: { "Content-Type": "application/zip" },
+        body: restoreFile,
+        credentials: "include",
+      });
+      const j = (await res.json()) as { success: boolean; error?: string };
+      if (j.success) {
+        toast.success(t("settings.backup.restoreUploaded"));
+        setRestoreConfirm(false);
+        setRestoreFile(null);
+        if (restoreInputRef.current) restoreInputRef.current.value = "";
+      } else {
+        toast.error(j.error || t("settings.backup.restoreFailed"));
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
   };
 
   const loadServers = async () => {
@@ -1162,6 +1216,73 @@ export default function SettingsPage() {
             {/* Yellow warning banner (always visible — UI-SPEC contract). */}
             <div className="mt-4 rounded-md border border-yellow-500/30 bg-yellow-500/5 p-3 text-xs text-yellow-600 dark:text-yellow-500">
               {t("settings.network.selfSignedNote")}
+            </div>
+          </section>
+
+          {/* Backup & Restore (04-W6-03) — zip download + upload-restore. Placed after
+              Network per UI-SPEC card order. Restore behind an inline red confirm. */}
+          <section className="rounded-lg border border-border bg-card p-5">
+            <div className="mb-4 flex items-center gap-2">
+              <Archive className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                {t("settings.backup.title")}
+              </h2>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={onDownloadBackup}
+                  disabled={!online}
+                  title={offlineTip}
+                  className="w-full rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground min-h-11 md:min-h-9 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {t("settings.backup.downloadBackup")}
+                </button>
+                <p className="text-xs text-muted-foreground">{t("settings.backup.downloadHint")}</p>
+              </div>
+
+              <div className="space-y-2">
+                <input
+                  ref={restoreInputRef}
+                  type="file"
+                  accept=".zip"
+                  onChange={(e) => setRestoreFile(e.target.files?.[0] ?? null)}
+                  className="w-full text-xs text-muted-foreground file:mr-2 file:rounded-md file:border file:border-border file:bg-background file:px-2 file:py-1 file:text-xs file:text-foreground"
+                />
+                {restoreFile && !restoreConfirm && (
+                  <button
+                    type="button"
+                    onClick={() => setRestoreConfirm(true)}
+                    className="w-full rounded-md border border-border px-3 py-1.5 text-sm font-medium text-red-500 min-h-11 md:min-h-9 hover:bg-muted"
+                  >
+                    {t("settings.backup.uploadRestore")}
+                  </button>
+                )}
+                {restoreConfirm && (
+                  <div className="space-y-3 rounded-md border border-red-500/30 bg-red-500/5 p-3">
+                    <p className="text-xs text-muted-foreground">{t("settings.backup.confirmRestoreBody")}</p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setRestoreConfirm(false)}
+                        className="flex-1 rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground min-h-11 md:min-h-9"
+                      >
+                        {t("settings.cancel")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={onRestore}
+                        className="flex-1 rounded-md bg-red-500 px-3 py-1.5 text-sm font-semibold text-white min-h-11 md:min-h-9 hover:bg-red-600"
+                      >
+                        {t("settings.backup.confirmRestore")}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <p className="text-xs text-muted-foreground">{t("settings.backup.restoreHint")}</p>
+              </div>
             </div>
           </section>
 

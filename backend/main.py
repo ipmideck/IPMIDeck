@@ -61,6 +61,13 @@ async def lifespan(app: FastAPI):
     data_dir = Path(config.data.db_path).parent
     save_default_config(data_dir / "config.yaml")
 
+    # 04-W6-03: apply a pending restore (staged by POST /api/system/restore) BEFORE
+    # connecting the DB, so the swapped-in ipmilink.db + encryption.key + config.yaml
+    # are the ones that get opened this boot. No-op when data/staging/ is absent.
+    from backend.api.system_routes import _apply_staging_if_present
+    if await _apply_staging_if_present(config):
+        logger.info("Applied restore staging swap on startup")
+
     # Connect database
     db = Database(config.data.db_path)
     await db.connect()

@@ -13,8 +13,8 @@ import { SensorChart, SensorChartHeaderActions } from "@/modules/sensors/widgets
 import { VoltagesWidget } from "@/modules/sensors/widgets/VoltagesWidget";
 import { PowerStatusWidget } from "@/modules/power/widgets/PowerStatusWidget";
 import { PowerControlsWidget, PowerControlsHeaderActions } from "@/modules/power/widgets/PowerControlsWidget";
-import { PowerStatsWidget } from "@/modules/power/widgets/PowerStatsWidget";
-import { EnergyCostWidget } from "@/modules/power/widgets/EnergyCostWidget";
+import { PowerStatsWidget, PowerStatsHeaderActions } from "@/modules/power/widgets/PowerStatsWidget";
+import { EnergyCostWidget, EnergyCostHeaderActions } from "@/modules/power/widgets/EnergyCostWidget";
 import { PsuRedundancyWidget } from "@/modules/power/widgets/PsuRedundancyWidget";
 import { FanPilotStatusWidget } from "@/modules/fanpilot/widgets/FanPilotStatusWidget";
 import type { WidgetLayout } from "@/stores/layout-store";
@@ -126,11 +126,15 @@ const WIDGET_MAP: Record<
   },
   "power-stats": ({ serverId }) => ({
     body: <PowerStatsWidget serverId={serverId} />,
+    // 04-W6-03: Export CSV button in the card header toolbar.
+    headerActions: <PowerStatsHeaderActions serverId={serverId} />,
   }),
   // 04-W2-06: Energy Cost — derives w/h from the saved layout so the widget can
   // pick its 2x2 (cost-only) vs 3x2 (chart) layout (Decision N kWh chart inside).
   "power-energy-cost": ({ serverId, layout }) => ({
     body: <EnergyCostWidget serverId={serverId} w={layout.w} h={layout.h} />,
+    // 04-W6-03: Export CSV button in the card header toolbar.
+    headerActions: <EnergyCostHeaderActions serverId={serverId} />,
   }),
   // 04-W5-02: PSU Redundancy — derives w/h from the saved layout to pick 2x2 (per-PSU
   // cards) vs 2x1 (status pill + N-of-M-OK). PSUs detected by sensor TYPE (Decision S).

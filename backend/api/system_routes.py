@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import csv
+import io
+import shutil
+import zipfile
 from datetime import datetime, timezone
+from pathlib import Path
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from backend.core.auth import require_auth
@@ -244,6 +250,183 @@ async def toggle_https(body: HttpsBody):
         return {"success": True, "https": body.https, "restart_required": True}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+# 04-W6-03 (Plan 04-09): Backup / Restore / CSV export.
+# Mounted at prefix="/api" so paths resolve to /api/system/backup, /api/system/restore,
+# /api/system/history-csv (Decision B). Current-globals pattern (Decision A1:
+# `from backend.main import config, db`). Server IDs are strings (Decision C).
+#
+# Backup zip MUST include data/encryption.key — Plan 04-07 moved the at-rest
+# credential key OUT of the DB into that file. A backup without it makes the
+# restored BMC credentials undecryptable (04-07-SUMMARY warning). The data dir is
+# derived the same way AuthManager derives it: Path(config.data.db_path).parent.
+
+ALLOWED_BACKUP_FILES = {"ipmilink.db", "config.yaml", "encryption.key"}
+
+
+@router.post("/system/backup", dependencies=[Depends(require_auth)])
+async def backup():
+    """Stream a .zip of ipmilink.db + config.yaml + encryption.key for download.
+
+    encryption.key is REQUIRED (04-W4-04): without it the restored credentials
+    cannot be decrypted. The data dir is the parent of config.data.db_path.
+    """
+    from backend.main import config, db
+
+    data_dir = Path(config.data.db_path).parent
+    db_path = Path(config.data.db_path)
+    config_path = data_dir / "config.yaml"
+    key_path = data_dir / "encryption.key"
+
+    # The DB runs in WAL mode (PRAGMA journal_mode=WAL) — recent committed writes
+    # may still live in ipmilink.db-wal, NOT the main ipmilink.db file. Checkpoint
+    # (TRUNCATE) first so the zipped ipmilink.db is a COMPLETE, consistent snapshot;
+    # otherwise a restored backup silently loses any not-yet-checkpointed rows.
+    try:
+        await db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        await db.commit()
+    except Exception:
+        pass  # best-effort — a backup of the main file alone is still better than failing
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        if db_path.exists():
+            z.write(db_path, arcname="ipmilink.db")
+        if config_path.exists():
+            z.write(config_path, arcname="config.yaml")
+        if key_path.exists():
+            z.write(key_path, arcname="encryption.key")
+    buf.seek(0)
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="ipmilink-backup-{ts}.zip"'},
+    )
+
+
+@router.post("/system/restore", dependencies=[Depends(require_auth)])
+async def restore(request: Request):
+    """Validate an uploaded backup zip and stage it for an atomic swap on next startup.
+
+    The zip arrives as the RAW request body (Content-Type: application/zip) — NOT a
+    multipart form — so we don't pull in the python-multipart dependency (the repo
+    ships only the deps in pyproject.toml; "no new dependencies" is a phase constraint).
+    The zip is extracted ONLY into data/staging/ — the live files are never touched
+    here. lifespan() applies the swap on the next boot via _apply_staging_if_present.
+    Zip-slip guarded by an exact-filename allow-list (reject any path separators).
+    """
+    from backend.main import config
+
+    data_dir = Path(config.data.db_path).parent
+    staging = data_dir / "staging"
+    if staging.exists():
+        shutil.rmtree(staging)
+    staging.mkdir(parents=True)
+
+    content = await request.body()
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as z:
+            names = z.namelist()
+            for name in names:
+                # Zip-slip guard: only allow our exact filenames; reject traversal.
+                if name not in ALLOWED_BACKUP_FILES or "/" in name or "\\" in name:
+                    shutil.rmtree(staging, ignore_errors=True)
+                    return {"success": False, "error": "unexpected_file_in_zip", "name": name}
+            # A valid backup must at least contain the DB.
+            if "ipmilink.db" not in names:
+                shutil.rmtree(staging, ignore_errors=True)
+                return {"success": False, "error": "missing_database"}
+            for name in names:
+                z.extract(name, staging)
+    except zipfile.BadZipFile:
+        shutil.rmtree(staging, ignore_errors=True)
+        return {"success": False, "error": "invalid_zip"}
+
+    return {
+        "success": True,
+        "restart_required": True,
+        "message": "Backup uploaded. Restart the app to apply.",
+    }
+
+
+async def _apply_staging_if_present(config) -> bool:
+    """Apply a pending restore by atomic file swap. Called from lifespan() on startup.
+
+    Moves each staged file into the data dir, replacing the live copy, then removes
+    the staging dir. Returns True if a swap was applied. Runs BEFORE Database.connect()
+    so the new ipmilink.db is the one that gets opened.
+
+    CRITICAL (WAL): the DB runs in WAL mode, so the data dir may hold an orphaned
+    ipmilink.db-wal / ipmilink.db-shm from the pre-restore process. If we drop in the
+    restored ipmilink.db but leave those stale sidecars, SQLite's WAL recovery on next
+    open mixes the OLD wal frames with the NEW db file → the restore silently shows the
+    wrong (or empty) data. We must delete the sidecars whenever we replace the DB.
+    """
+    data_dir = Path(config.data.db_path).parent
+    staging = data_dir / "staging"
+    if not staging.exists():
+        return False
+    db_name = Path(config.data.db_path).name
+    for name in ALLOWED_BACKUP_FILES:
+        src = staging / name
+        if src.exists():
+            # The DB arcname is always "ipmilink.db"; land it at the CONFIGURED db
+            # filename so a non-default db_path still restores correctly.
+            dest = (data_dir / db_name) if name == "ipmilink.db" else (data_dir / name)
+            # When replacing the DB, also remove any orphaned WAL/SHM sidecars of the
+            # DESTINATION file so the restored DB opens clean (the backup zip only
+            # carries the checkpointed main file — its own sidecars don't exist).
+            if name == "ipmilink.db":
+                for sidecar in (f"{db_name}-wal", f"{db_name}-shm"):
+                    sc = data_dir / sidecar
+                    if sc.exists():
+                        sc.unlink()
+            shutil.move(str(src), str(dest))
+    shutil.rmtree(staging, ignore_errors=True)
+    return True
+
+
+# CSV history export. The `range` values MATCH the frontend useRangeStore enum
+# ("live" | "1h" | "24h" | "7d") — NOT the day/week names in the plan snippet.
+# The actual store (frontend/src/stores/range-store.ts) uses 1h/24h/7d, so this
+# mapping is the correct one (Codex MEDIUM concern: match useRangeStore enum).
+# Values are SQLite datetime() offsets, mirroring sensors/routes.py get_sensor_history
+# so the cutoff is in the SAME 'YYYY-MM-DD HH:MM:SS' format as the stored timestamps
+# (a Python isoformat() cutoff with a 'T' separator would never match — space < 'T').
+_RANGE_OFFSETS = {
+    "live": "-5 minutes",
+    "1h": "-1 hour",
+    "24h": "-24 hours",
+    "7d": "-7 days",
+}
+
+
+@router.get("/system/history-csv", dependencies=[Depends(require_auth)])
+async def history_csv(server_id: str, sensor_name: str, range: str = "24h"):
+    """Export sensor history as CSV. server_id is str (Decision C); range matches
+    useRangeStore ("live" | "1h" | "24h" | "7d")."""
+    from backend.main import db
+
+    offset = _RANGE_OFFSETS.get(range, _RANGE_OFFSETS["24h"])
+    rows = await db.fetchall(
+        "SELECT timestamp, sensor_name, value FROM sensor_readings "
+        "WHERE server_id = ? AND sensor_name = ? AND timestamp > datetime('now', ?) "
+        "ORDER BY timestamp ASC",
+        (server_id, sensor_name, offset),
+    )
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["timestamp", "sensor_name", "value"])
+    for r in rows:
+        writer.writerow([r["timestamp"], r["sensor_name"], r["value"]])
+    safe = sensor_name.replace(" ", "_").replace("/", "_")
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="ipmilink-{safe}-{range}.csv"'},
+    )
 
 
 @router.get("/health")
