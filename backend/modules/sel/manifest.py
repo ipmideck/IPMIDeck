@@ -4,6 +4,7 @@ from pathlib import Path
 
 from backend.core.modules import ModuleManifest
 from backend.modules.sel.routes import router
+from backend.modules.sel.tasks import sel_polling_loop
 
 module = ModuleManifest(
     id="sel",
@@ -13,6 +14,7 @@ module = ModuleManifest(
     category="diagnostics",
     icon="list",
     router=router,
+    background_tasks=[sel_polling_loop],
     migrations_dir=Path(__file__).parent / "migrations",
     widgets=[
         {

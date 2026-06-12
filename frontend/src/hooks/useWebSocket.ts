@@ -1,5 +1,8 @@
 import { useEffect, useRef } from "react";
+import { toast } from "sonner";
+import i18n from "@/i18n";
 import { useSensorStore } from "@/stores/sensor-store";
+import { useAlertingStore } from "@/stores/alerting-store";
 import { useConnectionStore, type WSStatus } from "@/stores/connection-store";
 
 // Re-export so existing call sites that import WSStatus from this module keep working.
@@ -67,6 +70,43 @@ export function useWebSocket(): void {
           const msg = JSON.parse(event.data);
           if (msg.type === "sensor_update") {
             useSensorStore.getState().updateSensors(msg.server_id, msg.sensors);
+          } else if (
+            msg.type === "alert" &&
+            (msg.severity === "critical" || msg.severity === "warning")
+          ) {
+            // 04-W3-01: SEL critical/warning alerts. Severity filter — `info` is silently
+            // dropped (it stays in the Event Log only). The broadcast wire shape is
+            // { type, server_id, severity, sensor, message, value } (broadcast_alert).
+            const text = `${msg.sensor || ""}${msg.sensor ? ": " : ""}${msg.message || ""}`.trim();
+            const notifEnabled = useAlertingStore.getState().notificationsEnabled;
+
+            // Pitfall 3: gate the system Notification on document.hidden read AT message
+            // arrival (not mount) so we never double-fire (toast + notification) when the
+            // tab is focused. When hidden + opted-in + granted → Notification; else → toast.
+            if (
+              notifEnabled &&
+              document.hidden &&
+              typeof Notification !== "undefined" &&
+              Notification.permission === "granted"
+            ) {
+              const n = new Notification(
+                msg.severity === "critical"
+                  ? i18n.t("alert.criticalTitle")
+                  : i18n.t("alert.warningTitle"),
+                { body: text, tag: `sel-${msg.server_id}-${Date.now()}` }
+              );
+              // Auto-close the notification once the user returns to the tab.
+              const onVis = () => {
+                if (!document.hidden) {
+                  n.close();
+                  document.removeEventListener("visibilitychange", onVis);
+                }
+              };
+              document.addEventListener("visibilitychange", onVis);
+            } else {
+              if (msg.severity === "critical") toast.error(text);
+              else toast.warning(text);
+            }
           }
         } catch {
           // ignore parse errors
