@@ -141,14 +141,17 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
         // action-only `power_status` broadcast. PowerStatsWidget already gates this way.
         // Top-aligned column so the Power On button
         // below (its own shrink-0 wrapper) never overlaps the stats at 2x2.
-        // Wattage block LEFT, Min/Max/Total stacked RIGHT (was: stats stacked below).
-        // GAP-A (04-13): `overflow-y-auto` makes the body clip/scroll its OWN overflow
-        // instead of spilling the always-on cost/CTA row down onto the shrink-0 action
-        // block below it. With `min-h-0 flex-1 overflow-y-auto` the cost row / CTA and
-        // the "Accendi" button get distinct, non-overlapping rects at the 2x2 size; the
-        // root container's `overflow-hidden` keeps anything from escaping the card.
-        <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
-          {/* Compact view — W2-01 relayout: two-column wattage | Min/Max/Total */}
+        // Wattage block LEFT, Min/Max/Total + Costo stacked RIGHT.
+        // GAP-A (04-13 rework): the cost value / "Configura tariffa" affordance now
+        // lives INSIDE the right-side stat stack as a 4th always-visible line (same row
+        // format as Min/Max/Total), instead of a separate full-width mt-* block below the
+        // wattage|stats row. That earlier block overflowed the shrunk flex-1 body at 2x2
+        // and either overlapped the "Accendi" button or (with overflow-y-auto) got clipped
+        // below a scroll fold. Folding it into the stat stack keeps the cost/CTA fully
+        // visible and non-overlapping at 2x2 with no scrollbar — so the body returns to a
+        // plain `min-h-0 flex-1` column (no overflow-y-auto needed).
+        <div className="flex min-h-0 flex-1 flex-col gap-0.5">
+          {/* Compact view — W2-01 relayout: two-column wattage | Min/Max/Total/Costo */}
           <div className="flex flex-row items-start gap-4">
             {/* Left block — wattage */}
             <div className="flex flex-col">
@@ -163,53 +166,61 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
               </span>
             </div>
 
-            {/* Right block — Min / Max / Total stacked */}
-            {sensorName != null && (
+            {/* Right block — Min / Max / Total + Costo stacked. Renders when there are
+                stats to show (sensorName) OR a server to show cost/CTA for (Decision O:
+                null-server guard so we never navigate to /settings#server-undefined-cost). */}
+            {(sensorName != null || server != null) && (
               <div className="ml-auto flex flex-col gap-1">
-                <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
-                  <span className="w-10 uppercase tracking-wider text-[10px]">{t("power.min")}</span>
-                  <span className="font-mono text-sm text-foreground tabular-nums">
-                    {min != null ? `${Math.round(min)} ${unit}` : "—"}
-                  </span>
-                </div>
-                <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
-                  <span className="w-10 uppercase tracking-wider text-[10px]">{t("power.max")}</span>
-                  <span className="font-mono text-sm text-foreground tabular-nums">
-                    {max != null ? `${Math.round(max)} ${unit}` : "—"}
-                  </span>
-                </div>
-                <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
-                  <span className="w-10 uppercase tracking-wider text-[10px]">{t("power.total")}</span>
-                  <span className="font-mono text-sm text-foreground tabular-nums">
-                    {formatKwh(totalWh)}
-                  </span>
-                </div>
+                {sensorName != null && (
+                  <>
+                    <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
+                      <span className="w-10 uppercase tracking-wider text-[10px]">{t("power.min")}</span>
+                      <span className="font-mono text-sm text-foreground tabular-nums">
+                        {min != null ? `${Math.round(min)} ${unit}` : "—"}
+                      </span>
+                    </div>
+                    <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
+                      <span className="w-10 uppercase tracking-wider text-[10px]">{t("power.max")}</span>
+                      <span className="font-mono text-sm text-foreground tabular-nums">
+                        {max != null ? `${Math.round(max)} ${unit}` : "—"}
+                      </span>
+                    </div>
+                    <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
+                      <span className="w-10 uppercase tracking-wider text-[10px]">{t("power.total")}</span>
+                      <span className="font-mono text-sm text-foreground tabular-nums">
+                        {formatKwh(totalWh)}
+                      </span>
+                    </div>
+                  </>
+                )}
+                {/* Costo line — tariff set → cost value; tariff unset → compact
+                    "Configura tariffa" link affordance (still deep-links to settings). */}
+                {server != null && (
+                  server.cost_per_kwh != null ? (
+                    <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
+                      <span className="w-10 uppercase tracking-wider text-[10px]">{t("power.cost")}</span>
+                      <span className="font-mono text-sm text-foreground tabular-nums">
+                        {formatCurrency((totalWh / 1000) * server.cost_per_kwh, currency, locale)}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
+                      <span className="w-10 uppercase tracking-wider text-[10px]">{t("power.cost")}</span>
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/settings#server-${server.id}-cost`)}
+                        className="inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground underline decoration-dashed underline-offset-2 hover:text-foreground"
+                        aria-label={t("power.configureTariff")}
+                      >
+                        <Settings className="h-3 w-3 shrink-0" aria-hidden="true" />
+                        {t("power.configureTariff")}
+                      </button>
+                    </div>
+                  )
+                )}
               </div>
             )}
           </div>
-
-          {/* Cost row OR Configure tariff CTA — Decision O: null-server guard so we
-              never navigate to /settings#server-undefined-cost. */}
-          {server == null ? null : (
-            server.cost_per_kwh != null ? (
-              <div className="mt-1.5 flex items-baseline gap-2">
-                <span className="text-xs text-muted-foreground uppercase tracking-wider">{t("power.cost")}</span>
-                <span className="font-mono text-sm text-foreground tabular-nums">
-                  {formatCurrency((totalWh / 1000) * server.cost_per_kwh, currency, locale)}
-                </span>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => navigate(`/settings#server-${server.id}-cost`)}
-                className="mt-1.5 inline-flex items-center gap-1.5 self-start rounded-md border border-dashed border-border px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground min-h-9 md:min-h-7"
-                aria-label={t("power.configureTariff")}
-              >
-                <Settings className="h-3 w-3" aria-hidden="true" />
-                {t("power.configureTariff")}
-              </button>
-            )
-          )}
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 items-center justify-center text-xs text-muted-foreground">
