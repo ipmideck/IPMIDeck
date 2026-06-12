@@ -51,8 +51,18 @@ export default function SettingsPage() {
     if (!match) return;
     const targetId = match[1]; // string — Decision C, no Number()/parseInt
     if (!targetId || targetId === "undefined" || targetId === "new") return;
-    // Expand the edit form for this server (the form renders when editingId === s.id).
-    setEditingId(targetId);
+    // GAP-B (04-13): look up the target server and PREFILL editForm — not just
+    // setEditingId. The form fields are controlled by editForm, so rendering the
+    // form without populating it left name/host/vendor blank and saveEdit bailed on
+    // the empty-host guard (no PUT). Read servers from the store at call time to keep
+    // the deps array minimal (the deep-link arrives from the dashboard where servers
+    // are already loaded). If no server matches the id, do NOT open a blank form.
+    const target = useServerStore.getState().servers.find((s) => s.id === targetId);
+    if (target == null) return;
+    // startEdit prefills editForm from the server AND setEditingId(target.id) AND
+    // setShowForm(false). Guard against clobbering an edit already in progress for
+    // this same server (belt-and-suspenders — the hash is cleared in the rAF below).
+    if (editingId !== targetId) startEdit(target);
     // Wait for the form to render, then scroll + focus the cost input.
     const tick = requestAnimationFrame(() => {
       const el = document.getElementById(`server-${targetId}-cost`);
@@ -64,6 +74,9 @@ export default function SettingsPage() {
       navigate(location.pathname + location.search, { replace: true });
     });
     return () => cancelAnimationFrame(tick);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- editingId/startEdit are
+    // read for a one-shot deep-link prefill; re-running on their identity change would
+    // re-fire the scroll/focus + hash-clear on every keystroke in the edit form.
   }, [location.hash, location.pathname, location.search, navigate]);
 
   // 04-W2-03: global currency selector (Appearance card, below Language).
