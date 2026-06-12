@@ -39,5 +39,14 @@ module = ModuleManifest(
             "default_size": "2x2",
             "category": "monitoring",
         },
+        {
+            # 04-W2-06: Energy Cost — cost figure + cumulative kWh chart (Decision N).
+            "id": "power-energy-cost",
+            "name": "Energy Cost",
+            "description": "Energy cost (currency) + cumulative kWh — 2x2 cost summary, 3x2 with chart",
+            "sizes": ["2x2", "3x2"],
+            "default_size": "2x2",
+            "category": "monitoring",
+        },
     ],
 )

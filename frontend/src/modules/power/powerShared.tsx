@@ -13,6 +13,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   LineChart,
   Line,
+  Area,
+  AreaChart,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -337,4 +339,180 @@ export function formatKwh(totalWh: number): string {
   if (kwh < 10) return `${kwh.toFixed(2)} kWh`;
   if (kwh < 100) return `${kwh.toFixed(1)} kWh`;
   return `${Math.round(kwh)} kWh`;
+}
+
+/** A watts sample on the time axis — `time` is epoch ms (for trapezoidal dt). */
+interface WattsPoint {
+  time: number;
+  value: number | null;
+}
+
+/**
+ * Watts-history fetch hook (factored out of PowerLiveChart's inline logic so the
+ * cumulative-kWh chart can reuse the SAME source — executor-discretion naming per
+ * 04-04 plan). Returns watts samples with EPOCH-MS timestamps so EnergyKwhChart can
+ * integrate by elapsed time.
+ *
+ * - range === "live": rolling 60-point buffer from the sensor store (3s tick).
+ * - range !== "live": fetches /api/modules/sensors/{serverId}/history once on
+ *   range/sensor change, then refreshes every 15s (same cadence as PowerLiveChart).
+ */
+export function usePowerWattsHistory(
+  serverId: string,
+  sensorName: string | null
+): WattsPoint[] {
+  const range = useRangeStore((s) => s.range);
+  const [liveData, setLiveData] = useState<WattsPoint[]>([]);
+  const [historyData, setHistoryData] = useState<WattsPoint[]>([]);
+  const lastUpdateRef = useRef(0);
+
+  // ---- Live buffer (60-point rolling, 3s tick) — only when range is "live" ----
+  useEffect(() => {
+    if (range !== "live") {
+      setLiveData([]);
+      return;
+    }
+    if (!serverId || !sensorName) return;
+    setLiveData([]);
+
+    const tick = () => {
+      const r = useSensorStore.getState().readings[serverId];
+      if (!r) return;
+      const now = Date.now();
+      if (now - lastUpdateRef.current < 2000) return;
+      lastUpdateRef.current = now;
+      const v = r[sensorName]?.value;
+      setLiveData((prev) =>
+        [...prev, { time: now, value: typeof v === "number" ? v : null }].slice(-60)
+      );
+    };
+
+    tick(); // seed the first point right away
+    const id = setInterval(tick, 3000);
+    return () => clearInterval(id);
+  }, [serverId, sensorName, range]);
+
+  // ---- History fetch — only when range is NOT "live" ----
+  useEffect(() => {
+    if (range === "live") {
+      setHistoryData([]);
+      return;
+    }
+    if (!serverId || !sensorName) return;
+
+    let cancelled = false;
+    setHistoryData([]);
+
+    const toMs = (t: string) => {
+      const iso = /[zZ]|[+-]\d\d:?\d\d$/.test(t) ? t : t.replace(" ", "T") + "Z";
+      return new Date(iso).getTime();
+    };
+
+    async function loadHistory() {
+      try {
+        const r = await get<{ data: { value: number; timestamp: string }[] }>(
+          `/api/modules/sensors/${serverId}/history?sensor_name=${encodeURIComponent(sensorName as string)}&range=${range}`
+        );
+        if (cancelled) return;
+        const points: WattsPoint[] = (r.data || []).map((pt) => ({
+          time: toMs(pt.timestamp),
+          value: pt.value,
+        }));
+        setHistoryData(points);
+      } catch {
+        if (!cancelled) setHistoryData([]);
+      }
+    }
+
+    loadHistory();
+    const id = setInterval(loadHistory, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [serverId, sensorName, range]);
+
+  return range === "live" ? liveData : historyData;
+}
+
+/**
+ * Cumulative kWh chart (04-W2-06 + Decision N — Codex HIGH fix).
+ *
+ * Computes a running kWh series by TRAPEZOIDAL integration of the watts series:
+ *   kwh[i] = kwh[i-1] + ((w[i] + w[i-1]) / 2) * dtHours / 1000
+ * where dtHours = (t[i] - t[i-1]) / 3_600_000 (timestamps are epoch ms).
+ *
+ * This is NOT the watts chart re-skinned — at any range the line rises monotonically
+ * because it accumulates energy. Reuses the violet #a78bfa accent + range-store wiring
+ * (via usePowerWattsHistory, shared with PowerLiveChart).
+ */
+export function EnergyKwhChart({ serverId }: { serverId: string }) {
+  const readings = useSensorStore((s) => s.readings[serverId]);
+  const sensorName = useMemo(() => pickPowerSensorName(readings), [readings]);
+  const watts = usePowerWattsHistory(serverId, sensorName);
+
+  const kwhSeries = useMemo(() => {
+    let acc = 0;
+    return watts.map((p, i) => {
+      if (i === 0 || p.value == null || watts[i - 1].value == null) {
+        return { time: p.time, kwh: acc };
+      }
+      const prev = watts[i - 1];
+      const dtHours = (p.time - prev.time) / 3_600_000;
+      // Trapezoidal rule: average of two samples × dt, watts→kWh (÷1000).
+      acc += (((p.value + (prev.value as number)) / 2) * dtHours) / 1000;
+      return { time: p.time, kwh: acc };
+    });
+  }, [watts]);
+
+  if (!sensorName) {
+    return (
+      <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+        No power sensor
+      </div>
+    );
+  }
+  if (kwhSeries.length < 2) {
+    return (
+      <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+        Waiting for data…
+      </div>
+    );
+  }
+
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <AreaChart data={kwhSeries} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
+        <XAxis dataKey="time" hide />
+        <YAxis hide domain={["auto", "auto"]} />
+        <Tooltip
+          contentStyle={{
+            background: "var(--color-card)",
+            border: "1px solid var(--color-border)",
+            borderRadius: "6px",
+            fontSize: "12px",
+          }}
+          labelStyle={{ color: "var(--color-muted-foreground)" }}
+          labelFormatter={(t) =>
+            new Date(Number(t)).toLocaleTimeString(intlLocale(i18n.resolvedLanguage), {
+              hour12: false, hour: "2-digit", minute: "2-digit",
+            })
+          }
+          formatter={(value) =>
+            typeof value === "number" ? [formatKwh(value * 1000), "kWh"] : [String(value ?? "—"), "kWh"]
+          }
+        />
+        <Area
+          type="monotone"
+          dataKey="kwh"
+          stroke="#a78bfa"
+          fill="#a78bfa"
+          fillOpacity={0.2}
+          strokeWidth={2}
+          dot={false}
+          activeDot={{ r: 3 }}
+        />
+      </AreaChart>
+    </ResponsiveContainer>
+  );
 }
