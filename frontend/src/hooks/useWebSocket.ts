@@ -3,6 +3,8 @@ import { toast } from "sonner";
 import i18n from "@/i18n";
 import { useSensorStore } from "@/stores/sensor-store";
 import { useAlertingStore } from "@/stores/alerting-store";
+import { usePowerStore } from "@/stores/power-store";
+import { useFanpilotStore } from "@/stores/fanpilot-store";
 import { useConnectionStore, type WSStatus } from "@/stores/connection-store";
 
 // Re-export so existing call sites that import WSStatus from this module keep working.
@@ -70,6 +72,23 @@ export function useWebSocket(): void {
           const msg = JSON.parse(event.data);
           if (msg.type === "sensor_update") {
             useSensorStore.getState().updateSensors(msg.server_id, msg.sensors);
+          } else if (msg.type === "power_status") {
+            // 04-W4-01: consume the backend broadcast (+ snapshot replay) instead of
+            // per-widget REST polling. Wire shape: { type, server_id, status }.
+            usePowerStore.getState().setStatus(msg.server_id, { status: msg.status });
+          } else if (msg.type === "fanpilot_status") {
+            // 04-W4-01: consume the backend broadcast (+ snapshot replay) instead of
+            // per-widget REST polling. The broadcast wire shape is
+            // { type, server_id, mode, active_profile, current_speed_pct, source_temp };
+            // normalize it into the widget-facing store shape here (Decision Q — the
+            // store mirrors the REST status contract the widget already read). A
+            // broadcast is only emitted while FanPilot drives the fans, so enabled=true.
+            useFanpilotStore.getState().setStatus(msg.server_id, {
+              enabled: msg.mode === "fanpilot",
+              profile: msg.active_profile ? { name: msg.active_profile } : null,
+              mode: msg.mode ?? "auto",
+              speedPct: msg.current_speed_pct ?? null,
+            });
           } else if (
             msg.type === "alert" &&
             (msg.severity === "critical" || msg.severity === "warning")

@@ -10,8 +10,10 @@ import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from typing import Annotated
+
 import uvicorn
-from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Cookie, Depends, FastAPI, WebSocket, WebSocketDisconnect, status
 from fastapi.staticfiles import StaticFiles
 
 from backend.core.auth import AuthManager, require_auth
@@ -137,7 +139,33 @@ app = FastAPI(
 # === WebSocket endpoint ===
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(
+    websocket: WebSocket,
+    session: Annotated[str | None, Cookie()] = None,
+):
+    # 04-W4-01 auth gate: when auth is ENABLED, a valid session cookie is required
+    # BEFORE the handshake is accepted. When auth is DISABLED (open-access mode, or
+    # no user configured), the connection is allowed exactly as before — this mirrors
+    # require_auth's is_auth_enabled() gate so single-user no-auth setups are never
+    # locked out. Uses the current module globals (auth, db, ws_manager) — there is
+    # NO app-state container exists (Decision A1 — Codex HIGH fix).
+    if await auth.is_auth_enabled():
+        username = auth.verify_session_token(session) if session else None
+        if not username:
+            # Reject pre-accept with policy-violation close code (1008).
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+        # Phase 02.1 REVIEWS #7 invariant: a token signed for an OLD username (pre
+        # credential-replace) must not stay valid — confirm the token subject is the
+        # CURRENT single stored user, same check as require_auth.
+        row = await db.fetchone(
+            "SELECT 1 FROM users WHERE username = ? LIMIT 1", (username,)
+        )
+        if row is None:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+    # Authenticated (or auth disabled) → accept + replay snapshot. The early-return
+    # above is added BEFORE connect(), so the snapshot-replay ordering is unchanged.
     await ws_manager.connect(websocket)
     try:
         while True:

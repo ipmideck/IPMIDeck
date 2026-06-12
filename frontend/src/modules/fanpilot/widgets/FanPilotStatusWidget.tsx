@@ -1,7 +1,6 @@
-import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { get } from "@/api/client";
 import { useBackendOnline } from "@/stores/connection-store";
+import { useFanpilotStore } from "@/stores/fanpilot-store";
 
 interface FanPilotStatusWidgetProps {
   serverId: string;
@@ -9,21 +8,12 @@ interface FanPilotStatusWidgetProps {
 
 export function FanPilotStatusWidget({ serverId }: FanPilotStatusWidgetProps) {
   const { t } = useTranslation();
-  const [status, setStatus] = useState<{ enabled: boolean; profile: { name: string } | null } | null>(null);
+  // 04-W4-01: FanPilot status now comes from the `fanpilot_status` WS broadcast
+  // (+ snapshot replay on connect) via useFanpilotStore — no more per-widget REST
+  // polling. The widget reads `enabled` + `profile.name` (Decision Q — real keys);
+  // status is null until the snapshot/broadcast arrives (within ~500ms of mount).
+  const status = useFanpilotStore((s) => s.statusByServer[serverId]);
   const online = useBackendOnline();
-
-  useEffect(() => {
-    if (!serverId) return;
-    const poll = async () => {
-      try {
-        const data = await get<any>(`/api/modules/fanpilot/${serverId}/status`);
-        setStatus(data);
-      } catch { /* ignore */ }
-    };
-    poll();
-    const interval = setInterval(poll, 5000);
-    return () => clearInterval(interval);
-  }, [serverId]);
 
   if (!serverId) {
     return <div className="flex h-full items-center justify-center text-muted-foreground">—</div>;

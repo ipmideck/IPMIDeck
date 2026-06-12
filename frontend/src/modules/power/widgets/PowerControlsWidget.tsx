@@ -1,12 +1,13 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { get, post } from "@/api/client";
+import { post } from "@/api/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Power, PowerOff, RotateCcw, RefreshCw, Zap, Settings, LayoutGrid, LineChart as LineChartIcon } from "lucide-react";
 import { useBackendOnline } from "@/stores/connection-store";
 import { useServerStore } from "@/stores/server-store";
+import { usePowerStore } from "@/stores/power-store";
 import { useCurrencyStore } from "@/stores/currency-store";
 import { formatCurrency } from "@/lib/currency";
 import { usePowerStats, PowerLiveChart, formatKwh } from "@/modules/power/powerShared";
@@ -31,29 +32,19 @@ const DESTRUCTIVE = [
 export function PowerControlsWidget({ serverId, view = "compact", onViewChange }: PowerControlsWidgetProps) {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
-  const [status, setStatus] = useState("unknown");
   const [loading, setLoading] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<string | null>(null);
   const online = useBackendOnline();
   const { live, unit, min, max, totalWh, sensorName } = usePowerStats(serverId);
+  // 04-W4-01: power state now comes from the `power_status` WS broadcast (+ snapshot
+  // replay on connect) via usePowerStore — no more per-widget REST polling. Default
+  // to "unknown" until the snapshot/broadcast arrives (within ~500ms of mount).
+  const status = usePowerStore((s) => s.statusByServer[serverId]?.status) ?? "unknown";
   // 04-W2-05 / 04-W2-04: cost row OR "Configure tariff" CTA in the compact view.
   // serverId is a STRING (Decision C) — match Server.id by string equality, no cast.
   const currency = useCurrencyStore((s) => s.currency);
   const locale = i18n.resolvedLanguage || "en";
   const server = useServerStore((s) => s.servers.find((srv) => srv.id === serverId));
-
-  useEffect(() => {
-    if (!serverId) return;
-    const poll = async () => {
-      try {
-        const data = await get<{ status: string }>(`/api/modules/power/${serverId}/status`);
-        setStatus(data.status);
-      } catch { /* ignore */ }
-    };
-    poll();
-    const interval = setInterval(poll, 10000);
-    return () => clearInterval(interval);
-  }, [serverId]);
 
   const handleAction = async (action: string) => {
     if (action !== "on" && confirm !== action) {
@@ -67,7 +58,10 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
       const res = await post<{ success: boolean; error?: string }>(`/api/modules/power/${serverId}/command`, { action });
       if (res.success) {
         toast.success(t("power.executed", { action }));
-        setStatus(action === "on" || action === "reset" || action === "cycle" ? "on" : "off");
+        // Optimistic update — the backend will broadcast the confirmed status shortly.
+        usePowerStore.getState().setStatus(serverId, {
+          status: action === "on" || action === "reset" || action === "cycle" ? "on" : "off",
+        });
       } else {
         toast.error(res.error || t("power.commandFailed"));
       }
