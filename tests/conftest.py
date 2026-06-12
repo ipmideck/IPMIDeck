@@ -85,16 +85,21 @@ def client(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-async def auth_manager():
-    """Strategy C: an in-memory AuthManager + Database for focused auth/crypto unit tests.
+async def auth_manager(tmp_path):
+    """Strategy C: a tmp-dir AuthManager + Database for focused auth/crypto unit tests.
 
-    No lifespan, no module loading, no background tasks — just a connected :memory: DB and an
-    initialized AuthManager. Yields (am, db); closes the DB on teardown.
+    No lifespan, no module loading, no background tasks — just a connected on-disk DB inside
+    pytest's per-test tmp_path and an initialized AuthManager. Yields (am, db); closes on teardown.
+
+    NOTE (04-W4-04): the DB lives in tmp_path (NOT ":memory:") on purpose —
+    AuthManager.initialize() derives its data_dir from Path(db.db_path).parent and writes the
+    file-based encryption.key there. A ":memory:" DB would resolve the parent to the repo root and
+    leak the key file into the working tree. tmp_path keeps it isolated and auto-cleaned.
     """
     from backend.core.auth import AuthManager
     from backend.core.database import Database
 
-    db = Database(":memory:")
+    db = Database(str(tmp_path / "ipmilink.db"))
     await db.connect()
     am = AuthManager(db)
     await am.initialize()

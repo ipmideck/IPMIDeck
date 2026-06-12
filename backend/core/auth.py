@@ -10,11 +10,13 @@ import json
 import logging
 import secrets
 import time
+from pathlib import Path
 
 import bcrypt
 
 from fastapi import HTTPException, Request
 
+from backend.core.crypto import _set_secure_permissions, decrypt, encrypt
 from backend.core.database import Database
 
 logger = logging.getLogger("ipmilink.auth")
@@ -25,7 +27,14 @@ SESSION_EXPIRY_SECONDS = 86400  # 24h default
 class AuthManager:
     def __init__(self, db: Database):
         self.db = db
+        # Session-token HMAC signing secret (kept in memory after initialize()).
+        # Persisted separately under app_config['session_secret'] — distinct from the
+        # at-rest credential encryption key, which lives in data/encryption.key.
         self._secret: str = ""
+        # 04-W4-04 (Decision I): at-rest credential encryption key, loaded from
+        # data/encryption.key (or generated/migrated by initialize()). The single
+        # source for get_encryption_key(); no longer derived from _secret.
+        self._file_key: bytes = b""
         # SEC-03 brute-force lockout state (D-01, D-02): per-username, in-memory.
         # Resets on server restart per D-02 (acceptable for LAN single-process).
         # Format: {username: {"count": int, "last_failure": float, "locked_until": float}}
@@ -33,12 +42,245 @@ class AuthManager:
         self._fail_state: dict[str, dict] = {}
         self._fail_lock = asyncio.Lock()
 
+    @staticmethod
+    def _derive_old_key(db_secret: str) -> bytes:
+        """The pre-04-W4-04 credential key: PBKDF2 over the in-DB app_secret.
+
+        Identical to the old get_encryption_key() derivation, so it can decrypt
+        credentials that were encrypted before the file-key migration.
+        """
+        return hashlib.pbkdf2_hmac(
+            "sha256", db_secret.encode(), b"ipmilink-cred-enc", 100000, dklen=32
+        )
+
     async def initialize(self) -> None:
-        """Load or generate app secret for session signing."""
-        secret = await self.db.get_config("app_secret")
+        """Load or CRASH-SAFE-migrate the at-rest credential encryption key.
+
+        Decision H: data_dir is derived from ``Path(self.db.db_path).parent`` —
+        AuthManager only holds a Database, it has NO ``.config`` attribute.
+
+        Decision I: the migration from the in-DB ``app_secret`` (PBKDF2-derived key)
+        to a file-based ``data/encryption.key`` is crash-safe. The hard rule is that
+        the in-DB ``app_secret`` is the ONLY canonical key holder until the file key is
+        proven to decrypt the existing rows; it is deleted LAST, after the key file is
+        durably in place. Four cases:
+
+        CASE 1 — BOTH ``encryption.key`` AND ``app_secret`` exist (crash recovery):
+          a partial migration left both behind. Verify the FILE key can decrypt a real
+          credential row. If yes → the DB rows are already re-encrypted with the file
+          key, so finish by deleting ``app_secret``. If NO → the file key is wrong (the
+          re-encrypt transaction never committed); keep ``app_secret`` as canonical,
+          fall back to the PBKDF2 key, and abort the migration WITHOUT corrupting data.
+
+        CASE 2 — ``encryption.key`` only → steady state; the file is authoritative.
+
+        CASE 3 — ``app_secret`` only, no file key → run the migration:
+          (a) decrypt every ``*_enc`` row in memory with the old key (fails here leaves
+              everything untouched);
+          (b) write the new key to ``encryption.key.tmp`` + secure perms;
+          (c) re-encrypt the rows inside a DB transaction and COMMIT;
+          (d) atomic ``os.replace(.tmp -> encryption.key)``;
+          (e) ONLY THEN delete ``app_secret``.
+          A crash between (c) and (d) leaves the .tmp + the re-encrypted rows + the
+          ``app_secret`` row → next boot lands in CASE 1 and finishes cleanly.
+
+        CASE 4 — neither exists → first-run greenfield; generate a fresh file key.
+
+        The session-signing secret is migrated/preserved separately (CASE 1/3 copy the
+        old app_secret value into ``session_secret`` BEFORE deleting it, so existing
+        session cookies stay valid across the upgrade) via ``_setup_session_secret()``.
+        """
+        # Decision H: data_dir from db.db_path (AuthManager has no AppConfig attribute).
+        data_dir = Path(self.db.db_path).parent
+        key_path = data_dir / "encryption.key"
+        tmp_path = key_path.with_suffix(".tmp")
+        db_secret = await self.db.get_config("app_secret")
+
+        # CASE 1 — both exist: a partial migration. Verify before deleting anything.
+        if key_path.exists() and db_secret:
+            file_key = key_path.read_bytes()
+            if len(file_key) != 32:
+                raise RuntimeError(
+                    f"Invalid encryption.key length: expected 32, got {len(file_key)}"
+                )
+            sample = await self.db.fetchone(
+                "SELECT username_enc FROM servers WHERE username_enc IS NOT NULL LIMIT 1"
+            )
+            file_key_ok: bool
+            if sample is None:
+                # No credential rows to verify against — accept the file key as
+                # canonical (nothing to corrupt) and drop the obsolete app_secret.
+                file_key_ok = True
+            else:
+                try:
+                    decrypt(sample["username_enc"], file_key)
+                    file_key_ok = True
+                except Exception:
+                    file_key_ok = False
+
+            if file_key_ok:
+                # File key works → the re-encrypt transaction committed. Preserve the
+                # session secret, then delete app_secret to finish the migration.
+                await self._migrate_session_secret(db_secret)
+                await self.db.execute("DELETE FROM app_config WHERE key=?", ("app_secret",))
+                await self.db.commit()
+                self._file_key = file_key
+                await self._setup_session_secret()
+                logger.info("encryption.key recovery: file key verified; app_secret removed")
+                return
+            # File key does NOT decrypt — the re-encrypt never committed. Keep
+            # app_secret as canonical, revert to the PBKDF2 key, abort migration.
+            logger.warning(
+                "Both encryption.key and app_secret exist but the file key does not "
+                "decrypt existing credentials — keeping app_secret as the canonical key "
+                "and aborting the migration. Remove data/encryption.key to retry, or "
+                "investigate a corrupted key file."
+            )
+            self._file_key = self._derive_old_key(db_secret)
+            await self._setup_session_secret()
+            return
+
+        # CASE 2 — file key only: steady state.
+        if key_path.exists():
+            file_key = key_path.read_bytes()
+            if len(file_key) != 32:
+                raise RuntimeError(
+                    f"Invalid encryption.key length: expected 32, got {len(file_key)}"
+                )
+            self._file_key = file_key
+            await self._setup_session_secret()
+            return
+
+        # CASE 3 — migration: app_secret exists, no file key yet.
+        if db_secret:
+            old_key = self._derive_old_key(db_secret)
+            new_key = secrets.token_bytes(32)
+            servers = await self.db.fetchall(
+                "SELECT id, username_enc, password_enc FROM servers"
+            )
+            # (a) decrypt + re-encrypt in memory FIRST — fails before any disk writes,
+            #     leaving app_secret + the original *_enc rows fully intact.
+            new_rows: list[tuple] = []
+            try:
+                for s in servers:
+                    u_new = (
+                        encrypt(decrypt(s["username_enc"], old_key), new_key)
+                        if s["username_enc"] else s["username_enc"]
+                    )
+                    p_new = (
+                        encrypt(decrypt(s["password_enc"], old_key), new_key)
+                        if s["password_enc"] else s["password_enc"]
+                    )
+                    new_rows.append((s["id"], u_new, p_new))
+            except Exception:
+                logger.exception(
+                    "Crypto migration aborted in the decrypt phase — app_secret and the "
+                    "*_enc rows are untouched."
+                )
+                raise
+
+            # (b) write the new key to .tmp first, so a committed DB never lacks a file.
+            data_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                tmp_path.write_bytes(new_key)
+                _set_secure_permissions(tmp_path)
+            except Exception:
+                if tmp_path.exists():
+                    try:
+                        tmp_path.unlink()
+                    except OSError:
+                        pass
+                raise
+
+            # (c) DB transaction: re-encrypt rows + preserve the session secret, commit.
+            try:
+                await self.db.execute("BEGIN")
+                for sid, u_new, p_new in new_rows:
+                    await self.db.execute(
+                        "UPDATE servers SET username_enc=?, password_enc=? WHERE id=?",
+                        (u_new, p_new, sid),
+                    )
+                # Copy app_secret -> session_secret in the SAME transaction so session
+                # cookies keep verifying after app_secret is later deleted.
+                await self.db.execute(
+                    "INSERT INTO app_config (key, value, updated_at) "
+                    "VALUES ('session_secret', ?, CURRENT_TIMESTAMP) "
+                    "ON CONFLICT(key) DO NOTHING",
+                    (db_secret,),
+                )
+                await self.db.commit()
+            except Exception:
+                try:
+                    await self.db.rollback()
+                except Exception:
+                    pass
+                if tmp_path.exists():
+                    try:
+                        tmp_path.unlink()
+                    except OSError:
+                        pass
+                logger.exception(
+                    "Crypto migration aborted during the re-encrypt transaction — rolled "
+                    "back; .tmp removed; app_secret remains canonical."
+                )
+                raise
+
+            # (d) atomic rename. A crash before this leaves .tmp + committed rows +
+            #     app_secret → next boot lands in CASE 1 and finishes the migration.
+            try:
+                tmp_path.replace(key_path)
+            except Exception:
+                logger.exception(
+                    "Crypto migration: atomic rename failed AFTER the DB commit. The DB "
+                    "rows are re-encrypted with the new key and encryption.key.tmp still "
+                    "holds it — on the next boot the dual-exist recovery branch will "
+                    "verify and complete the migration, or you can rename the .tmp to "
+                    "encryption.key manually. app_secret is intentionally still present."
+                )
+                raise
+
+            # (e) ONLY NOW delete app_secret — the file key is durably in place.
+            await self.db.execute("DELETE FROM app_config WHERE key=?", ("app_secret",))
+            await self.db.commit()
+            self._file_key = new_key
+            await self._setup_session_secret()
+            logger.info(
+                "Migrated at-rest credential key to data/encryption.key (%d rows re-encrypted); "
+                "app_secret removed from the DB.", len(new_rows),
+            )
+            return
+
+        # CASE 4 — first-run greenfield: generate a fresh file key.
+        new_key = secrets.token_bytes(32)
+        data_dir.mkdir(parents=True, exist_ok=True)
+        key_path.write_bytes(new_key)
+        _set_secure_permissions(key_path)
+        self._file_key = new_key
+        await self._setup_session_secret()
+        logger.info("Generated new at-rest credential key at data/encryption.key (first run)")
+
+    async def _migrate_session_secret(self, db_secret: str) -> None:
+        """Best-effort: persist the old app_secret as session_secret if not present.
+
+        Used by the CASE-1 recovery path (where the re-encrypt transaction may have
+        committed without yet copying the session secret). Idempotent.
+        """
+        existing = await self.db.get_config("session_secret")
+        if existing is None:
+            await self.db.set_config("session_secret", db_secret)
+
+    async def _setup_session_secret(self) -> None:
+        """Load (or generate) the session-token HMAC signing secret.
+
+        Stored separately from the credential key under app_config['session_secret'].
+        On a migrated install this row holds the old app_secret value, so previously
+        issued session cookies remain valid. On a greenfield install it is freshly
+        generated.
+        """
+        secret = await self.db.get_config("session_secret")
         if not secret:
             secret = secrets.token_hex(32)
-            await self.db.set_config("app_secret", secret)
+            await self.db.set_config("session_secret", secret)
         self._secret = secret
 
     async def is_auth_enabled(self) -> bool:
@@ -185,10 +427,16 @@ class AuthManager:
             return None
 
     def get_encryption_key(self) -> bytes:
-        """Derive encryption key for BMC credentials from app secret."""
-        return hashlib.pbkdf2_hmac(
-            "sha256", self._secret.encode(), b"ipmilink-cred-enc", 100000, dklen=32
-        )
+        """Return the at-rest BMC-credential encryption key.
+
+        The single read path used everywhere (server_routes, sel/routes, fanpilot/tasks,
+        power/routes, fru/routes, etc.). After 04-W4-04 this returns the file-based key
+        (self._file_key) loaded/migrated by initialize() — no longer a PBKDF2 derivation
+        of the session secret. Callers are unchanged; only the source of the bytes moved.
+        """
+        if not self._file_key:
+            raise RuntimeError("AuthManager not initialized — encryption key unavailable")
+        return self._file_key
 
 
 async def require_auth(request: Request) -> str:

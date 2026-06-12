@@ -1,12 +1,49 @@
-"""AES-256-CBC encryption for BMC credentials."""
+"""AES-256-CBC encryption for BMC credentials.
+
+The encryption key itself lives in a file at ``<data_dir>/encryption.key`` (32 raw
+bytes), managed by ``AuthManager.initialize()`` — NOT in the SQLite DB. That file MUST
+be backed up SEPARATELY from ``data/ipmilink.db``: a stolen DB on its own no longer
+decrypts any BMC credentials, and losing the key file makes the stored credentials
+unrecoverable. See ``backend/core/auth.py`` for the file-key lifecycle and migration.
+"""
 
 from __future__ import annotations
 
+import logging
 import os
+import subprocess
 from base64 import b64decode, b64encode
+from pathlib import Path
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.padding import PKCS7
+
+
+def _set_secure_permissions(path: Path) -> None:
+    """Restrict a file to the current owner only.
+
+    POSIX: ``chmod 0o600``. Windows: ``os.chmod`` only flips the read-only bit and
+    does NOT touch the NTFS ACL (the file would still inherit the parent dir's ACL,
+    often readable by every local user). So on Windows we shell out to ``icacls`` to
+    remove inherited ACEs and grant Full control to only the current user. This is the
+    documented cross-platform workaround (RESEARCH Pitfall 1). Failure on Windows is
+    logged, not raised — the key file is still written, just with weaker permissions.
+    """
+    path = Path(path)
+    if os.name != "nt":
+        os.chmod(path, 0o600)
+        return
+    user = os.environ.get("USERNAME") or "owner"
+    try:
+        subprocess.run(
+            ["icacls", str(path), "/inheritance:r", "/grant:r", f"{user}:F"],
+            check=True, capture_output=True, text=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError) as e:
+        logging.getLogger("ipmilink.crypto").warning(
+            "Failed to set Windows ACL on %s: %s. File may be readable by other local users.",
+            path, e,
+        )
 
 
 def encrypt(plaintext: str, key: bytes) -> str:
