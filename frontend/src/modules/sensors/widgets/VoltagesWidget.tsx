@@ -24,14 +24,31 @@ export function VoltagesWidget({ serverId, hiddenSensors, onHiddenChange }: Volt
   const filterRef = useRef<HTMLButtonElement>(null);
 
   // Type-driven: every voltage and current sensor by its REAL name. No hardcoded rails.
-  const voltageNames = useMemo(() => sensorNamesForType(readings, "voltage"), [readings]);
+  const allVoltageNames = useMemo(() => sensorNamesForType(readings, "voltage"), [readings]);
   const currentNames = useMemo(() => sensorNamesForType(readings, "current"), [readings]);
-  // The full filterable set (voltages then currents), used by the show/hide menu.
-  const allSensors = useMemo(() => [...voltageNames, ...currentNames], [voltageNames, currentNames]);
+
+  // 04-W5-02: PSU voltage/current PAIRINGS moved to the dedicated PSU Redundancy widget
+  // (Decision S — detected by sensor TYPE there). VoltagesWidget now shows ONLY non-PSU
+  // voltage rails: a voltage whose trailing index has a matching current sensor is a PSU
+  // rail and is omitted here. Standalone currents are PSU draw, also omitted. On the R720
+  // demo dataset this leaves nothing to show (vendor-portable for BMCs that report rails).
+  const trailingNum = (s: string) => s.match(/(\d+)\s*$/)?.[1] ?? null;
+  const pairedCurrentIndices = useMemo(
+    () => new Set(currentNames.map(trailingNum).filter((n): n is string => n != null)),
+    [currentNames]
+  );
+  const voltageNames = useMemo(
+    () => allVoltageNames.filter((v) => {
+      const num = trailingNum(v);
+      return num == null || !pairedCurrentIndices.has(num);
+    }),
+    [allVoltageNames, pairedCurrentIndices]
+  );
+  // The full filterable set (non-PSU voltages only), used by the show/hide menu.
+  const allSensors = useMemo(() => [...voltageNames], [voltageNames]);
 
   const hiddenSet = useMemo(() => new Set(hiddenSensors ?? []), [hiddenSensors]);
   const visibleVoltages = voltageNames.filter((n) => !hiddenSet.has(n));
-  const visibleCurrents = currentNames.filter((n) => !hiddenSet.has(n));
 
   const toggle = useCallback(
     (name: string) => {
@@ -65,37 +82,13 @@ export function VoltagesWidget({ serverId, hiddenSensors, onHiddenChange }: Volt
           ? "bg-red-500"
           : "bg-muted-foreground/40";
 
-  // Pair each voltage with the current sharing its trailing index → one card per PSU/rail.
-  // Currents without a matching voltage get their own card (and vice-versa).
-  const trailingNum = (s: string) => s.match(/(\d+)\s*$/)?.[1] ?? null;
-  type PsuCard = { key: string; label: string; voltage: number | null; current: number | null; status?: string };
-  const cards: PsuCard[] = (() => {
-    const out: PsuCard[] = [];
-    const usedCurrents = new Set<string>();
-    for (const vName of visibleVoltages) {
-      const num = trailingNum(vName);
-      const cName =
-        num != null
-          ? visibleCurrents.find((c) => trailingNum(c) === num && !usedCurrents.has(c))
-          : undefined;
-      if (cName) usedCurrents.add(cName);
-      const vr = readings?.[vName];
-      const cr = cName ? readings?.[cName] : undefined;
-      out.push({
-        key: vName,
-        label: vName,
-        voltage: vr?.value ?? null,
-        current: cr?.value ?? null,
-        status: vr?.status ?? cr?.status,
-      });
-    }
-    for (const cName of visibleCurrents) {
-      if (usedCurrents.has(cName)) continue;
-      const cr = readings?.[cName];
-      out.push({ key: cName, label: cName, voltage: null, current: cr?.value ?? null, status: cr?.status });
-    }
-    return out;
-  })();
+  // 04-W5-02: one card per non-PSU voltage rail. PSU V/A pairs are rendered by the
+  // dedicated PSU Redundancy widget now, so no voltage↔current pairing happens here.
+  type RailCard = { key: string; label: string; voltage: number | null; status?: string };
+  const cards: RailCard[] = visibleVoltages.map((vName) => {
+    const vr = readings?.[vName];
+    return { key: vName, label: vName, voltage: vr?.value ?? null, status: vr?.status };
+  });
 
   // Filter affordance (top-right) — only when there's something to filter + persistence is wired.
   const filterControl =
@@ -137,14 +130,15 @@ export function VoltagesWidget({ serverId, hiddenSensors, onHiddenChange }: Volt
     ) : null;
 
   const hasAnySensors = allSensors.length > 0;
-  const hasVisible = visibleVoltages.length > 0 || visibleCurrents.length > 0;
+  const hasVisible = visibleVoltages.length > 0;
 
   let body: React.ReactNode;
   if (!hasAnySensors) {
+    // 04-W5-02: with PSU V/A pairs moved out, a server reporting only PSU rails (e.g. the
+    // R720 demo dataset) now has no non-PSU voltage rails to show.
     body = (
       <div className="flex h-full flex-col items-center justify-center text-center text-sm text-muted-foreground">
-        <p>{t("widget.voltagesNoSensorsTitle")}</p>
-        <p className="mt-1 text-xs">{t("widget.voltagesNoSensorsHint")}</p>
+        <p>{t("widget.voltagesNoRails")}</p>
       </div>
     );
   } else if (!hasVisible) {
@@ -173,20 +167,8 @@ export function VoltagesWidget({ serverId, hiddenSensors, onHiddenChange }: Volt
                 <span className="font-mono text-2xl font-bold leading-none tabular-nums">{c.voltage}</span>
                 <span className="text-xs text-muted-foreground">V</span>
               </div>
-            ) : c.current != null ? (
-              <div className="mt-1 flex items-baseline gap-1">
-                <span className="font-mono text-2xl font-bold leading-none tabular-nums">{c.current}</span>
-                <span className="text-xs text-muted-foreground">A</span>
-              </div>
             ) : (
               <div className="mt-1 font-mono text-2xl font-bold leading-none text-muted-foreground">—</div>
-            )}
-            {c.voltage != null && c.current != null && (
-              <div className="mt-1.5 flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
-                <span>{c.current} A</span>
-                <span>·</span>
-                <span>≈{Math.round(c.voltage * c.current)} W</span>
-              </div>
             )}
           </div>
         ))}

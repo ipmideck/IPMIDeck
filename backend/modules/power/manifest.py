@@ -48,5 +48,15 @@ module = ModuleManifest(
             "default_size": "2x2",
             "category": "monitoring",
         },
+        {
+            # 04-W5-02: PSU Redundancy — per-PSU cards (2x2) or status pill + N-of-M-OK
+            # (2x1). PSUs detected by sensor TYPE (voltage/current — Decision S), not name.
+            "id": "power-psu-redundancy",
+            "name": "PSU Redundancy",
+            "description": "PSU redundancy status with per-PSU voltage/current/wattage — 2x2 cards, 2x1 status pill",
+            "sizes": ["2x2", "2x1"],
+            "default_size": "2x2",
+            "category": "monitoring",
+        },
     ],
 )

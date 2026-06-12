@@ -15,6 +15,7 @@ import { PowerStatusWidget } from "@/modules/power/widgets/PowerStatusWidget";
 import { PowerControlsWidget, PowerControlsHeaderActions } from "@/modules/power/widgets/PowerControlsWidget";
 import { PowerStatsWidget } from "@/modules/power/widgets/PowerStatsWidget";
 import { EnergyCostWidget } from "@/modules/power/widgets/EnergyCostWidget";
+import { PsuRedundancyWidget } from "@/modules/power/widgets/PsuRedundancyWidget";
 import { FanPilotStatusWidget } from "@/modules/fanpilot/widgets/FanPilotStatusWidget";
 import type { WidgetLayout } from "@/stores/layout-store";
 import { useModuleStore } from "@/stores/module-store";
@@ -131,6 +132,11 @@ const WIDGET_MAP: Record<
   "power-energy-cost": ({ serverId, layout }) => ({
     body: <EnergyCostWidget serverId={serverId} w={layout.w} h={layout.h} />,
   }),
+  // 04-W5-02: PSU Redundancy — derives w/h from the saved layout to pick 2x2 (per-PSU
+  // cards) vs 2x1 (status pill + N-of-M-OK). PSUs detected by sensor TYPE (Decision S).
+  "power-psu-redundancy": ({ serverId, layout }) => ({
+    body: <PsuRedundancyWidget serverId={serverId} w={layout.w} h={layout.h} />,
+  }),
   "fanpilot-status": ({ serverId }) => ({
     body: <FanPilotStatusWidget serverId={serverId} />,
   }),
@@ -210,6 +216,7 @@ export function getWidgetTitle(layout: WidgetLayout, t: TFunction): string {
     "power-controls": t("widget.titlePowerControl"),
     "power-stats": t("widget.titlePowerStats"),
     "power-energy-cost": t("widget.titleEnergyCost"),
+    "power-psu-redundancy": t("widget.titlePsuRedundancy"),
     "fanpilot-status": t("widget.titleFanpilot"),
     "fanpilot-curve": t("widget.titleFanCurve"),
   };
