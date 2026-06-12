@@ -17,6 +17,7 @@ import { applyTheme, useThemeStore } from "@/stores/theme-store";
 import { useServerStore } from "@/stores/server-store";
 import { useAuthStore } from "@/stores/auth-store";
 import { bootstrapAppData } from "@/lib/bootstrap";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { get, setUnauthorizedHandler } from "@/api/client";
 
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
@@ -116,6 +117,9 @@ function AppShell() {
 
   const navigate = useNavigate();
   const location = useLocation();
+  // Wave 7: Sonner toasts move to bottom-center on mobile for thumb reach,
+  // top-right on desktop (Decision M — Toaster is mounted HERE, not PageLayout).
+  const isMobile = useMediaQuery("(max-width: 767px)");
   useEffect(() => {
     setUnauthorizedHandler(() => {
       // Mark unauthenticated so AuthGate routes correctly; preserve intended path (D-05, LOW).
@@ -167,7 +171,8 @@ function AppShell() {
       <ShortcutsHelp />
       <Toaster
         theme="dark"
-        position="bottom-right"
+        position={isMobile ? "bottom-center" : "top-right"}
+        mobileOffset={{ bottom: "16px" }}
         toastOptions={{
           className: "!bg-card !border-border !text-foreground",
         }}

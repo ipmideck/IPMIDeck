@@ -60,7 +60,7 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="flex h-screen w-[var(--sidebar-width)] flex-col border-r border-border bg-sidebar sticky top-0 shrink-0">
+    <aside className="hidden md:flex h-screen w-[var(--sidebar-width)] flex-col border-r border-border bg-sidebar sticky top-0 shrink-0">
       {/* Logo */}
       <div className="border-b border-border px-4 py-3">
         <div className="flex items-center gap-2.5">
