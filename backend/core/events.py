@@ -1,41 +1,16 @@
-"""Async event bus for inter-module communication."""
+"""Tombstone: EventBus was removed in Phase 04 (W6-01).
+
+The in-process async EventBus had 4 emit() sites and ZERO subscribers — no
+ModuleManifest ever declared event_handlers. Every plausible subscriber had a
+cleaner inline path (temperature_critical was wired directly to broadcast_alert
+in the alerting wave; power_state_changed and sensor_reading were already handled
+inline by command_log + broadcast_sensor_update; fan_speed_changed had no target).
+
+See .planning/phases/04-energy-management-safety-completion-alerting-hardening-and-mobile-redesign/04-RESEARCH.md
+Open Question #3 for the full revive-vs-remove rationale (recommendation: REMOVE).
+
+This module is intentionally left as a tombstone so that any stale import of
+backend.core.events surfaces loudly instead of silently importing a dead bus.
+"""
 
 from __future__ import annotations
-
-import asyncio
-import logging
-from collections import defaultdict
-from typing import Any, Callable, Coroutine
-
-logger = logging.getLogger("ipmilink.events")
-
-EventHandler = Callable[[dict[str, Any]], Coroutine[Any, Any, None]]
-
-
-class EventBus:
-    """Simple in-process async event bus using asyncio tasks."""
-
-    def __init__(self):
-        self._handlers: dict[str, list[EventHandler]] = defaultdict(list)
-
-    def subscribe(self, event_type: str, handler: EventHandler) -> None:
-        self._handlers[event_type].append(handler)
-        logger.debug("Subscribed to '%s': %s", event_type, handler.__qualname__)
-
-    def unsubscribe(self, event_type: str, handler: EventHandler) -> None:
-        if handler in self._handlers[event_type]:
-            self._handlers[event_type].remove(handler)
-
-    async def emit(self, event_type: str, data: dict[str, Any] | None = None) -> None:
-        handlers = self._handlers.get(event_type, [])
-        if not handlers:
-            return
-        payload = data or {}
-        for handler in handlers:
-            try:
-                asyncio.create_task(handler(payload))
-            except Exception:
-                logger.exception("Error in event handler for '%s'", event_type)
-
-    def clear(self) -> None:
-        self._handlers.clear()

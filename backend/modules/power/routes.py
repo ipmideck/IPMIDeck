@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from backend.core.i18n import get_lang, t
+from backend.modules import get_ctx
 
 router = APIRouter()
 
@@ -22,10 +23,10 @@ class PowerAction(BaseModel):
 
 @router.get("/{server_id}/status")
 async def get_power_status(server_id: str, lang: str = Depends(get_lang)):
-    import backend.modules as ctx
     from backend.core.crypto import decrypt
-    from backend.main import auth
+    from backend.main import auth  # AuthManager not in ModuleContext — kept (Decision J)
 
+    ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
     server = await ctx.db.fetchone(
         "SELECT host, username_enc, password_enc FROM servers WHERE id = ?", (server_id,)
     )
@@ -44,10 +45,10 @@ async def get_power_status(server_id: str, lang: str = Depends(get_lang)):
 
 @router.post("/{server_id}/command")
 async def power_command(server_id: str, body: PowerAction, lang: str = Depends(get_lang)):
-    import backend.modules as ctx
     from backend.core.crypto import decrypt
-    from backend.main import auth
+    from backend.main import auth  # AuthManager not in ModuleContext — kept (Decision J)
 
+    ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
     # Rate limit
     now = time.time()
     last = _last_command.get(server_id, 0)
@@ -80,11 +81,9 @@ async def power_command(server_id: str, body: PowerAction, lang: str = Depends(g
         )
         await ctx.db.commit()
 
-        # Emit event
-        await ctx.events.emit("power_state_changed", {
-            "server_id": server_id,
-            "action": body.action,
-        })
+        # 04-W6-01: EventBus removed. The former `power_state_changed` emit had no
+        # subscriber — the command is already logged to command_log inline above and
+        # the new state is broadcast via broadcast_power_status below. Deleted.
 
         # Broadcast status update
         new_status = "on" if body.action in ("on", "reset", "cycle") else "off"

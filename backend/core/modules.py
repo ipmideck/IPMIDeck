@@ -6,12 +6,14 @@ import importlib
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Coroutine
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Coroutine
 
 from fastapi import APIRouter
 
 from backend.core.database import Database
-from backend.core.events import EventBus
+
+if TYPE_CHECKING:
+    from backend.modules import ModuleContext
 
 logger = logging.getLogger("ipmilink.modules")
 
@@ -30,7 +32,10 @@ class ModuleManifest:
     dependencies: list[str] = field(default_factory=list)
     router: APIRouter | None = None
     background_tasks: list[BackgroundTask] = field(default_factory=list)
-    event_handlers: dict[str, Callable] = field(default_factory=dict)
+    # 04-W6-02: optional lifecycle hook run once per enabled module at load time,
+    # receiving the live ModuleContext. Replaces the removed event_handlers field
+    # (EventBus removed in 04-W6-01). None means "no setup needed".
+    setup: "Callable[[ModuleContext], Awaitable[None]] | None" = None
     migrations_dir: Path | None = None
     on_startup: Callable | None = None
     on_shutdown: Callable | None = None
@@ -42,16 +47,16 @@ class ModuleLoader:
 
     BUILTIN_MODULES = ["sensors", "fanpilot", "power", "sel", "fru"]
 
-    def __init__(self, db: Database, event_bus: EventBus):
+    def __init__(self, db: Database):
         self.db = db
-        self.event_bus = event_bus
         self._modules: dict[str, ModuleManifest] = {}
         self._enabled: dict[str, bool] = {}
         self._running_tasks: dict[str, list[Any]] = {}  # keyed by module_id
-        self._fully_started: set[str] = set()  # modules whose migrations+subscriptions+tasks ran this process
+        self._fully_started: set[str] = set()  # modules whose migrations+setup+tasks ran this process
 
     async def discover_and_load(
         self,
+        ctx: "ModuleContext",
         enabled_config: dict[str, Any] | None = None,
         persisted_enabled: dict[str, bool] | None = None,
     ) -> None:
@@ -98,9 +103,11 @@ class ModuleLoader:
             if manifest.migrations_dir and manifest.migrations_dir.exists():
                 await self.db.run_module_migrations(mod_id, manifest.migrations_dir)
 
-            # Register event handlers
-            for event_type, handler in manifest.event_handlers.items():
-                self.event_bus.subscribe(event_type, handler)
+            # 04-W6-02: run the module's setup(ctx) lifecycle hook if present.
+            # Replaces the removed EventBus subscribe loop (04-W6-01). None of the
+            # 5 built-ins declare one today; the hook exists for explicit DI wiring.
+            if manifest.setup is not None:
+                await manifest.setup(ctx)
 
             logger.info("Module loaded: %s v%s", manifest.name, manifest.version)
 

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from backend.core.i18n import get_lang, t
+from backend.modules import get_ctx
 from backend.modules.fanpilot.tasks import get_last_state, set_last_state, wake_loop
 from backend.modules.sensors.tasks import wake_loop as wake_sensor_loop
 
@@ -49,7 +50,7 @@ class FanMode(BaseModel):
 
 @router.get("/profiles")
 async def list_profiles():
-    import backend.modules as ctx
+    ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
     rows = await ctx.db.fetchall("SELECT * FROM fan_profiles ORDER BY is_preset DESC, name")
     for row in rows:
         row["curve_points"] = json.loads(row["curve_points"])
@@ -58,7 +59,7 @@ async def list_profiles():
 
 @router.post("/profiles")
 async def create_profile(body: ProfileCreate):
-    import backend.modules as ctx
+    ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
     await ctx.db.execute(
         "INSERT INTO fan_profiles (name, description, curve_points, interpolation, hysteresis, safety_threshold, source_sensor) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -72,7 +73,7 @@ async def create_profile(body: ProfileCreate):
 
 @router.get("/profiles/{profile_id}")
 async def get_profile(profile_id: int, lang: str = Depends(get_lang)):
-    import backend.modules as ctx
+    ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
     row = await ctx.db.fetchone("SELECT * FROM fan_profiles WHERE id = ?", (profile_id,))
     if not row:
         return {"success": False, "error": t("profile_not_found", lang)}
@@ -82,7 +83,7 @@ async def get_profile(profile_id: int, lang: str = Depends(get_lang)):
 
 @router.put("/profiles/{profile_id}")
 async def update_profile(profile_id: int, body: ProfileUpdate, lang: str = Depends(get_lang)):
-    import backend.modules as ctx
+    ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
     existing = await ctx.db.fetchone("SELECT is_preset FROM fan_profiles WHERE id = ?", (profile_id,))
     if not existing:
         return {"success": False, "error": t("profile_not_found", lang)}
@@ -117,7 +118,7 @@ async def update_profile(profile_id: int, body: ProfileUpdate, lang: str = Depen
 
 @router.delete("/profiles/{profile_id}")
 async def delete_profile(profile_id: int, lang: str = Depends(get_lang)):
-    import backend.modules as ctx
+    ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
     existing = await ctx.db.fetchone("SELECT is_preset FROM fan_profiles WHERE id = ?", (profile_id,))
     if not existing:
         return {"success": False, "error": t("profile_not_found", lang)}
@@ -132,7 +133,7 @@ async def delete_profile(profile_id: int, lang: str = Depends(get_lang)):
 
 @router.get("/{server_id}/status")
 async def get_fanpilot_status(server_id: str, lang: str = Depends(get_lang)):
-    import backend.modules as ctx
+    ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
     server = await ctx.db.fetchone(
         "SELECT fanpilot_enabled, fanpilot_profile_id FROM servers WHERE id = ?", (server_id,)
     )
@@ -164,10 +165,10 @@ async def get_fanpilot_status(server_id: str, lang: str = Depends(get_lang)):
 
 @router.post("/{server_id}/mode")
 async def set_fanpilot_mode(server_id: str, body: FanMode, lang: str = Depends(get_lang)):
-    import backend.modules as ctx
     from backend.core.crypto import decrypt
-    from backend.main import auth
+    from backend.main import auth  # AuthManager not in ModuleContext — kept (Decision J)
 
+    ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
     server = await ctx.db.fetchone(
         "SELECT host, username_enc, password_enc, vendor FROM servers WHERE id = ?",
         (server_id,),

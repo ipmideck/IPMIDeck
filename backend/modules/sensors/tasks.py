@@ -37,9 +37,10 @@ async def _poll_one_server(server: dict, key) -> None:
     never blocks or delays polling of the others. On failure the server is marked offline and
     placed on a NON-BLOCKING cooldown (no sleep); on success any cooldown is cleared.
     """
-    import backend.modules as ctx
     from backend.core.crypto import decrypt
+    from backend.modules import get_ctx
 
+    ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
     server_id = server["id"]
 
     try:
@@ -87,25 +88,20 @@ async def _poll_one_server(server: dict, key) -> None:
         }
         await ctx.ws.broadcast_sensor_update(server_id, sensors_dict, now)
 
-        # Emit event for other modules (e.g., FanPilot)
+        # 04-W6-01: EventBus removed. The former `sensor_reading` emit had no
+        # subscriber and was pure indirection — the readings are already broadcast
+        # by broadcast_sensor_update above and persisted to sensor_readings. The
+        # former `temperature_critical` emit is now a DIRECT broadcast_alert call
+        # (same try block — no asyncio.create_task indirection, log-correlated).
         for r in readings:
-            await ctx.events.emit("sensor_reading", {
-                "server_id": server_id,
-                "sensor_name": r["name"],
-                "sensor_type": r["type"],
-                "value": r["value"],
-                "unit": r["unit"],
-                "status": r["status"],
-            })
-
-            # Emit critical temperature events
             if r["type"] == "temperature" and r["value"] is not None and r["value"] >= 80:
-                await ctx.events.emit("temperature_critical", {
-                    "server_id": server_id,
-                    "sensor_name": r["name"],
-                    "value": r["value"],
-                    "threshold": 80,
-                })
+                await ctx.ws.broadcast_alert(
+                    server_id=server_id,
+                    severity="critical",
+                    sensor=r["name"],
+                    message=f"{r['name']} at {r['value']}{r.get('unit') or ''} (>= 80)",
+                    value=float(r["value"]),
+                )
 
         # Success — clear any cooldown so a recovered server resumes polling immediately.
         _next_retry.pop(server_id, None)
@@ -130,7 +126,7 @@ async def _poll_one_server(server: dict, key) -> None:
 
 async def sensor_polling_loop():
     """Main polling loop — runs until cancelled."""
-    import backend.modules as ctx
+    from backend.modules import get_ctx
 
     global _running, _wake_event
     _running = True
@@ -141,6 +137,7 @@ async def sensor_polling_loop():
 
     while _running:
         try:
+            ctx = get_ctx()  # Look up fresh inside the loop body (Decision J)
             servers = await ctx.db.fetchall(
                 "SELECT id, host, username_enc, password_enc, poll_interval FROM servers"
             )
@@ -173,10 +170,11 @@ async def sensor_polling_loop():
 
         # Sleep until the next interval OR until a user action calls wake_loop()
         # (e.g. fanpilot set_mode). The wake_for/timeout pattern matches fanpilot.
+        # Re-fetch ctx so the timeout is valid even if the try block above raised
+        # before binding ctx (Decision J — fresh lookup, never a stale binding).
+        poll_interval = get_ctx().config.ipmi.poll_interval
         try:
-            await asyncio.wait_for(
-                _wake_event.wait(), timeout=ctx.config.ipmi.poll_interval
-            )
+            await asyncio.wait_for(_wake_event.wait(), timeout=poll_interval)
         except asyncio.TimeoutError:
             pass
         _wake_event.clear()
@@ -217,11 +215,12 @@ async def retention_cleanup_once(db, config) -> int:
 
 async def retention_cleanup_loop():
     """Daily cleanup of old sensor data beyond retention period."""
-    import backend.modules as ctx
+    from backend.modules import get_ctx
 
     while True:
         try:
             await asyncio.sleep(3600)  # Check every hour
+            ctx = get_ctx()  # Look up fresh inside the loop body (Decision J)
             deleted = await retention_cleanup_once(ctx.db, ctx.config)
             logger.info("Retention cleanup: removed %d old sensor reading(s)", deleted)
         except asyncio.CancelledError:

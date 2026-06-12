@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Query
 
+from backend.modules import get_ctx
+
 router = APIRouter()
 
 
 @router.get("/{server_id}/latest")
 async def get_latest_sensors(server_id: str):
     """Get the most recent reading for each sensor on a server."""
-    import backend.modules as ctx
+    ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
     rows = await ctx.db.fetchall(
         """
         SELECT sensor_name, sensor_type, value, unit, status, MAX(timestamp) as timestamp
@@ -31,7 +33,7 @@ async def get_sensor_history(
     range: str = Query("1h", regex="^(5m|1h|6h|24h|7d|30d)$"),
 ):
     """Get historical sensor data with automatic downsampling."""
-    import backend.modules as ctx
+    ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
 
     # Determine time offset and bucket size
     range_config = {
@@ -77,7 +79,7 @@ async def get_sensor_history(
 @router.get("/{server_id}/types")
 async def get_sensor_types(server_id: str):
     """List all sensor names and types for a server."""
-    import backend.modules as ctx
+    ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
     rows = await ctx.db.fetchall(
         """
         SELECT DISTINCT sensor_name, sensor_type, unit

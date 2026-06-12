@@ -19,19 +19,21 @@ from fastapi.staticfiles import StaticFiles
 from backend.core.auth import AuthManager, require_auth
 from backend.core.config import AppConfig, load_config, save_default_config, update_server_yaml
 from backend.core.database import Database
-from backend.core.events import EventBus
 from backend.core.modules import ModuleLoader
 from backend.core.websocket import WebSocketManager
 
 logger = logging.getLogger("ipmilink")
 
 # === Global app state (set during lifespan) ===
+# NOTE: the EventBus was removed in 04-W6-01 (see backend/core/events.py tombstone).
+# Module dependency injection now flows through backend.modules.ModuleContext via
+# set_ctx()/get_ctx() (Decision J) instead of the former `import backend.modules as ctx`
+# mutable-globals pattern.
 config: AppConfig = AppConfig()
 db: Database = Database("")
 auth: AuthManager = AuthManager(db)
-event_bus: EventBus = EventBus()
 ws_manager: WebSocketManager = WebSocketManager()
-module_loader: ModuleLoader = ModuleLoader(db, event_bus)
+module_loader: ModuleLoader = ModuleLoader(db)
 ipmi_service = None  # Set during startup based on config.demo
 
 
@@ -46,7 +48,7 @@ def _setup_logging(level: str) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup and shutdown."""
-    global config, db, auth, event_bus, ws_manager, module_loader, ipmi_service
+    global config, db, auth, ws_manager, module_loader, ipmi_service
 
     # Load config
     config = load_config()
@@ -75,13 +77,14 @@ async def lifespan(app: FastAPI):
         from backend.core.ipmi_service import LocalIPMIService
         ipmi_service = LocalIPMIService(timeout=config.ipmi.command_timeout)
 
-    # Inject globals into modules package
-    import backend.modules as modules_pkg
-    modules_pkg.db = db
-    modules_pkg.ipmi = ipmi_service
-    modules_pkg.events = event_bus
-    modules_pkg.ws = ws_manager
-    modules_pkg.config = config
+    # 04-W6-02 / Decision J: construct the explicit ModuleContext and install it via
+    # set_ctx(). Modules look it up FRESH at function-use time via get_ctx() — never
+    # bound at import time. Replaces the former mutable-globals injection
+    # (modules_pkg.db = db, ...). The EventBus is gone (04-W6-01), so ctx has no
+    # `events` field.
+    from backend.modules import ModuleContext, set_ctx
+    ctx = ModuleContext(db=db, ipmi=ipmi_service, ws=ws_manager, config=config)
+    set_ctx(ctx)
 
     # GAP-05: read persisted per-module enable state (written by ModuleLoader.set_enabled
     # via db.set_config) so a UI-disabled module stays disabled across restarts. No
@@ -92,9 +95,11 @@ async def lifespan(app: FastAPI):
         if raw is not None:
             persisted_enabled[mod_id] = raw.strip().lower() != "false"
 
-    # Load modules (discover, run migrations, register events)
-    module_loader = ModuleLoader(db, event_bus)
-    await module_loader.discover_and_load(config.modules, persisted_enabled=persisted_enabled)
+    # Load modules (discover, run migrations, run setup hooks)
+    module_loader = ModuleLoader(db)
+    await module_loader.discover_and_load(
+        ctx, config.modules, persisted_enabled=persisted_enabled
+    )
 
     # FIX-04: dynamically mount only enabled modules' routes (with auth guard).
     # Disabled modules will never have their routes registered → 404 instead of 200.

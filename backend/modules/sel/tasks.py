@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
-import backend.modules as ctx
 from backend.core.crypto import decrypt
+from backend.modules import get_ctx
 
 logger = logging.getLogger("ipmilink.modules.sel")
 
@@ -39,6 +39,7 @@ async def _init_cursor(server_id: str) -> int:
     """
     if server_id in _last_seen_sel_id:
         return _last_seen_sel_id[server_id]
+    ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
     # 1. Try app_config persisted value (Decision K)
     raw = await ctx.db.get_config(f"sel:last_seen_id:{server_id}", default=None)
     if raw is not None:
@@ -61,17 +62,19 @@ async def _init_cursor(server_id: str) -> int:
 async def _persist_cursor(server_id: str, last_id: int) -> None:
     """Persist the per-server cursor so restarts don't replay old criticals (Decision K)."""
     _last_seen_sel_id[server_id] = last_id
+    ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
     await ctx.db.set_config(f"sel:last_seen_id:{server_id}", str(last_id))
 
 
 async def _load_online_servers() -> list[dict]:
     """Read online servers' creds (mirror sensors/tasks.py). Server IDs are str (Decision C)."""
+    ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
     rows = await ctx.db.fetchall(
         "SELECT id, host, username_enc, password_enc FROM servers WHERE is_online = 1"
     )
     if not rows:
         return []
-    from backend.main import auth
+    from backend.main import auth  # AuthManager not in ModuleContext — kept (Decision J)
 
     key = auth.get_encryption_key()
     out: list[dict] = []
@@ -90,6 +93,7 @@ async def _load_online_servers() -> list[dict]:
 
 async def _poll_one_server(server: dict) -> None:
     sid: str = server["id"]
+    ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
     try:
         # Decision K — the verified service method is get_sel (the only SEL fetch on the ABC).
         entries = await asyncio.wait_for(
@@ -134,6 +138,7 @@ async def sel_polling_loop():
     Poll interval reuses a `sel_poll_interval` attr if one is ever added to the IPMI config,
     otherwise falls back to 60s. No new config knob is introduced (CONTEXT 04-W3-01).
     """
+    ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
     poll_interval = getattr(ctx.config.ipmi, "sel_poll_interval", 60)
     logger.info("SEL polling loop started (interval=%ss)", poll_interval)
     while True:

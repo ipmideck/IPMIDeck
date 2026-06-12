@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 
 from backend.core.i18n import get_lang, t
+from backend.modules import get_ctx
 
 router = APIRouter()
 
@@ -21,7 +22,7 @@ async def get_sel(
     search: str | None = None,
     limit: int = Query(100, le=1000),
 ):
-    import backend.modules as ctx
+    ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
 
     conditions = ["server_id = ?"]
     params: list = [server_id]
@@ -45,10 +46,10 @@ async def get_sel(
 
 @router.get("/{server_id}/info")
 async def get_sel_info(server_id: str, lang: str = Depends(get_lang)):
-    import backend.modules as ctx
     from backend.core.crypto import decrypt
-    from backend.main import auth
+    from backend.main import auth  # AuthManager not in ModuleContext — kept (Decision J)
 
+    ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
     server = await ctx.db.fetchone(
         "SELECT host, username_enc, password_enc FROM servers WHERE id = ?", (server_id,)
     )
@@ -68,10 +69,10 @@ async def get_sel_info(server_id: str, lang: str = Depends(get_lang)):
 @router.post("/{server_id}/refresh")
 async def refresh_sel(server_id: str, lang: str = Depends(get_lang)):
     """Fetch SEL from BMC and update cache."""
-    import backend.modules as ctx
     from backend.core.crypto import decrypt
-    from backend.main import auth
+    from backend.main import auth  # AuthManager not in ModuleContext — kept (Decision J)
 
+    ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
     server = await ctx.db.fetchone(
         "SELECT host, username_enc, password_enc FROM servers WHERE id = ?", (server_id,)
     )
@@ -104,10 +105,10 @@ async def refresh_sel(server_id: str, lang: str = Depends(get_lang)):
 
 @router.post("/{server_id}/clear")
 async def clear_sel(server_id: str, lang: str = Depends(get_lang)):
-    import backend.modules as ctx
     from backend.core.crypto import decrypt
-    from backend.main import auth
+    from backend.main import auth  # AuthManager not in ModuleContext — kept (Decision J)
 
+    ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
     server = await ctx.db.fetchone(
         "SELECT host, username_enc, password_enc FROM servers WHERE id = ?", (server_id,)
     )
@@ -135,7 +136,7 @@ async def clear_sel(server_id: str, lang: str = Depends(get_lang)):
 
 @router.get("/{server_id}/export")
 async def export_sel(server_id: str, format: str = Query("csv", regex="^(csv|json)$")):
-    import backend.modules as ctx
+    ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
 
     rows = await ctx.db.fetchall(
         "SELECT event_id, timestamp, sensor_name, event_type, description, severity "

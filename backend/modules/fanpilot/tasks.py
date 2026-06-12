@@ -174,9 +174,11 @@ async def _recover_to_bmc_auto(
 
 async def fanpilot_loop():
     """Background task that applies fan curves to all servers with FanPilot enabled."""
-    import backend.modules as ctx
     from backend.core.crypto import decrypt
-    from backend.main import auth
+    from backend.main import auth  # AuthManager not in ModuleContext — kept (Decision J)
+    from backend.modules import get_ctx
+
+    ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
 
     global _running
     _running = True
@@ -265,6 +267,7 @@ async def fanpilot_loop():
 
     while _running:
         try:
+            ctx = get_ctx()  # Look up fresh inside the loop body (Decision J)
             # 04-W1-01 (Codex HIGH fix): SELECT all fanpilot_enabled=1 servers
             # regardless of is_online so the offline-transition handler CAN see
             # newly-offline rows. The previous "AND s.is_online = 1" filter made
@@ -416,13 +419,10 @@ async def fanpilot_loop():
                     # Cache for /status — UI reads mode + current_speed_pct from here.
                     set_last_state(server_id, "fanpilot", target_speed)
 
-                    # Emit event
-                    await ctx.events.emit("fan_speed_changed", {
-                        "server_id": server_id,
-                        "speed_pct": target_speed,
-                        "profile": server["profile_name"],
-                        "source_temp": current_temp,
-                    })
+                    # 04-W6-01: EventBus removed. The former `fan_speed_changed` emit
+                    # had no subscriber (the audit-log target it was meant to feed
+                    # doesn't exist and is out of phase scope) — deleted. The fan-speed
+                    # change is already broadcast via broadcast_fanpilot_status above.
 
                 except Exception:
                     logger.exception("FanPilot error setting speed on %s", server_id)
@@ -445,9 +445,11 @@ async def fanpilot_loop():
 
 async def fanpilot_shutdown():
     """Restore auto fan mode on all servers — CRITICAL for safety."""
-    import backend.modules as ctx
     from backend.core.crypto import decrypt
-    from backend.main import auth
+    from backend.main import auth  # AuthManager not in ModuleContext — kept (Decision J)
+    from backend.modules import get_ctx
+
+    ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
 
     global _running
     _running = False

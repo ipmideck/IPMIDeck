@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from backend.core.i18n import get_lang, t
+from backend.modules import get_ctx
 
 router = APIRouter()
 
@@ -12,7 +13,7 @@ router = APIRouter()
 @router.get("/{server_id}")
 async def get_fru(server_id: str):
     """Get cached FRU data for a server."""
-    import backend.modules as ctx
+    ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
 
     rows = await ctx.db.fetchall(
         "SELECT section, field, value, fetched_at FROM fru_cache WHERE server_id = ? ORDER BY section, field",
@@ -45,10 +46,10 @@ async def get_fru(server_id: str):
 @router.post("/{server_id}/refresh")
 async def refresh_fru(server_id: str, lang: str = Depends(get_lang)):
     """Fetch FRU data from BMC and update cache."""
-    import backend.modules as ctx
     from backend.core.crypto import decrypt
-    from backend.main import auth
+    from backend.main import auth  # AuthManager not in ModuleContext — kept (Decision J)
 
+    ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
     server = await ctx.db.fetchone(
         "SELECT host, username_enc, password_enc FROM servers WHERE id = ?", (server_id,)
     )
