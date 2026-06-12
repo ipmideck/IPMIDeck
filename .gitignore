@@ -76,3 +76,6 @@ coverage/
 htmlcov/
 .coverage
 frontend/coverage/
+
+# Personal scratch notes (local-only)
+TODO.md
