@@ -16,6 +16,7 @@ import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { applyTheme, useThemeStore } from "@/stores/theme-store";
 import { useServerStore } from "@/stores/server-store";
 import { useAuthStore } from "@/stores/auth-store";
+import { useCurrencyStore } from "@/stores/currency-store";
 import { bootstrapAppData } from "@/lib/bootstrap";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { get, setUnauthorizedHandler } from "@/api/client";
@@ -189,6 +190,15 @@ export default function App() {
   useEffect(() => {
     applyTheme(theme);
   }, [theme]);
+
+  // GAP-2 (04-12): hydrate the global currency ONCE at the app shell so cost widgets
+  // (Power Control, Energy Cost, Power Stats) show the configured currency on the very
+  // first dashboard paint — regardless of whether the user lands on `/` or /settings.
+  // Idempotent with SettingsPage:73 via the store's `hydrated` guard. getState() (not the
+  // hook) keeps this effect dependency-free and avoids a re-render subscription.
+  useEffect(() => {
+    useCurrencyStore.getState().hydrate();
+  }, []);
 
   // Boot: fetch /api/auth/me FIRST, then load protected data only when usable.
   useEffect(() => {
