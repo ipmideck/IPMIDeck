@@ -169,7 +169,8 @@ async def set_fanpilot_mode(server_id: str, body: FanMode, lang: str = Depends(g
     from backend.main import auth
 
     server = await ctx.db.fetchone(
-        "SELECT host, username_enc, password_enc FROM servers WHERE id = ?", (server_id,)
+        "SELECT host, username_enc, password_enc, vendor FROM servers WHERE id = ?",
+        (server_id,),
     )
     if not server:
         return {"success": False, "error": t("server_not_found", lang)}
@@ -178,17 +179,19 @@ async def set_fanpilot_mode(server_id: str, body: FanMode, lang: str = Depends(g
     host = server["host"]
     user = decrypt(server["username_enc"], key)
     pwd = decrypt(server["password_enc"], key)
+    # 04-W4-02: vendor-aware dispatch (default 'dell' if NULL/empty — Decision G).
+    vendor = server["vendor"] or "dell"
 
     if body.mode == "auto":
-        await ctx.ipmi.set_fan_mode(host, user, pwd, manual=False)
+        await ctx.ipmi.set_fan_mode(host, user, pwd, manual=False, vendor=vendor)
         await ctx.db.execute(
             "UPDATE servers SET fanpilot_enabled = 0 WHERE id = ?", (server_id,)
         )
         set_last_state(server_id, "auto")
     elif body.mode == "manual":
         speed = body.manual_speed if body.manual_speed is not None else 50
-        await ctx.ipmi.set_fan_mode(host, user, pwd, manual=True)
-        await ctx.ipmi.set_fan_speed(host, user, pwd, speed)
+        await ctx.ipmi.set_fan_mode(host, user, pwd, manual=True, vendor=vendor)
+        await ctx.ipmi.set_fan_speed(host, user, pwd, speed, vendor=vendor)
         await ctx.db.execute(
             "UPDATE servers SET fanpilot_enabled = 0 WHERE id = ?", (server_id,)
         )

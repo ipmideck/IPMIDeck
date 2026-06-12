@@ -64,10 +64,16 @@ class DemoIPMIService(IPMIService):
             self._power_states[host] = "on"
         return f"Chassis Power Control: {action}"
 
-    async def set_fan_mode(self, host: str, user: str, password: str, manual: bool) -> None:
+    async def set_fan_mode(
+        self, host: str, user: str, password: str, manual: bool, vendor: str = "dell"
+    ) -> None:
+        # Demo: vendor is ignored (mock) — signature matches the ABC (Decision G).
         self._fan_manual[host] = manual
 
-    async def set_fan_speed(self, host: str, user: str, password: str, speed_pct: int) -> None:
+    async def set_fan_speed(
+        self, host: str, user: str, password: str, speed_pct: int, vendor: str = "dell"
+    ) -> None:
+        # Demo: vendor is ignored (mock) — signature matches the ABC (Decision G).
         self._fan_speed[host] = max(0, min(100, speed_pct))
 
     async def get_sel(self, host: str, user: str, password: str) -> list[dict]:

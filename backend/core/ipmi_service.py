@@ -9,6 +9,12 @@ from abc import ABC, abstractmethod
 
 logger = logging.getLogger("ipmilink.ipmi")
 
+# 04-W4-02: vendors whose fan PWM is reachable via raw ipmitool. Dell is the working
+# baseline (R720); Supermicro is documented. HPE iLO actively locks fan control against
+# raw commands (no supported byte sequence exists) and "generic" is unknown — both raise
+# NotImplementedError so the UI can surface an honest "unsupported" message.
+_SUPPORTED_FAN_VENDORS = {"dell", "supermicro"}
+
 
 class IPMIService(ABC):
     """Abstract IPMI interface. Implementations: Local (ipmitool) or Demo (mock)."""
@@ -26,11 +32,15 @@ class IPMIService(ABC):
         ...
 
     @abstractmethod
-    async def set_fan_mode(self, host: str, user: str, password: str, manual: bool) -> None:
+    async def set_fan_mode(
+        self, host: str, user: str, password: str, manual: bool, vendor: str = "dell"
+    ) -> None:
         ...
 
     @abstractmethod
-    async def set_fan_speed(self, host: str, user: str, password: str, speed_pct: int) -> None:
+    async def set_fan_speed(
+        self, host: str, user: str, password: str, speed_pct: int, vendor: str = "dell"
+    ) -> None:
         ...
 
     @abstractmethod
@@ -109,16 +119,50 @@ class LocalIPMIService(IPMIService):
         output = await self._exec(host, user, password, ["chassis", "power", action])
         return output.strip()
 
-    async def set_fan_mode(self, host: str, user: str, password: str, manual: bool) -> None:
-        val = "0x00" if manual else "0x01"
-        await self._exec(host, user, password, ["raw", "0x30", "0x30", "0x01", val])
+    async def set_fan_mode(
+        self, host: str, user: str, password: str, manual: bool, vendor: str = "dell"
+    ) -> None:
+        # 04-W4-02: vendor dispatch. Default vendor="dell" keeps Plan 01's existing
+        # call sites (which pass NO vendor kwarg) valid (Decision G).
+        vendor = (vendor or "dell").lower()
+        if vendor not in _SUPPORTED_FAN_VENDORS:
+            raise NotImplementedError(
+                f"Fan control not supported for vendor '{vendor}' "
+                f"(supported: {sorted(_SUPPORTED_FAN_VENDORS)})"
+            )
+        if vendor == "dell":
+            # 0x30 0x30 0x01 0x00 = manual; 0x01 = auto
+            val = "0x00" if manual else "0x01"
+            await self._exec(host, user, password, ["raw", "0x30", "0x30", "0x01", val])
+        elif vendor == "supermicro":
+            # 0x30 0x45 0x01 0x01 = Full (manual); 0x02 = Optimal (auto). Setting the
+            # profile to Full is required or Supermicro reverts to thermal-managed
+            # mode after ~5 min (RESEARCH Pitfall 5).
+            val = "0x01" if manual else "0x02"
+            await self._exec(host, user, password, ["raw", "0x30", "0x45", "0x01", val])
 
-    async def set_fan_speed(self, host: str, user: str, password: str, speed_pct: int) -> None:
+    async def set_fan_speed(
+        self, host: str, user: str, password: str, speed_pct: int, vendor: str = "dell"
+    ) -> None:
+        # 04-W4-02: vendor dispatch. Default vendor="dell" (Decision G).
+        vendor = (vendor or "dell").lower()
+        if vendor not in _SUPPORTED_FAN_VENDORS:
+            raise NotImplementedError(
+                f"Fan speed not supported for vendor '{vendor}' "
+                f"(supported: {sorted(_SUPPORTED_FAN_VENDORS)})"
+            )
         speed = max(0, min(100, speed_pct))
         hex_val = f"0x{speed:02x}"
-        await self._exec(
-            host, user, password, ["raw", "0x30", "0x30", "0x02", "0xff", hex_val]
-        )
+        if vendor == "dell":
+            # Dell: 0x30 0x30 0x02 0xff <pct_hex>
+            await self._exec(
+                host, user, password, ["raw", "0x30", "0x30", "0x02", "0xff", hex_val]
+            )
+        elif vendor == "supermicro":
+            # Supermicro: 0x30 0x70 0x66 0x01 <zone=0x00> <pct_hex>; zone 0 = system fans.
+            await self._exec(
+                host, user, password, ["raw", "0x30", "0x70", "0x66", "0x01", "0x00", hex_val]
+            )
 
     async def get_sel(self, host: str, user: str, password: str) -> list[dict]:
         output = await self._exec(host, user, password, ["sel", "elist"])

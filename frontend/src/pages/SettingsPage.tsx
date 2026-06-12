@@ -243,6 +243,16 @@ export default function SettingsPage() {
     try {
       await put(`/api/servers/${id}`, payload);
       toast.success(t("settings.serverUpdated"));
+      // 04-W4-02: warn when saving an unsupported vendor on a FanPilot-enabled server.
+      // FanPilot only drives dell/supermicro fans; hpe/generic raise NotImplementedError
+      // on the backend. fanpilot_enabled isn't in the edit form, so read it from the
+      // just-saved server row (string id match — Decision C).
+      const UNSUPPORTED_VENDORS = ["hpe", "generic"];
+      const vendor = (editForm.vendor || "").toLowerCase();
+      const savedServer = servers.find((srv) => srv.id === id);
+      if (savedServer?.fanpilot_enabled && UNSUPPORTED_VENDORS.includes(vendor)) {
+        toast.warning(t("settings.fanpilotVendorUnsupported", { vendor }), { duration: 6000 });
+      }
       setEditingId(null);
       await loadServers();
     } catch {

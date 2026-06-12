@@ -88,6 +88,7 @@ async def _recover_to_bmc_auto(
     username_enc: str,
     password_enc: str,
     reason: str,
+    vendor: str = "dell",
 ) -> None:
     """Best-effort restore BMC-auto fan mode + persist fanpilot_enabled=0 + log to command_log.
 
@@ -108,19 +109,20 @@ async def _recover_to_bmc_auto(
         username_enc / password_enc: AES-encrypted credentials from servers table.
         reason: Free-form label for the warning log line
             ("offline_transition" or "sensor_stale").
+        vendor: Server vendor for 04-W4-02 dispatch. Defaults to 'dell' so an
+            unconfigured row keeps the Dell baseline.
     """
     from backend.core.crypto import decrypt
     from backend.main import auth
 
     # Best-effort IPMI restore. Decryption can raise if the credential blob is
-    # malformed; wrap it. Decision G — Plan 01 does NOT pass vendor; Plan 06
-    # introduces vendor with a default that keeps this call site valid.
+    # malformed; wrap it. 04-W4-02: forward the server vendor (Decision G default).
     try:
         key = auth.get_encryption_key()
         user = decrypt(username_enc, key)
         pwd = decrypt(password_enc, key)
         await asyncio.wait_for(
-            ctx.ipmi.set_fan_mode(host, user, pwd, manual=False),
+            ctx.ipmi.set_fan_mode(host, user, pwd, manual=False, vendor=vendor or "dell"),
             timeout=5.0,
         )
         ipmi_ok = True
@@ -213,7 +215,8 @@ async def fanpilot_loop():
                 prev_mode = row["command_detail"]
                 try:
                     server = await ctx.db.fetchone(
-                        "SELECT host, username_enc, password_enc FROM servers WHERE id = ?",
+                        "SELECT host, username_enc, password_enc, vendor "
+                        "FROM servers WHERE id = ?",
                         (server_id,),
                     )
                     if not server:
@@ -224,7 +227,10 @@ async def fanpilot_loop():
                     host = server["host"]
                     user = decrypt(server["username_enc"], key)
                     pwd = decrypt(server["password_enc"], key)
-                    await ctx.ipmi.set_fan_mode(host, user, pwd, manual=False)
+                    # 04-W4-02: forward vendor (default 'dell' if NULL/empty).
+                    await ctx.ipmi.set_fan_mode(
+                        host, user, pwd, manual=False, vendor=server["vendor"] or "dell"
+                    )
                     # Log the recovery so the next startup does not re-trigger.
                     await ctx.db.execute(
                         "INSERT INTO command_log (server_id, command_type, command_detail, result) "
@@ -264,7 +270,8 @@ async def fanpilot_loop():
             # newly-offline rows. The previous "AND s.is_online = 1" filter made
             # offline rows invisible — recovery could never fire.
             servers = await ctx.db.fetchall(
-                "SELECT s.id, s.host, s.username_enc, s.password_enc, s.fanpilot_profile_id, "
+                "SELECT s.id, s.host, s.username_enc, s.password_enc, s.vendor, "
+                "s.fanpilot_profile_id, "
                 "s.fanpilot_enabled, s.is_online, fp.curve_points, fp.hysteresis, "
                 "fp.safety_threshold, fp.source_sensor, fp.name as profile_name "
                 "FROM servers s "
@@ -308,6 +315,7 @@ async def fanpilot_loop():
                             ctx, server_id, server["host"],
                             server["username_enc"], server["password_enc"],
                             reason="offline_transition",
+                            vendor=server["vendor"] or "dell",
                         )
                     else:
                         logger.warning(
@@ -376,6 +384,7 @@ async def fanpilot_loop():
                                 ctx, server_id, server["host"],
                                 server["username_enc"], server["password_enc"],
                                 reason="sensor_stale",
+                                vendor=server["vendor"] or "dell",
                             )
                         # Don't pass stale data to compute_fan_speed.
                         continue
@@ -388,9 +397,12 @@ async def fanpilot_loop():
                     host = server["host"]
                     user = decrypt(server["username_enc"], key)
                     pwd = decrypt(server["password_enc"], key)
+                    # 04-W4-02: vendor-aware dispatch. Default 'dell' if the column is
+                    # NULL/empty so an unconfigured row keeps the Dell baseline.
+                    vendor = server["vendor"] or "dell"
 
-                    await ctx.ipmi.set_fan_mode(host, user, pwd, manual=True)
-                    await ctx.ipmi.set_fan_speed(host, user, pwd, target_speed)
+                    await ctx.ipmi.set_fan_mode(host, user, pwd, manual=True, vendor=vendor)
+                    await ctx.ipmi.set_fan_speed(host, user, pwd, target_speed, vendor=vendor)
 
                     # Broadcast status
                     await ctx.ws.broadcast_fanpilot_status(
@@ -443,7 +455,8 @@ async def fanpilot_shutdown():
     logger.info("FanPilot shutdown: restoring auto mode on all servers")
 
     servers = await ctx.db.fetchall(
-        "SELECT id, host, username_enc, password_enc FROM servers WHERE fanpilot_enabled = 1"
+        "SELECT id, host, username_enc, password_enc, vendor "
+        "FROM servers WHERE fanpilot_enabled = 1"
     )
 
     if not servers:
@@ -455,7 +468,10 @@ async def fanpilot_shutdown():
             host = server["host"]
             user = decrypt(server["username_enc"], key)
             pwd = decrypt(server["password_enc"], key)
-            await ctx.ipmi.set_fan_mode(host, user, pwd, manual=False)
+            # 04-W4-02: forward vendor (default 'dell' if NULL/empty).
+            await ctx.ipmi.set_fan_mode(
+                host, user, pwd, manual=False, vendor=server["vendor"] or "dell"
+            )
             set_last_state(server["id"], "auto")
             logger.info("Restored auto fan mode on %s (%s)", server["id"], host)
         except Exception:
