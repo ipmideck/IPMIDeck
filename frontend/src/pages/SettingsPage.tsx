@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { Header } from "@/components/layout/Header";
 import { useServerStore, type Server } from "@/stores/server-store";
 import { useCurrencyStore } from "@/stores/currency-store";
+import { useEnergyResetStore } from "@/stores/energy-reset-store";
 import { SUPPORTED_CURRENCIES, currencyOptionLabel, type CurrencyCode } from "@/lib/currency";
 import { useThemeStore } from "@/stores/theme-store";
 import { useTourStore } from "@/stores/tour-store";
@@ -12,12 +13,12 @@ import { useBackendOnline } from "@/stores/connection-store";
 import { get, post, put, del } from "@/api/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { Plus, Trash2, TestTube, Pencil, ExternalLink, Heart, Code2, Globe, Moon, Sun, Monitor, Server as ServerIcon, ShieldCheck, ShieldOff, Fan } from "lucide-react";
+import { Plus, Trash2, TestTube, Pencil, ExternalLink, Heart, Code2, Globe, Moon, Sun, Monitor, Server as ServerIcon, ShieldCheck, ShieldOff, Fan, Zap } from "lucide-react";
 import { EmptyState } from "@/components/common/EmptyState";
 import { LanguageSelect } from "@/components/LanguageSelect";
 
 export default function SettingsPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { servers, setServers } = useServerStore();
   const { theme, setTheme } = useThemeStore();
   const startTour = useTourStore((s) => s.start);
@@ -61,6 +62,18 @@ export default function SettingsPage() {
   const setCurrency = useCurrencyStore((s) => s.setCurrency);
   const hydrateCurrency = useCurrencyStore((s) => s.hydrate);
   useEffect(() => { hydrateCurrency(); }, [hydrateCurrency]);
+
+  // 04-W2-07: Energy Counters card. Per-server + reset-all, each behind the
+  // inline-expand-confirm pattern. Server IDs are STRINGS (Decision C). resetAll
+  // merges the backend's affected_ids (Decision P, in the store).
+  const [resetConfirmId, setResetConfirmId] = useState<string | null>(null);
+  const [resetAllConfirm, setResetAllConfirm] = useState(false);
+  const resets = useEnergyResetStore((s) => s.resets);
+  const resetServer = useEnergyResetStore((s) => s.resetServer);
+  const resetAll = useEnergyResetStore((s) => s.resetAll);
+  const hydrateResets = useEnergyResetStore((s) => s.hydrate);
+  useEffect(() => { hydrateResets(); }, [hydrateResets]);
+  const energyLocale = i18n.resolvedLanguage || "en";
 
   // Security card (D-08..D-10): enable -> /configure (fresh creds), disable -> /toggle {enabled:false}.
   const authEnabled = useAuthStore((s) => s.authEnabled);
@@ -595,6 +608,124 @@ export default function SettingsPage() {
               </div>
             )}
           </div>
+
+          {/* Energy Counters (04-W2-07) — per-server + reset-all energy counters.
+              Placed after Security per UI-SPEC card order (Alerting/Data land in
+              later plans; until then this sits between Security and Appearance). */}
+          <section className="rounded-lg border border-border bg-card p-5">
+            <div className="mb-4 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Zap className="h-4 w-4 text-violet-400" aria-hidden="true" />
+                <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                  {t("settings.energy.title")}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setResetAllConfirm(true)}
+                disabled={servers.length === 0}
+                className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-red-500 hover:bg-red-500/10 min-h-11 md:min-h-9 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {t("settings.energy.resetAll")}
+              </button>
+            </div>
+
+            {/* Reset-all inline confirm (destructive contract — Security disable pattern). */}
+            {resetAllConfirm && (
+              <div className="mb-4 space-y-3 rounded-md border border-red-500/30 bg-red-500/5 p-3">
+                <p className="text-xs text-muted-foreground">
+                  {t("settings.energy.confirmResetAllBody", { count: servers.length })}
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setResetAllConfirm(false)}
+                    className="flex-1 rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground min-h-11 md:min-h-9"
+                  >
+                    {t("settings.cancel")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await resetAll();
+                        setResetAllConfirm(false);
+                        toast.success(t("settings.energy.resetSuccess"));
+                      } catch {
+                        toast.error(t("settings.energy.resetFailed"));
+                      }
+                    }}
+                    className="flex-1 rounded-md bg-red-500 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-600 min-h-11 md:min-h-9"
+                  >
+                    {t("settings.energy.confirmResetAll")}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {servers.length === 0 ? (
+              <p className="text-xs text-muted-foreground">{t("settings.noServersDescription")}</p>
+            ) : (
+              <div className="space-y-2">
+                {servers.map((server) => (
+                  <div
+                    key={server.id}
+                    className="flex flex-col items-stretch justify-between gap-3 rounded-md border border-border p-3 md:flex-row md:items-center"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-foreground">{server.name}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {resets[server.id]
+                          ? t("settings.energy.lastReset", {
+                              value: new Date(resets[server.id]!).toLocaleString(energyLocale),
+                            })
+                          : t("settings.energy.neverReset")}
+                      </div>
+                    </div>
+                    {resetConfirmId === server.id ? (
+                      <div className="w-full space-y-3 rounded-md border border-red-500/30 bg-red-500/5 p-3 md:w-auto">
+                        <p className="text-xs text-muted-foreground">
+                          {t("settings.energy.confirmResetBody", { name: server.name })}
+                        </p>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setResetConfirmId(null)}
+                            className="flex-1 rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground min-h-11 md:min-h-9"
+                          >
+                            {t("settings.cancel")}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await resetServer(server.id);
+                                setResetConfirmId(null);
+                                toast.success(t("settings.energy.resetSuccess"));
+                              } catch {
+                                toast.error(t("settings.energy.resetFailed"));
+                              }
+                            }}
+                            className="flex-1 rounded-md bg-red-500 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-600 min-h-11 md:min-h-9"
+                          >
+                            {t("settings.energy.confirmReset")}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setResetConfirmId(server.id)}
+                        className="w-full rounded-md border border-border px-2.5 py-1 text-xs font-medium text-red-500 hover:bg-red-500/10 min-h-11 md:min-h-9 md:w-auto"
+                      >
+                        {t("settings.energy.resetServer", { name: server.name })}
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
 
           {/* Appearance */}
           <div className="rounded-lg border border-border bg-card p-5">

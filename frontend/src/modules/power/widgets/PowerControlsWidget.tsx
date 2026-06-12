@@ -35,7 +35,7 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
   const [loading, setLoading] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<string | null>(null);
   const online = useBackendOnline();
-  const { live, unit, min, max, totalWh, sensorName, reset } = usePowerStats(serverId);
+  const { live, unit, min, max, totalWh, sensorName } = usePowerStats(serverId);
   // 04-W2-05 / 04-W2-04: cost row OR "Configure tariff" CTA in the compact view.
   // serverId is a STRING (Decision C) — match Server.id by string equality, no cast.
   const currency = useCurrencyStore((s) => s.currency);
@@ -310,9 +310,10 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
 /**
  * Header-action chrome for the PowerControls widget — rendered by WidgetGrid in
  * the widget card title bar (not inside the body). Subscribes to the same
- * usePowerStats() hook so reset/view-toggle behaviour stays in sync with the
- * body. All buttons stopPropagation on mousedown so clicking them while the
- * grid is in edit mode doesn't initiate a drag.
+ * usePowerStats() hook so the view-toggle stays in sync with the body. Buttons
+ * stopPropagation on mousedown so clicking them while the grid is in edit mode
+ * doesn't initiate a drag. (Energy-counter reset moved to Settings → Energy
+ * Counters in 04-W2-07; no inline reset button here anymore.)
  */
 export function PowerControlsHeaderActions({
   serverId,
@@ -324,20 +325,11 @@ export function PowerControlsHeaderActions({
   onViewChange?: (v: "compact" | "chart") => void;
 }) {
   const { t } = useTranslation();
-  const { sensorName, reset } = usePowerStats(serverId);
+  const { sensorName } = usePowerStats(serverId);
   if (sensorName == null) return null;
   const isChart = view === "chart";
   return (
     <>
-      <button
-        type="button"
-        onMouseDown={(e) => e.stopPropagation()}
-        onClick={reset}
-        title={t("power.resetCounters")}
-        className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-      >
-        <RefreshCw className="h-3 w-3" />
-      </button>
       {onViewChange && (
         <button
           type="button"

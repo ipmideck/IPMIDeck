@@ -24,6 +24,7 @@ import {
 import { useSensorStore, type SensorReading } from "@/stores/sensor-store";
 import { sensorNamesForType } from "@/modules/sensors/sensorUtils";
 import { useRangeStore } from "@/stores/range-store";
+import { useEnergyResetStore } from "@/stores/energy-reset-store";
 import { get } from "@/api/client";
 import i18n from "@/i18n";
 import { intlLocale } from "@/i18n/languages";
@@ -86,6 +87,15 @@ export function usePowerStats(serverId: string): PowerStats {
   // trapezoid-integrate between samples even when the wattage plateaus (which it does
   // most of the time on an idle server).
   const lastRef = useRef<{ value: number; ts: number } | null>(null);
+
+  // 04-W2-07: observe the per-server reset timestamp from the energy-reset store
+  // (set when the user resets via Settings → Energy Counters). When it changes,
+  // zero the integrator so the session counters start fresh immediately.
+  const resetTs = useEnergyResetStore((s) => s.resets[serverId] ?? null);
+  useEffect(() => {
+    lastRef.current = null;
+    setStats({ min: null, max: null, totalWh: 0 });
+  }, [resetTs]);
 
   useEffect(() => {
     // Restart the integrator any time the tracked sensor changes (e.g. server switch).

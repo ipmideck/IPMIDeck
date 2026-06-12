@@ -1,4 +1,4 @@
-import { Zap, RefreshCw, WifiOff, Settings } from "lucide-react";
+import { Zap, WifiOff, Settings } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
@@ -20,7 +20,7 @@ export function PowerStatsWidget({ serverId }: PowerStatsWidgetProps) {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const online = useBackendOnline();
-  const { live, unit, min, max, totalWh, sensorName, reset } = usePowerStats(serverId);
+  const { live, unit, min, max, totalWh, sensorName } = usePowerStats(serverId);
   // 04-W2-05 / 04-W2-04: cost line next to Min/Max/Total, OR "Configure tariff" CTA.
   // serverId is a STRING (Decision C) — match Server.id by string equality, no cast.
   const currency = useCurrencyStore((s) => s.currency);
@@ -38,7 +38,8 @@ export function PowerStatsWidget({ serverId }: PowerStatsWidgetProps) {
         !online && "opacity-50 grayscale"
       )}
     >
-      {/* Header: inline live + stats + reset button */}
+      {/* Header: inline live + stats. Energy-counter reset moved to
+          Settings → Energy Counters (04-W2-07). */}
       <div className="flex shrink-0 flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <div className="flex items-baseline gap-1">
           <Zap className="h-4 w-4 self-center text-violet-400" />
@@ -77,17 +78,6 @@ export function PowerStatsWidget({ serverId }: PowerStatsWidgetProps) {
                 {t("power.configureTariff")}
               </button>
             )
-          )}
-          {sensorName != null && (
-            <button
-              type="button"
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={reset}
-              title={t("power.resetCounters")}
-              className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-            >
-              <RefreshCw className="h-3 w-3" />
-            </button>
           )}
         </div>
       </div>

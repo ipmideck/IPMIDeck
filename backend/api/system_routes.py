@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -72,6 +72,62 @@ async def put_app_config_value(key: str, body: AppConfigValueBody):
         stored = str(v)
     await db.set_config(key, stored)
     return {"success": True, "key": key, "value": body.value}
+
+
+# 04-W2-07 (Plan 04-04, Task 2): energy-counter reset endpoints.
+# Mounted at prefix="/api" so paths resolve to /api/system/energy-reset[s]
+# (Decision B). Current-globals pattern (Decision A1). Server IDs are strings
+# (Decision C). The reset timestamp per server is persisted in app_config under
+# the key energy_reset:{server_id}; the frontend integrator (usePowerStats) zeros
+# itself when that timestamp changes.
+
+
+class EnergyResetBody(BaseModel):
+    """POST body. server_id=None means "all servers" (Decision C — str not int)."""
+    server_id: str | None = None
+
+
+@router.post("/system/energy-reset", dependencies=[Depends(require_auth)])
+async def energy_reset(body: EnergyResetBody):
+    """Reset energy counters for one server or all servers.
+
+    Returns the list of affected server_id strings so the frontend resetAll()
+    can merge against the AUTHORITATIVE affected set, not just keys already in its
+    local map (Decision P — Codex MEDIUM fix).
+    """
+    from backend.main import db
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if body.server_id is None:
+        rows = await db.fetchall("SELECT id FROM servers")
+        affected_ids = [r["id"] for r in rows]  # list[str] — Decision C
+        for sid in affected_ids:
+            await db.set_config(f"energy_reset:{sid}", now_iso)
+        return {
+            "success": True,
+            "count": len(affected_ids),
+            "affected_ids": affected_ids,
+            "timestamp": now_iso,
+        }
+    await db.set_config(f"energy_reset:{body.server_id}", now_iso)
+    return {
+        "success": True,
+        "server_id": body.server_id,
+        "affected_ids": [body.server_id],
+        "timestamp": now_iso,
+    }
+
+
+@router.get("/system/energy-resets", dependencies=[Depends(require_auth)])
+async def energy_resets():
+    """Return {server_id: iso_timestamp_or_null} for all servers."""
+    from backend.main import db
+
+    rows = await db.fetchall("SELECT id FROM servers")
+    out: dict[str, str | None] = {}
+    for r in rows:
+        out[r["id"]] = await db.get_config(f"energy_reset:{r['id']}", default=None)
+    return {"success": True, "resets": out}
 
 
 @router.get("/health")
