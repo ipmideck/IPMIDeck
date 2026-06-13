@@ -15,11 +15,6 @@ logger = logging.getLogger("ipmilink.modules.sel")
 # replay of old criticals on every restart).
 _last_seen_sel_id: dict[str, int] = {}
 
-# slow Dell R720 SEL fetch can exceed the old 15s; 45 is the wait_for backstop. The inner
-# LocalIPMIService._exec command_timeout (=30s) is now the effective cap and raises a NAMED,
-# message-bearing TimeoutError instead of a blank asyncio.TimeoutError (260613-69x).
-_SEL_FETCH_TIMEOUT = 45.0
-
 # Severity classification — map raw SEL severity text to a broadcast severity.
 CRITICAL = {"critical", "non-recoverable", "upper non-recoverable", "lower non-recoverable"}
 WARNING = {"warning", "non-critical", "upper non-critical", "lower non-critical"}
@@ -103,13 +98,10 @@ async def _poll_one_server(server: dict) -> None:
         # Decision K — the verified service method is get_sel (the only SEL fetch on the ABC).
         entries = await asyncio.wait_for(
             ctx.ipmi.get_sel(server["host"], server["username"], server["password"]),
-            timeout=_SEL_FETCH_TIMEOUT,
+            timeout=15.0,
         )
     except Exception as e:
-        # repr(e) names the exception type so a timeout logs as e.g.
-        # TimeoutError('ipmitool timed out after 30s') (or bare TimeoutError()) instead of
-        # the blank str() of asyncio.TimeoutError (260613-69x).
-        logger.warning("sel poll failed server_id=%s: %s", sid, repr(e))
+        logger.warning("sel poll failed server_id=%s: %s", sid, e)
         return
 
     last_id = await _init_cursor(sid)
