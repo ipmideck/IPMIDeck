@@ -17,13 +17,42 @@ from fastapi import Cookie, Depends, FastAPI, WebSocket, WebSocketDisconnect, st
 from fastapi.staticfiles import StaticFiles
 
 from backend.core.auth import AuthManager, require_auth
-from backend.core.branding import APP_NAME, VERSION
+from backend.core.branding import APP_NAME, VERSION, credits_line, render_banner_safe
 from backend.core.config import AppConfig, load_config, save_default_config, update_server_yaml
+from backend.core.logging_util import suppress_noisy_loggers
 from backend.core.database import Database
 from backend.core.modules import ModuleLoader
 from backend.core.websocket import WebSocketManager
 
 logger = logging.getLogger("ipmilink")
+
+# === D-18: idempotent Windows-proactor ConnectionResetError suppression ===
+# On Windows the ProactorEventLoop logs a full ConnectionResetError traceback when a WS/HTTP
+# client drops mid-write. _silence_proactor_connreset() wraps the offending transport callback
+# to swallow that one exception down to a single debug line. It is a NO-OP off Windows, and the
+# module-level _PROACTOR_PATCHED guard makes it idempotent: lifespan runs again on an in-process
+# restart (D-15c), so without the guard the method would be wrapped repeatedly (REVIEWS MED).
+_PROACTOR_PATCHED = False
+
+
+def _silence_proactor_connreset() -> None:
+    """Tame the Windows proactor ConnectionResetError spam (D-18). No-op off Windows + idempotent."""
+    global _PROACTOR_PATCHED
+    if sys.platform != "win32" or _PROACTOR_PATCHED:
+        return
+    from asyncio.proactor_events import _ProactorBasePipeTransport
+
+    orig = _ProactorBasePipeTransport._call_connection_lost
+
+    def _wrap(self, exc):
+        try:
+            return orig(self, exc)
+        except ConnectionResetError:
+            logger.debug("WS/HTTP client dropped (ConnectionReset) — suppressed")
+
+    _ProactorBasePipeTransport._call_connection_lost = _wrap
+    _PROACTOR_PATCHED = True
+
 
 # === Global app state (set during lifespan) ===
 # NOTE: the EventBus was removed in 04-W6-01 (see backend/core/events.py tombstone).
@@ -54,6 +83,23 @@ async def lifespan(app: FastAPI):
     # Load config
     config = load_config()
     _setup_logging(config.logging.level)
+
+    # D-04: keep the INFO default clean — tame uvicorn.access etc. at the INFO baseline so
+    # "quiet == INFO with noisy loggers suppressed" holds in Docker too (idempotent on restart).
+    suppress_noisy_loggers()
+
+    # D-18: install the idempotent Windows-proactor ConnectionReset suppression early, before any
+    # WS/HTTP traffic. No-op off Windows; the _PROACTOR_PATCHED guard makes it safe across restarts.
+    _silence_proactor_connreset()
+
+    # D-21: emit the branded banner ONCE via a TTY-independent print/log so it shows in
+    # `docker logs` (the container never runs cli()). Gated on app.state.host_splash_shown:
+    # cli() sets that flag ONLY on the interactive TTY path, where the rich splash (Task 2)
+    # already shows the banner — so the host TTY never double-prints (REVIEWS MED: no-double-banner).
+    # On Docker / non-TTY the flag is unset → the operator gets the banner here.
+    if not getattr(app.state, "host_splash_shown", False):
+        print(render_banner_safe())  # render-safe figlet art; Docker logs capture it
+        logger.info("%s", credits_line())  # credits via logger (INFO — visible by default, D-04)
 
     if config.demo:
         logger.info("*** DEMO MODE — no real hardware ***")
