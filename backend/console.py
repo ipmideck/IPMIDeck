@@ -45,6 +45,33 @@ IGNORE_KEY = "\x00__IGNORE__"
 _WIN_EXTENDED_PREFIXES = ("\x00", "\xe0")
 
 
+# The bind-wildcard hosts. These mean "listen on every interface" — they are NOT navigable
+# addresses, so a dashboard URL built from one (e.g. http://0.0.0.0:8099) is not browsable.
+_BIND_WILDCARDS = ("0.0.0.0", "::", "")
+
+
+def browsable_host(host: str) -> str:
+    """Map a bind-wildcard host to a browsable loopback address (D-15a).
+
+    ``0.0.0.0`` / ``::`` / ``""`` are bind-wildcards (listen-on-all), not addresses a browser can
+    open — so the show-URL action (key 'u') would otherwise surface an unclickable
+    ``http://0.0.0.0:port``. This maps any wildcard to ``127.0.0.1`` (we use the IPv4 loopback even
+    for ``::`` for simplicity — it is reachable on every dual-stack host) and leaves a concrete
+    host (LAN IP / hostname) unchanged. Pure/stdin-free so it is unit-testable.
+    """
+    return "127.0.0.1" if (host or "") in _BIND_WILDCARDS else host
+
+
+def browsable_url(scheme: str, host: str, port: int) -> str:
+    """Build a browsable ``scheme://host:port`` URL, mapping a wildcard bind host to loopback.
+
+    Thin wrapper over :func:`browsable_host` so cli()'s get_url callback (and tests) get a single
+    pure builder. The wildcard → 127.0.0.1 rewrite is the MUST (browsability); the caller decides
+    whether to additionally render it as a clickable terminal hyperlink.
+    """
+    return f"{scheme}://{browsable_host(host)}:{port}"
+
+
 def port_in_use(host: str, port: int) -> bool:
     """Return True if ``port`` is already bound/listening on ``host`` (D-17).
 
@@ -409,6 +436,13 @@ class ConsoleUI:
         elif key == "s":
             self.view = "servers"
         elif key == "u":
+            # D-15a: push the (browsable) dashboard URL. get_url() already rewrites a wildcard
+            # bind to 127.0.0.1 (cli() uses browsable_url), so this is always navigable. We push
+            # it as PLAIN TEXT on purpose: the log body joins arbitrary strings into a single
+            # Panel, so injecting rich link markup ('[link=…]') here would force render_body to
+            # interpret '[...]' in EVERY log line (BMC output, etc.) and corrupt the frame. Plain
+            # text is the documented, least-invasive choice (browsability is the MUST; a clickable
+            # OSC-8 hyperlink is a nice-to-have not worth destabilising the log render for).
             self._push_log(self.get_url())
         elif key == "g":
             self._push_log(

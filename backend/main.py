@@ -473,6 +473,7 @@ def cli():
     # paths (reset-password / gen-cert / --reload) have already returned.
     from backend.console import (
         ConsoleUI,
+        browsable_url,
         is_interactive,
         port_in_use,
         start_key_listener,
@@ -645,7 +646,9 @@ def cli():
 
             console = ConsoleUI(
                 ws_manager=ws_manager,
-                get_url=lambda: f"{scheme}://{effective_host}:{effective_port}",  # D-15a
+                # D-15a: map a wildcard bind (0.0.0.0/::/"") to a browsable 127.0.0.1 so 'u'
+                # surfaces a URL the operator can actually open (not http://0.0.0.0:port).
+                get_url=lambda: browsable_url(scheme, effective_host, effective_port),
                 get_servers=lambda: list(servers_cache),  # D-15b — cached snapshot (async-safe)
                 on_exit=lambda: loop.call_soon_threadsafe(_request_exit),  # D-12
                 on_restart=lambda: loop.call_soon_threadsafe(_request_restart),  # D-15c

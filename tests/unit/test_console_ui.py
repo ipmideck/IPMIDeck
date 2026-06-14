@@ -124,6 +124,45 @@ def test_show_url_pushes_log():
     assert ui.log_lines[-1] == "http://h:3000"
 
 
+# --- gap-closure r2: browsable URL host mapping (wildcard -> 127.0.0.1) -------------------
+
+
+def test_browsable_host_maps_wildcards_to_loopback():
+    """browsable_host() maps the bind-wildcards 0.0.0.0 / :: / "" to a browsable 127.0.0.1.
+
+    A wildcard bind is NOT a navigable address — pressing 'u' must surface something the operator
+    can actually open. A real host (LAN IP / hostname) is returned unchanged.
+    """
+    from backend.console import browsable_host
+
+    assert browsable_host("0.0.0.0") == "127.0.0.1"
+    assert browsable_host("::") == "127.0.0.1"
+    assert browsable_host("") == "127.0.0.1"
+    # a concrete host is left alone
+    assert browsable_host("192.0.2.10") == "192.0.2.10"
+    assert browsable_host("myhost.lan") == "myhost.lan"
+    assert browsable_host("127.0.0.1") == "127.0.0.1"
+
+
+def test_browsable_url_rewrites_wildcard_host():
+    """browsable_url() rebuilds scheme://host:port with the wildcard host mapped to loopback."""
+    from backend.console import browsable_url
+
+    assert browsable_url("http", "0.0.0.0", 8099) == "http://127.0.0.1:8099"
+    assert browsable_url("https", "::", 8443) == "https://127.0.0.1:8443"
+    assert browsable_url("http", "192.0.2.10", 3000) == "http://192.0.2.10:3000"
+
+
+def test_show_url_is_browsable_when_bound_to_wildcard():
+    """When the bind host is a wildcard, 'u' pushes a browsable 127.0.0.1 URL (not 0.0.0.0)."""
+    from backend.console import browsable_url
+
+    ui, _ = _make_ui(get_url=lambda: browsable_url("http", "0.0.0.0", 8099))
+    ui.dispatch("u")
+    assert ui.log_lines[-1] == "http://127.0.0.1:8099"
+    assert "0.0.0.0" not in ui.log_lines[-1]
+
+
 def test_validate_bind_accepts_good_and_rejects_bad():
     """_validate_bind accepts a good host/port and rejects empty host, out-of-range and non-int ports."""
     assert ConsoleUI._validate_bind("0.0.0.0", "8099") == ("0.0.0.0", 8099)
