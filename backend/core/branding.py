@@ -35,6 +35,19 @@ def render_banner_safe(compact: bool = False) -> str:
         return APP_NAME
 
 
+def brand_title(compact: bool = False) -> str:
+    """Return a SINGLE-LINE brand string generated from the constants (no figlet, no newlines).
+
+    Used by the pinned header (D-01/D-02 "splash grande poi compatto"): the multi-line figlet
+    banner() is the one-time launch splash, while the always-visible compact header uses this
+    one-liner so the help bar / status / credits below it are never clipped. Generated from
+    APP_NAME/VERSION so the 04.2 rename still flips everything from the one brand constant.
+    """
+    if compact:
+        return f"{APP_NAME} v{VERSION}"
+    return f"{APP_NAME} · v{VERSION}"
+
+
 def credits_line() -> str:
     """One-line credit string for the splash/banner (D-10)."""
     return f"{AUTHOR} · v{VERSION} · {LICENSE} · {URL}"
