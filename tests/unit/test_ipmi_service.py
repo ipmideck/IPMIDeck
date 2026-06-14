@@ -10,6 +10,8 @@ asyncio_mode="auto" (pyproject) => async tests need NO decorator.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from backend.core.ipmi_service import LocalIPMIService
@@ -143,3 +145,93 @@ def _make_const(value: str):
         return value
 
     return fake_exec
+
+
+# === _exec kill+reap lifecycle (D-16) + error-message fallback (D-18) ===
+#
+# These monkeypatch asyncio.create_subprocess_exec to return a _FakeProc so NO real
+# ipmitool ever runs (the R720 stays READ-ONLY). They prove _exec ALWAYS terminates and
+# reaps the child on timeout AND cancellation, NEVER kills a normally-completing process,
+# never swallows CancelledError, and builds a legible message from stderr OR stdout.
+
+
+class _FakeProc:
+    """A stand-in asyncio subprocess. `hang=True` makes communicate() block forever so the
+    wait_for timeout / task cancel paths are exercised; otherwise communicate() returns the
+    supplied (out, err) and sets the returncode immediately (happy / error paths)."""
+
+    def __init__(self, *, hang: bool = False, out: bytes = b"", err: bytes = b"", rc: int = 0):
+        self._hang = hang
+        self._out = out
+        self._err = err
+        self._rc = rc
+        self.returncode = None  # None until communicate() completes (mirrors asyncio proc)
+        self.killed = False
+
+    async def communicate(self):
+        if self._hang:
+            # Block "forever" — the caller's wait_for timeout or task.cancel() ends this.
+            await asyncio.sleep(3600)
+        self.returncode = self._rc
+        return self._out, self._err
+
+    def kill(self):
+        self.killed = True
+        # Once killed, the OS would set a returncode; reflect that so reap is a no-op.
+        if self.returncode is None:
+            self.returncode = -9
+
+    async def wait(self):
+        return self.returncode
+
+
+def _patch_proc(monkeypatch, proc: _FakeProc) -> None:
+    async def fake_create(*args, **kwargs):
+        return proc
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create)
+
+
+async def test_exec_kills_on_timeout(monkeypatch):
+    """A hanging child + tiny timeout raises TimeoutError AND the child is killed+reaped."""
+    proc = _FakeProc(hang=True)
+    _patch_proc(monkeypatch, proc)
+    svc = LocalIPMIService(timeout=0)
+    with pytest.raises(TimeoutError):
+        await svc._exec("h", "u", "p", ["chassis", "power", "status"])
+    assert proc.killed is True
+
+
+async def test_exec_kills_on_cancel(monkeypatch):
+    """Cancelling the _exec task propagates CancelledError (NOT swallowed) AND kills the child."""
+    proc = _FakeProc(hang=True)
+    _patch_proc(monkeypatch, proc)
+    svc = LocalIPMIService(timeout=3600)
+    task = asyncio.ensure_future(svc._exec("h", "u", "p", ["sdr", "elist"]))
+    await asyncio.sleep(0.05)  # let _exec reach the awaited communicate()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert proc.killed is True
+
+
+async def test_exec_happy_path_not_killed(monkeypatch):
+    """A normally-completing child returns its stdout and is NEVER killed."""
+    proc = _FakeProc(hang=False, out=b"happy-out", err=b"", rc=0)
+    _patch_proc(monkeypatch, proc)
+    svc = LocalIPMIService()
+    result = await svc._exec("h", "u", "p", ["chassis", "power", "status"])
+    assert result == "happy-out"
+    assert proc.killed is False
+
+
+async def test_exec_error_message_fallback(monkeypatch):
+    """returncode!=0 with empty stderr but non-empty stdout builds the message from stdout."""
+    proc = _FakeProc(hang=False, out=b"out-detail", err=b"", rc=255)
+    _patch_proc(monkeypatch, proc)
+    svc = LocalIPMIService()
+    with pytest.raises(RuntimeError) as exc:
+        await svc._exec("h", "u", "p", ["raw", "0x30", "0x30"])
+    msg = str(exc.value)
+    assert "out-detail" in msg
+    assert "code 255" in msg

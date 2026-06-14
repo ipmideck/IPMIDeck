@@ -77,27 +77,37 @@ class LocalIPMIService(IPMIService):
             self._host_locks[host] = asyncio.Semaphore(1)
         return self._host_locks[host]
 
-    async def _exec(self, host: str, user: str, password: str, args: list[str]) -> str:  # pragma: no cover
-        # The subprocess body cannot run without a real ipmitool binary + reachable BMC, so it
-        # is excluded from coverage (REVIEWS MED #7, up-front decision). The thin command methods
-        # that call _exec (power_command/set_fan_speed/etc.) ARE covered via a monkeypatched _exec
-        # in tests/unit/test_ipmi_service.py — only this network/subprocess surface is pragma'd.
+    async def _exec(self, host: str, user: str, password: str, args: list[str]) -> str:
+        # Only the genuine subprocess SPAWN (asyncio.create_subprocess_exec) is `# pragma: no cover`
+        # — it needs a real ipmitool binary + reachable BMC. The kill+reap / error-message branches
+        # below ARE exercised by tests/unit/test_ipmi_service.py, which monkeypatches
+        # create_subprocess_exec to return a fake proc (timeout / cancel / happy / error paths), so
+        # the D-16 lifecycle + D-18 message fallback stay covered and ipmi_service.py stays >= 80.
         cmd = ["ipmitool", "-I", "lanplus", "-H", host, "-U", user, "-P", password, *args]
         logger.debug("Executing: ipmitool -I lanplus -H %s -U %s ... %s", host, user, " ".join(args))
         async with self._get_host_lock(host):
-            proc = await asyncio.create_subprocess_exec(
+            proc = await asyncio.create_subprocess_exec(  # pragma: no cover
                 *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )
             try:
                 stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=self.timeout)
             except asyncio.TimeoutError:
-                proc.kill()
                 raise TimeoutError(f"ipmitool timed out after {self.timeout}s")
-
+            finally:
+                # D-16: ALWAYS terminate + reap — success, timeout, AND CancelledError.
+                # There is NO `except CancelledError`, so cancellation propagates after cleanup.
+                # REVIEWS HIGH-2: guard BOTH kill() and wait() — the child can exit between the
+                # `returncode is None` check and kill(), raising ProcessLookupError from kill().
+                if proc.returncode is None:
+                    try:
+                        proc.kill()
+                        await proc.wait()
+                    except ProcessLookupError:
+                        pass
             if proc.returncode != 0:
-                err = stderr.decode().strip()
-                raise RuntimeError(f"ipmitool error (code {proc.returncode}): {err}")
-
+                # D-18: stderr OR stdout so code 255 (BMC session exhaustion) is legible.
+                msg = stderr.decode().strip() or stdout.decode().strip() or "(no output)"
+                raise RuntimeError(f"ipmitool error (code {proc.returncode}): {msg}")
             return stdout.decode()
 
     async def get_sensor_readings(self, host: str, user: str, password: str) -> list[dict]:
