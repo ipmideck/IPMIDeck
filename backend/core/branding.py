@@ -6,7 +6,7 @@ the literal name anywhere — the banner is GENERATED from APP_NAME.
 
 from __future__ import annotations
 
-APP_NAME = "IPMILink"  # 04.2 flips this single line
+APP_NAME = "IPMIDeck"  # 04.2 flips this single line
 VERSION = "2.0.0-alpha.1"
 AUTHOR = "Luigi Tanzillo"
 LICENSE = "ISC"
@@ -18,10 +18,17 @@ def banner(compact: bool = False) -> str:
     module stays import-cheap, but pyfiglet is a DECLARED dependency (pyproject) and MUST
     be importable in normal/Docker envs. A missing pyfiglet is BROKEN PACKAGING, not a
     degrade path — let ImportError propagate (REVIEWS MED: pyfiglet-fails-loud). The only
-    sanctioned runtime-degrade is render_banner_safe() below, tested separately."""
+    sanctioned runtime-degrade is render_banner_safe() below, tested separately.
+
+    The full (non-compact) splash uses the "ansi_shadow" font — the big block banner the
+    operator sees once at launch (matches the GSD-style splash). Its glyphs are Unicode box-
+    drawing/block chars (█ ╗ ═ ║ …), so any caller that PRINTS this to a piped/cp1252 Windows
+    stdout MUST emit it Unicode-safely (see backend.main.print_banner_safe) — a bare print()
+    would raise UnicodeEncodeError under a cp1252-encoded stream. The compact variant keeps a
+    small ASCII figlet; it is only a fallback now that the pinned header uses brand_title()."""
     from pyfiglet import Figlet  # declared dep — propagate ImportError (fail loud)
 
-    fig = Figlet(font="small" if compact else "standard")
+    fig = Figlet(font="small" if compact else "ansi_shadow")
     return fig.renderText(APP_NAME).rstrip("\n")
 
 

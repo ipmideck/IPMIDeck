@@ -90,6 +90,42 @@ def _setup_logging(level: str) -> None:
     )
 
 
+def print_banner_safe(text: str) -> None:
+    """Emit a (possibly Unicode-block) banner to stdout WITHOUT crashing on a non-UTF-8 stream.
+
+    The ANSI Shadow splash (backend.core.branding.banner) is drawn from Unicode block/box chars
+    (█ ╗ ═ ║ ╝ ╚ ╔). On a REAL interactive Windows console Python writes via WriteConsoleW so those
+    print fine, but when stdout is PIPED/redirected on Windows the stream encoding is cp1252 and a
+    bare ``print(text)`` raises UnicodeEncodeError. This helper makes the emission encoding-safe:
+
+      1. Fast path — try a normal ``print(text)``. Succeeds on a UTF-8 stream or a real Win console.
+      2. On UnicodeEncodeError — re-emit the same bytes as UTF-8 directly to the underlying binary
+         buffer (``sys.stdout.buffer``), so the block art survives a cp1252/ascii-encoded pipe.
+      3. If even that is unavailable (no .buffer, closed stream, etc.) — degrade to plain ASCII
+         (render_banner_safe / APP_NAME) so the process NEVER dies just trying to print a banner.
+
+    Import-safe on Linux (pure stdlib, no platform imports) and does nothing to TTY-gating — callers
+    still decide WHEN to emit; this only governs HOW the bytes hit a non-UTF-8 stream.
+    """
+    try:
+        print(text)
+        return
+    except UnicodeEncodeError:
+        pass
+    # cp1252/ascii pipe: write UTF-8 bytes straight to the binary buffer (bypasses the text codec).
+    try:
+        buf = sys.stdout.buffer  # type: ignore[attr-defined]
+        buf.write((text + "\n").encode("utf-8"))
+        buf.flush()
+        return
+    except Exception:
+        # Last-ditch: a plain-ASCII brand so we still announce ourselves without ever crashing.
+        try:
+            print(render_banner_safe())
+        except Exception:
+            print(APP_NAME)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup and shutdown."""
@@ -113,7 +149,10 @@ async def lifespan(app: FastAPI):
     # already shows the banner — so the host TTY never double-prints (REVIEWS MED: no-double-banner).
     # On Docker / non-TTY the flag is unset → the operator gets the banner here.
     if not getattr(app.state, "host_splash_shown", False):
-        print(render_banner_safe())  # render-safe figlet art; Docker logs capture it
+        # render_banner_safe() degrades the figlet on a broken pyfiglet install; print_banner_safe()
+        # degrades the EMISSION on a cp1252/piped stdout (the ANSI Shadow block chars would otherwise
+        # raise UnicodeEncodeError under `docker logs`/redirected non-UTF-8 streams).
+        print_banner_safe(render_banner_safe())  # render-safe figlet art; Docker logs capture it
         logger.info("%s", credits_line())  # credits via logger (INFO — visible by default, D-04)
 
     if config.demo:
@@ -579,7 +618,9 @@ def cli():
             # app.state gate so lifespan (Task 1) skips its banner → no double banner.
             from backend.core.branding import banner, credits_line
 
-            print(banner())
+            # banner() is the big ANSI Shadow splash (Unicode block art); print_banner_safe()
+            # guarantees it never raises UnicodeEncodeError if this TTY's stdout is a cp1252 pipe.
+            print_banner_safe(banner())
             print(credits_line())
             app.state.host_splash_shown = True
 

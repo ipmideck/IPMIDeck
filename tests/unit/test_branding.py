@@ -22,8 +22,24 @@ def test_brand_constants_present_and_nonempty():
         val = getattr(branding, name)
         assert isinstance(val, str), f"{name} must be a str"
         assert val.strip(), f"{name} must be non-empty"
-    # Name stays "IPMILink" this phase (04.2 flips APP_NAME).
-    assert branding.APP_NAME == "IPMILink"
+    # 04.1 console/backend rename: the single brand constant now reads "IPMIDeck" (the web UI /
+    # package name / logger namespaces stay "ipmilink" until the full 04.2 rebrand).
+    assert branding.APP_NAME == "IPMIDeck"
+
+
+def test_full_banner_is_ansi_shadow_block_art():
+    """The launch splash (non-compact banner) is rendered in the ANSI Shadow font — i.e. it is the
+    big Unicode block-art banner (█ glyphs), not the small ASCII figlet. Generated from APP_NAME."""
+    art = branding.banner()
+    assert "█" in art, "full banner should use ANSI Shadow block glyphs (█)"
+    assert art.count("\n") >= 4, "ANSI Shadow art spans several rows"
+
+
+def test_brand_title_reflects_app_name_and_version():
+    """The 1-line pinned-header helper sources from APP_NAME/VERSION (the rename flows through it)."""
+    assert branding.brand_title(compact=True) == f"{branding.APP_NAME} v{branding.VERSION}"
+    assert branding.APP_NAME in branding.brand_title(compact=True)
+    assert branding.APP_NAME in branding.brand_title(compact=False)
 
 
 def test_app_title_and_version_source_from_branding():
