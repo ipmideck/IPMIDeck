@@ -9,6 +9,7 @@ import logging
 import signal
 import sys
 import threading
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -27,6 +28,16 @@ from backend.core.modules import ModuleLoader
 from backend.core.websocket import WebSocketManager
 
 logger = logging.getLogger("ipmilink")
+
+# === D-02: launch-splash dwell ===
+# The big ANSI Shadow splash is printed once on the interactive/TTY path, immediately before the
+# render thread enters rich Live(screen=True) — which switches to the ALTERNATE screen buffer and
+# instantly hides whatever was on the normal buffer. Without a brief pause the operator never sees
+# the big banner (only the compact pinned header). We sleep SPLASH_SECONDS after emitting the
+# splash + credits and BEFORE starting the render thread so "splash grande poi compatto" (D-02)
+# actually happens. TTY path ONLY — the non-TTY/Docker path (D-07/D-21) emits the banner once and
+# NEVER sleeps (startup must not be delayed for headless/piped/systemd).
+SPLASH_SECONDS = 1.5
 
 # === D-18: idempotent Windows-proactor ConnectionResetError suppression ===
 # On Windows the ProactorEventLoop logs a full ConnectionResetError traceback when a WS/HTTP
@@ -623,6 +634,11 @@ def cli():
             print_banner_safe(banner())
             print(credits_line())
             app.state.host_splash_shown = True
+
+            # D-02: dwell on the big splash before rich Live (alternate screen) hides it, so the
+            # operator actually sees "splash grande poi compatto". TTY path only — the non-TTY
+            # branch below never reaches this sleep (D-07/D-21: banner once, no startup delay).
+            time.sleep(SPLASH_SECONDS)
 
             cur_level = (early_cfg.logging.level.upper() if early_cfg is not None else "INFO")
             scheme = "https" if (early_cfg is not None and early_cfg.server.https) else "http"

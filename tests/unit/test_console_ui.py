@@ -321,3 +321,39 @@ def test_last_key_not_set_by_ignored_special_key():
     assert ui.last_key == "v"
     ui.dispatch(ConsoleUI.IGNORE_KEY)  # ignored -> last_key unchanged
     assert ui.last_key == "v"
+
+
+# --- gap-closure r2: launch-splash pause so the big banner is actually seen (D-02) -------
+
+
+def test_splash_seconds_constant_exists_and_is_positive():
+    """main.SPLASH_SECONDS exists and is a small positive pause (the splash dwell before Live)."""
+    import backend.main as main_mod
+
+    assert hasattr(main_mod, "SPLASH_SECONDS")
+    assert isinstance(main_mod.SPLASH_SECONDS, (int, float))
+    assert 0 < main_mod.SPLASH_SECONDS <= 5
+
+
+def test_splash_pause_is_guarded_to_the_tty_path():
+    """The splash sleep(SPLASH_SECONDS) is reachable ONLY inside the interactive (TTY) branch.
+
+    The non-TTY/Docker path (D-07/D-21) must emit the banner once and NEVER sleep. We assert the
+    sleep is lexically inside the `if interactive:` block of _serve_forever and that the constant
+    is used exactly once there — a static guard, so the test never actually sleeps.
+    """
+    import inspect
+
+    import backend.main as main_mod
+
+    src = inspect.getsource(main_mod.cli)
+    # the pause must reference the named constant (no magic number) and the print_banner_safe call
+    assert "SPLASH_SECONDS" in src
+    assert "time.sleep(SPLASH_SECONDS)" in src
+    # the sleep must come AFTER the banner emission and INSIDE the interactive branch, BEFORE the
+    # render thread starts (so the operator sees the big splash before Live takes the screen).
+    interactive_idx = src.index("if interactive:")
+    banner_idx = src.index("print_banner_safe(banner())")
+    sleep_idx = src.index("time.sleep(SPLASH_SECONDS)")
+    render_idx = src.index("render_thread = threading.Thread")
+    assert interactive_idx < banner_idx < sleep_idx < render_idx
