@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import WebSocket
@@ -24,10 +25,28 @@ class WebSocketManager:
         self._last_sensor: dict[str, dict[str, Any]] = {}
         self._last_power: dict[str, dict[str, Any]] = {}
         self._last_fanpilot: dict[str, dict[str, Any]] = {}
+        # Per-connection metadata (D-19): remote IP + connect timestamp (+ handshake
+        # User-Agent) keyed by the ws object. Feeds the console pinned-header client
+        # count and the connected-sessions sub-view. Console-only — no web route.
+        self._session_meta: dict[WebSocket, dict[str, Any]] = {}
 
     async def connect(self, ws: WebSocket) -> None:
         await ws.accept()
         self._connections.append(ws)
+        # Capture per-connection metadata (D-19). ws.client is a starlette Address
+        # (.host/.port) but may be None on some transports — guard the host read.
+        client = getattr(ws, "client", None)
+        ip = getattr(client, "host", None) or "unknown"
+        ua = ""
+        try:
+            ua = ws.headers.get("user-agent", "") or ""
+        except Exception:
+            ua = ""
+        self._session_meta[ws] = {
+            "ip": ip,
+            "connected_at": datetime.now(timezone.utc),
+            "user_agent": ua,
+        }
         logger.info("WebSocket connected (%d total)", len(self._connections))
         await self._send_snapshot(ws)
 
@@ -50,7 +69,27 @@ class WebSocketManager:
     def disconnect(self, ws: WebSocket) -> None:
         if ws in self._connections:
             self._connections.remove(ws)
+        self._session_meta.pop(ws, None)
         logger.info("WebSocket disconnected (%d remaining)", len(self._connections))
+
+    def sessions(self) -> list[dict]:
+        """Console-only snapshot of live WS clients (D-19): IP + connected-since + UA.
+
+        Returns fresh dicts (never the internal _session_meta entries — REVIEWS LOW) so
+        a caller mutating a row cannot corrupt manager state. Ordered to match the live
+        connection order so the sub-view is stable.
+        """
+        out: list[dict] = []
+        for ws in self._connections:
+            meta = self._session_meta.get(ws)
+            if not meta:
+                continue
+            out.append({
+                "ip": meta["ip"],
+                "connected_since": meta["connected_at"].isoformat(),
+                "user_agent": meta["user_agent"],
+            })
+        return out
 
     async def broadcast(self, message: dict[str, Any]) -> None:
         if not self._connections:
