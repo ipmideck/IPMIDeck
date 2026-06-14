@@ -42,3 +42,32 @@ def test_deque_log_handler_appends():
     handler.emit(record)
     assert len(log_lines) == 1
     assert log_lines[0] == "INFO hello console"
+
+
+def test_key_listener_logs_on_read_key_exception(monkeypatch, caplog):
+    """start_key_listener LOGS a read_key() exception before the thread exits (no silent death).
+
+    The original inner loop did `except Exception: return`, killing the daemon key thread with no
+    trace. A future getwch()/termios failure must leave a diagnosable warning, not vanish silently.
+    """
+    import threading
+
+    import backend.console as console_mod
+
+    def _boom() -> str:
+        raise RuntimeError("getwch exploded")
+
+    monkeypatch.setattr(console_mod, "read_key", _boom)
+
+    stop_event = threading.Event()
+    dispatched: list = []
+    with caplog.at_level(logging.WARNING, logger="ipmilink.console"):
+        t = console_mod.start_key_listener(
+            loop=None, dispatch=dispatched.append, stop_event=stop_event
+        )
+        t.join(timeout=2.0)
+
+    assert not t.is_alive()  # the thread exited (did not hang)
+    assert dispatched == []  # the exploding read never dispatched a key
+    # the exception was logged (not silently swallowed) — message names the failure
+    assert any("getwch exploded" in r.getMessage() or r.exc_info for r in caplog.records)

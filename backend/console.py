@@ -33,6 +33,17 @@ import threading
 from collections import deque
 from datetime import datetime, timezone  # noqa: F401  (imported for handler/UI timestamp use)
 
+logger = logging.getLogger("ipmilink.console")
+
+# Sentinel returned by read_key() for a consumed special key (Windows arrow/function/nav, where
+# msvcrt.getwch() yields a '\x00'/'\xe0' prefix + a scan code). dispatch() treats it as a no-op so
+# arrow keys never collide with a real binding or surface as a confusing unknown-key event.
+IGNORE_KEY = "\x00__IGNORE__"
+
+# msvcrt.getwch() returns one of these as a PREFIX byte for an extended (non-printable) key; the
+# very next getwch() returns the scan code that identifies the actual key. We consume both.
+_WIN_EXTENDED_PREFIXES = ("\x00", "\xe0")
+
 
 def port_in_use(host: str, port: int) -> bool:
     """Return True if ``port`` is already bound/listening on ``host`` (D-17).
@@ -60,13 +71,20 @@ def read_key() -> str | None:
 
     The keypress backend is imported INSIDE this function so the module stays import-safe on Linux
     (an unconditional module-level ``import msvcrt`` would crash the Linux container at import).
-    Returns the character read, or None if no keypress backend is available (e.g. a stripped POSIX
-    image without termios).
+    Returns the character read, ``IGNORE_KEY`` for a consumed special key (Windows arrow/function/
+    nav — a two-call '\\x00'/'\\xe0' prefix + scan-code sequence), or None if no keypress backend is
+    available (e.g. a stripped POSIX image without termios).
     """
     if sys.platform == "win32":
         import msvcrt  # guarded: Windows-only (D-23)
 
-        return msvcrt.getwch()  # getwch = unicode, no echo
+        ch = msvcrt.getwch()  # getwch = unicode, no echo
+        if ch in _WIN_EXTENDED_PREFIXES:
+            # Extended key (arrow/F-key/nav): consume the follow-up scan code so it is NOT
+            # dispatched as a stray, possibly-colliding event, and return the ignore sentinel.
+            msvcrt.getwch()
+            return IGNORE_KEY
+        return ch
     else:
         try:
             import termios
@@ -108,6 +126,9 @@ def start_key_listener(
             try:
                 k = read_key()
             except Exception:
+                # Log before exiting so a future getwch()/termios failure is diagnosable instead
+                # of the daemon key thread dying silently (no trace, "no key works").
+                logger.exception("Key listener stopped: read_key() raised")
                 return
             if k is None:
                 return
@@ -151,8 +172,11 @@ class ConsoleUI:
     verbosity (starting at INFO per D-04), and run the D-15d change-bind-host/port flow.
 
     SCROLLBACK / HANDLER tradeoffs are documented in the module docstring (Pitfall 1 / Pitfall 6).
-    NOTE (REVIEWS LOW): the header is a fixed size; if a figlet font + help bar overflows a narrow
-    terminal the compact banner is used and the help bar is allowed to wrap.
+    NOTE (REVIEWS LOW / 04.1-04 clipping fix): the pinned header uses a SINGLE-LINE brand
+    (brand_title), NOT the multi-line figlet — the big figlet is the one-time launch splash only
+    (main.py). The header is a fixed HEADER_SIZE rows sized for brand + help bar + status + credits
+    so none of those is ever clipped; on a narrow terminal the help bar WRAPS (overflow="fold")
+    rather than truncating.
 
     Callback-driven so it never imports backend.main — Plan 04 passes the real implementations:
       get_url()           -> dashboard address scheme://host:port (D-15a)
@@ -162,6 +186,16 @@ class ConsoleUI:
       on_set_verbosity(l) -> apply_log_level + persist the chosen level (D-11/D-25)
       on_change_bind(h,p) -> persist host/port + "restart required" (D-15d)
     """
+
+    # Re-exported so callers/tests reference the sentinel via the class (ConsoleUI.IGNORE_KEY).
+    IGNORE_KEY = IGNORE_KEY
+
+    # Fixed height of the pinned-header Layout region, in rows. Sized for the COMPACT header at an
+    # 80-col terminal: 1 brand + up-to-2 wrapped help-bar rows (9 key hints exceed 76 interior
+    # cols and legitimately wrap) + 1 status + 1 credits = 5 content rows, + 2 panel-border rows.
+    # The big multi-line figlet is NOT in the header (it is the one-time splash in main.py), so
+    # this size never clips the help bar / status / credits (the 04.1-04 clipping regression).
+    HEADER_SIZE = 7
 
     def __init__(
         self,
@@ -185,16 +219,19 @@ class ConsoleUI:
         self.verbosity = verbosity  # D-04: default/quiet == INFO
         self.log_lines: deque = deque(maxlen=max_log_lines)
         self.view = "log"  # "log" | "sessions" | "servers"
+        self.last_key: str | None = None  # last ACTIONABLE key, shown in the header for feedback
         self._stop = threading.Event()
         self._log_handler: logging.Handler | None = None
 
         # Lazy-import rich so the module stays import-safe on Linux (D-23). The Layout is built
-        # once: a fixed-size top header + a flexing body (D-01).
+        # once: a fixed-size top header + a flexing body (D-01). HEADER_SIZE is sized for the
+        # COMPACT (single-line-brand) header so the help bar/status/credits are never clipped.
         from rich.layout import Layout
 
         self.layout = Layout()
         self.layout.split_column(
-            Layout(name="header", size=8),  # banner + help bar + status (fixed, never scrolls)
+            # brand + help bar + status + credits (fixed, never scrolls); compact, no figlet
+            Layout(name="header", size=self.HEADER_SIZE),
             Layout(name="body"),  # log tail OR a sub-view table (flexes)
         )
 
@@ -225,20 +262,55 @@ class ConsoleUI:
     # --- rendering -------------------------------------------------------------------------
 
     def render_header(self):
-        """Build the pinned header: compact banner + help/shortcut bar + status + credits (D-01/D-02/D-10)."""
+        """Build the pinned header: compact brand + help/shortcut bar + status + credits (D-01/D-02/D-10).
+
+        Uses a SINGLE-LINE brand (brand_title) — NOT the multi-line figlet — so the help bar,
+        status and credits below it are ALWAYS visible inside HEADER_SIZE rows (the 04.1-04
+        clipping fix). The big figlet stays the one-time launch splash (main.py). Key hints in the
+        help bar are bracket-escaped so '[v]'/'[q]' render literally instead of being eaten as rich
+        markup; colours are added with rich markup (D-02/D-05) and degrade to monochrome
+        automatically when the terminal lacks colour or NO_COLOR is set.
+        """
+        from rich.markup import escape
         from rich.panel import Panel
+        from rich.text import Text
 
-        from backend.core.branding import banner, credits_line
+        from backend.core.branding import AUTHOR, LICENSE, VERSION, brand_title
 
-        help_bar = (
-            "[v] verbosity  [c] sessions  [s] servers  [u] url  "
-            "[g] update  [b] change bind  [r] restart  [q] quit  [ESC] back"
+        # Brand as a single coloured line (no newlines) — the compact header (D-02).
+        brand = f"[bold cyan]{escape(brand_title(compact=True))}[/bold cyan]"
+
+        # Bracket-escape the key hints so '[v]' etc. survive rich markup; colour only the keys.
+        keys = [
+            ("v", "verbosity"),
+            ("c", "sessions"),
+            ("s", "servers"),
+            ("u", "url"),
+            ("g", "update"),
+            ("b", "change bind"),
+            ("r", "restart"),
+            ("q", "quit"),
+            ("ESC", "back"),
+        ]
+        help_bar = "  ".join(
+            f"[bold yellow]{escape(f'[{k}]')}[/bold yellow] {escape(label)}" for k, label in keys
         )
+
+        last = self.last_key if self.last_key is not None else "-"
         status = (
-            f"Verbosity: {self.verbosity} | Clients: {self.ws_manager.connection_count}"
+            f"[dim]Verbosity:[/dim] [green]{escape(self.verbosity)}[/green]  "
+            f"[dim]|[/dim]  [dim]Clients:[/dim] {self.ws_manager.connection_count}  "
+            f"[dim]|[/dim]  [dim]last:[/dim] [magenta]{escape(str(last))}[/magenta]"
         )
-        body = "\n".join([banner(compact=True), "", help_bar, status, credits_line()])
-        return Panel(body, title="IPMILink")
+        # Compact one-line credits for the PINNED header (the full credits_line() incl. the long
+        # repo URL is shown once in the launch splash — main.py — where it has the full width).
+        credits = f"[dim]{escape(f'{AUTHOR} · v{VERSION} · {LICENSE}')}[/dim]"
+
+        body = Text.from_markup("\n".join([brand, help_bar, status, credits]))
+        # no_wrap=False (default) so the help bar WRAPS rather than truncates on a narrow terminal
+        # (REVIEWS LOW: graceful degrade); overflow="fold" keeps every char reachable.
+        body.overflow = "fold"
+        return Panel(body, title=Text.from_markup("[bold]Console[/bold]"))
 
     def render_body(self):
         """Render the body for the active view: the log tail, the sessions table, or the server table."""
@@ -315,7 +387,16 @@ class ConsoleUI:
           r   -> clean in-process restart (D-15c)
           q   -> if in a sub-view, return to the log view; else clean exit (D-03/D-12)
           ESC -> same as q for sub-views (D-03)
+
+        Special keys consumed by read_key() arrive as IGNORE_KEY (or None on a backend-less host)
+        and are a NO-OP: they neither fire a callback nor touch the last-key feedback (so an arrow
+        key never masquerades as an actionable press). Every ACTIONABLE key updates last_key so the
+        operator gets immediate visible confirmation in the header status line (04.1-04 fix).
         """
+        # Ignore consumed special keys / no-key reads — never collide with a real binding.
+        if key is None or key == IGNORE_KEY:
+            return
+
         from backend.core.branding import VERSION
         from backend.core.logging_util import next_level
 
@@ -342,6 +423,9 @@ class ConsoleUI:
                 self.view = "log"
             else:
                 self.on_exit()
+
+        # Visible feedback: record the actionable key for the header status line (04.1-04).
+        self.last_key = key
 
     # --- lifecycle -------------------------------------------------------------------------
 
