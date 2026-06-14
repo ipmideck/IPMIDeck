@@ -246,6 +246,12 @@ class ConsoleUI:
         self.verbosity = verbosity  # D-04: default/quiet == INFO
         self.log_lines: deque = deque(maxlen=max_log_lines)
         self.view = "log"  # "log" | "sessions" | "servers"
+        # D-15d keystroke-driven bind editor (replaces the loop-blocking input() prompt):
+        #   input_mode is None normally, "bind" while editing the host:port; input_buffer holds the
+        #   chars typed so far. dispatch() routes keys to the buffer while input_mode is set so the
+        #   editor reuses the EXISTING key listener and NEVER calls input() on the loop thread.
+        self.input_mode: str | None = None  # None | "bind"
+        self.input_buffer: str = ""
         self.last_key: str | None = None  # last ACTIONABLE key, shown in the header for feedback
         self._stop = threading.Event()
         self._log_handler: logging.Handler | None = None
@@ -324,11 +330,21 @@ class ConsoleUI:
         )
 
         last = self.last_key if self.last_key is not None else "-"
-        status = (
-            f"[dim]Verbosity:[/dim] [green]{escape(self.verbosity)}[/green]  "
-            f"[dim]|[/dim]  [dim]Clients:[/dim] {self.ws_manager.connection_count}  "
-            f"[dim]|[/dim]  [dim]last:[/dim] [magenta]{escape(str(last))}[/magenta]"
-        )
+        # While the D-15d bind editor is active, the status row becomes a live entry prompt that
+        # shows the host:port format, how to confirm/cancel, and the current buffer — so the
+        # operator gets visible feedback for every keystroke (the editor reuses the key listener).
+        if self.input_mode == "bind":
+            status = (
+                "[bold yellow]Enter new bind as host:port[/bold yellow]  "
+                "[dim](Enter=confirm, ESC=cancel, Backspace=del):[/dim] "
+                f"[cyan]{escape(self.input_buffer)}[/cyan]"
+            )
+        else:
+            status = (
+                f"[dim]Verbosity:[/dim] [green]{escape(self.verbosity)}[/green]  "
+                f"[dim]|[/dim]  [dim]Clients:[/dim] {self.ws_manager.connection_count}  "
+                f"[dim]|[/dim]  [dim]last:[/dim] [magenta]{escape(str(last))}[/magenta]"
+            )
         # Compact one-line credits for the PINNED header (the full credits_line() incl. the long
         # repo URL is shown once in the launch splash — main.py — where it has the full width).
         credits = f"[dim]{escape(f'{AUTHOR} · v{VERSION} · {LICENSE}')}[/dim]"
@@ -373,32 +389,69 @@ class ConsoleUI:
 
     # --- interaction -----------------------------------------------------------------------
 
-    def prompt_bind(self) -> tuple[str, int] | None:
-        """D-15d input flow: read a host + port from stdin and validate (run() suspends Live around this).
+    @staticmethod
+    def parse_bind(buffer: str) -> tuple[str, int] | None:
+        """Pure parse+validate of a 'host:port' buffer for the D-15d editor (stdin-free, testable).
 
-        Plain input() is acceptable because run() already gated on a TTY (D-24). Validation is
-        delegated to the pure _validate_bind() helper so the logic is unit-testable without stdin.
+        Splits on the LAST ':' (so IPv6-ish hosts and hostnames with no colon both behave sanely),
+        requires BOTH a host and a port to be present, then delegates to _validate_bind(). Returns
+        (host, port) on success, None on any malformed/empty/out-of-range input.
         """
-        try:
-            host = input("New bind host: ")
-            port_str = input("New bind port: ")
-        except (EOFError, KeyboardInterrupt):
-            self._push_log("Change bind cancelled")
+        if ":" not in buffer:
             return None
-        result = self._validate_bind(host, port_str)
-        if result is None:
-            self._push_log("Invalid host/port — change cancelled")
-            return None
-        return result
+        host, _, port_str = buffer.rpartition(":")
+        return ConsoleUI._validate_bind(host, port_str)
 
-    def _do_change_bind(self) -> None:
-        """Seam for the 'b' key: prompt + validate + invoke on_change_bind (monkeypatched in tests)."""
-        result = self.prompt_bind()
+    def _enter_bind_edit(self) -> None:
+        """Enter the keystroke-driven bind editor (key 'b'): flip input_mode, clear the buffer.
+
+        Deliberately does NO blocking I/O — it only sets state. While input_mode == "bind" the
+        normal action keys are suspended and dispatch() routes each keypress to input_buffer, so
+        the existing key listener drives the edit and the asyncio loop thread is NEVER blocked
+        (the old input()-based prompt blocked the loop and fought the key thread → console freeze).
+        """
+        self.input_mode = "bind"
+        self.input_buffer = ""
+
+    def _cancel_input(self) -> None:
+        """Leave any input mode without committing (ESC) — clears the editor state."""
+        self.input_mode = None
+        self.input_buffer = ""
+
+    def _commit_bind(self) -> None:
+        """Confirm the bind editor (Enter): parse the buffer, apply on success, then exit edit mode.
+
+        On a valid 'host:port' it calls on_change_bind(host, port) and pushes the existing
+        "restart required" confirmation; on invalid input it pushes "Invalid host/port" and the
+        callback is NOT called. Either way the editor state is cleared (no lingering buffer).
+        """
+        result = self.parse_bind(self.input_buffer)
         if result is None:
+            self._push_log(f"Invalid host/port '{self.input_buffer}' — change cancelled")
+            self._cancel_input()
             return
         host, port = result
         self.on_change_bind(host, port)
         self._push_log(f"Bind set to {host}:{port} — restart required to apply (press r)")
+        self._cancel_input()
+
+    def _dispatch_input(self, key: str) -> None:
+        """Route a keypress to the active input editor (currently only the D-15d bind editor).
+
+        Enter ('\\r'/'\\n') confirms, ESC ('\\x1b') cancels, Backspace ('\\x08'/'\\x7f') deletes the
+        last char, and any other single printable char appends to the buffer. The IGNORE_KEY
+        sentinel / None are filtered by dispatch() before we get here, so an arrow key never
+        corrupts the buffer. No branch performs a blocking call — this all runs on the loop thread.
+        """
+        if key in ("\r", "\n"):
+            self._commit_bind()
+        elif key == "\x1b":  # ESC
+            self._cancel_input()
+        elif key in ("\x08", "\x7f"):  # Backspace / Delete
+            self.input_buffer = self.input_buffer[:-1]
+        elif len(key) == 1 and key.isprintable():
+            self.input_buffer += key
+        # anything else (stray control char) is ignored — never blocks, never corrupts the buffer
 
     def dispatch(self, key: str) -> None:
         """Map an action key to its behavior (D-03/D-11/D-13/D-14/D-15a/b/c/d).
@@ -410,18 +463,31 @@ class ConsoleUI:
           u   -> push the dashboard URL into the log (D-15a)
           g   -> update-check STUB: print the local version + "ships with the pip release", NO
                  network call (D-13)
-          b   -> change-bind-host/port flow (D-15d)
+          b   -> enter the keystroke-driven change-bind editor (D-15d) — NOT a blocking input()
           r   -> clean in-process restart (D-15c)
           q   -> if in a sub-view, return to the log view; else clean exit (D-03/D-12)
           ESC -> same as q for sub-views (D-03)
 
+        While input_mode is set (the D-15d bind editor), keys are routed to the editor buffer via
+        _dispatch_input() instead of the action map, and dispatch() returns early — so typing a
+        host:port never triggers an action and no branch ever performs a blocking call on the loop
+        thread (the old input() prompt blocked the loop and fought the key thread → console freeze).
+
         Special keys consumed by read_key() arrive as IGNORE_KEY (or None on a backend-less host)
-        and are a NO-OP: they neither fire a callback nor touch the last-key feedback (so an arrow
-        key never masquerades as an actionable press). Every ACTIONABLE key updates last_key so the
-        operator gets immediate visible confirmation in the header status line (04.1-04 fix).
+        and are a NO-OP: they neither fire a callback, feed the input buffer, nor touch the last-key
+        feedback (so an arrow key never masquerades as an actionable press). Every ACTIONABLE key
+        updates last_key so the operator gets immediate visible confirmation in the header status
+        line (04.1-04 fix).
         """
-        # Ignore consumed special keys / no-key reads — never collide with a real binding.
+        # Ignore consumed special keys / no-key reads — never collide with a real binding (or
+        # corrupt the bind-edit buffer). This guard stays first so IGNORE_KEY is inert everywhere.
         if key is None or key == IGNORE_KEY:
+            return
+
+        # While an input editor is active (D-15d bind edit) every key feeds the buffer, NOT the
+        # action map — and we return early so no action fires while typing. No blocking call.
+        if self.input_mode is not None:
+            self._dispatch_input(key)
             return
 
         from backend.core.branding import VERSION
@@ -449,7 +515,8 @@ class ConsoleUI:
                 f"Current version {VERSION}. Online update check ships with the pip release."
             )
         elif key == "b":
-            self._do_change_bind()
+            # D-15d: enter the keystroke-driven bind editor (no input(), never blocks the loop).
+            self._enter_bind_edit()
         elif key == "r":
             self.on_restart()
         elif key in ("q", "\x1b"):

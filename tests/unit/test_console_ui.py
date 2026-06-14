@@ -172,21 +172,132 @@ def test_validate_bind_accepts_good_and_rejects_bad():
     assert ConsoleUI._validate_bind("h", "abc") is None
 
 
-def test_change_bind_dispatch_calls_callback(monkeypatch):
-    """dispatch('b') prompts, then calls on_change_bind + logs 'restart required' (D-15d)."""
+# --- gap-closure r2: keystroke-driven bind-edit mode (no input(), no loop block) ---------
+
+
+def test_b_enters_bind_edit_mode_without_input(monkeypatch):
+    """dispatch('b') enters keystroke-driven bind-edit mode and NEVER calls input() (no loop block).
+
+    The old input()-based prompt blocked the asyncio loop thread (the console froze). The new
+    editor reuses the existing key listener: 'b' just flips input_mode -> 'bind'; no blocking call.
+    """
+    import builtins
+
+    def _boom(*_a, **_k):
+        raise AssertionError("input() must never be called on the loop thread (freeze regression)")
+
+    monkeypatch.setattr(builtins, "input", _boom)
     ui, calls = _make_ui()
-    monkeypatch.setattr(ui, "prompt_bind", lambda: ("0.0.0.0", 8099))
     ui.dispatch("b")
-    assert calls["change_bind"] == [("0.0.0.0", 8099)]
+    assert ui.input_mode == "bind"
+    assert ui.input_buffer == ""
+    assert calls["change_bind"] == []  # nothing committed yet — still editing
+
+
+def test_bind_edit_buffers_printable_chars():
+    """While in bind-edit mode printable chars append to the buffer (routed away from actions)."""
+    ui, calls = _make_ui()
+    ui.dispatch("b")
+    for ch in "0.0.0.0:8100":
+        ui.dispatch(ch)
+    assert ui.input_buffer == "0.0.0.0:8100"
+    # the buffered chars must NOT have fired any action (e.g. the '.' / digits / ':' are inert here)
+    assert calls["set_verbosity"] == []
+    assert calls["exit"] == []
+    assert ui.view == "log"
+
+
+def test_bind_edit_backspace_deletes_last_char():
+    """Backspace (\\x08 or \\x7f) deletes the last buffered char in bind-edit mode."""
+    ui, _ = _make_ui()
+    ui.dispatch("b")
+    for ch in "127.0.0.1":
+        ui.dispatch(ch)
+    ui.dispatch("\x08")
+    assert ui.input_buffer == "127.0.0."
+    ui.dispatch("\x7f")
+    assert ui.input_buffer == "127.0.0"
+
+
+def test_bind_edit_enter_commits_valid_bind_and_exits():
+    """Enter with a valid 'host:port' calls on_change_bind(host, port), logs 'restart required',
+    and exits input mode (D-15d) — all via keystrokes, no input()."""
+    ui, calls = _make_ui()
+    ui.dispatch("b")
+    for ch in "0.0.0.0:8100":
+        ui.dispatch(ch)
+    ui.dispatch("\r")
+    assert calls["change_bind"] == [("0.0.0.0", 8100)]
     assert "restart required" in ui.log_lines[-1]
+    assert ui.input_mode is None
+    assert ui.input_buffer == ""
 
 
-def test_change_bind_dispatch_cancelled_does_not_call_callback(monkeypatch):
-    """If prompt_bind returns None (invalid/cancelled), on_change_bind is NOT called (D-15d)."""
+def test_bind_edit_enter_newline_variant_commits():
+    """A '\\n' Enter variant also commits (some terminals deliver newline, not carriage return)."""
     ui, calls = _make_ui()
-    monkeypatch.setattr(ui, "prompt_bind", lambda: None)
     ui.dispatch("b")
+    for ch in "127.0.0.1:9000":
+        ui.dispatch(ch)
+    ui.dispatch("\n")
+    assert calls["change_bind"] == [("127.0.0.1", 9000)]
+    assert ui.input_mode is None
+
+
+def test_bind_edit_esc_cancels_without_callback():
+    """ESC cancels bind-edit: input_mode/buffer cleared and on_change_bind NOT called (D-15d)."""
+    ui, calls = _make_ui()
+    ui.dispatch("b")
+    for ch in "0.0.0.0:8100":
+        ui.dispatch(ch)
+    ui.dispatch("\x1b")
     assert calls["change_bind"] == []
+    assert ui.input_mode is None
+    assert ui.input_buffer == ""
+
+
+def test_bind_edit_invalid_buffer_does_not_call_callback():
+    """Enter with an invalid buffer (bad/missing port) does NOT call on_change_bind."""
+    ui, calls = _make_ui()
+    ui.dispatch("b")
+    for ch in "0.0.0.0:abc":
+        ui.dispatch(ch)
+    ui.dispatch("\r")
+    assert calls["change_bind"] == []
+    assert any("Invalid" in line for line in ui.log_lines)
+
+
+def test_bind_edit_no_colon_is_invalid():
+    """A buffer with no ':' separator is invalid (host:port required) — no callback."""
+    ui, calls = _make_ui()
+    ui.dispatch("b")
+    for ch in "127.0.0.1":
+        ui.dispatch(ch)
+    ui.dispatch("\r")
+    assert calls["change_bind"] == []
+
+
+def test_bind_edit_header_shows_prompt():
+    """While editing, the header surfaces an entry prompt with the current buffer (visible feedback)."""
+    ui, _ = _make_ui()
+    ui.dispatch("b")
+    for ch in "0.0.0.0":
+        ui.dispatch(ch)
+    out = _render_header_text(ui, width=80)
+    assert "0.0.0.0" in out  # the live buffer is shown
+    # a hint that we are in entry mode (host:port + how to confirm/cancel)
+    assert "host:port" in out
+
+
+def test_bind_edit_ignores_special_key_sentinel():
+    """An IGNORE_KEY (arrow/function) inside bind-edit mode is a no-op (does not corrupt the buffer)."""
+    ui, _ = _make_ui()
+    ui.dispatch("b")
+    ui.dispatch("1")
+    ui.dispatch(ConsoleUI.IGNORE_KEY)
+    ui.dispatch("2")
+    assert ui.input_buffer == "12"
+    assert ui.input_mode == "bind"
 
 
 def test_restart_dispatch_calls_callback():
