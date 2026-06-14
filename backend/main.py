@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import getpass
 import logging
 import signal
 import sys
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -52,6 +54,19 @@ def _silence_proactor_connreset() -> None:
 
     _ProactorBasePipeTransport._call_connection_lost = _wrap
     _PROACTOR_PATCHED = True
+
+
+class _NoSignalServer(uvicorn.Server):
+    """Embedded uvicorn server that does NOT install its own signal handlers (D-08).
+
+    cli() runs this on the main thread via asyncio.run() alongside the interactive console.
+    We own SIGINT/SIGTERM in cli() so a Ctrl+C / docker stop flips server.should_exit (lifespan
+    shutdown runs → fans restored) instead of uvicorn pre-empting the teardown. Overriding
+    install_signal_handlers() to a no-op is the documented pattern (RESEARCH Pattern 3).
+    """
+
+    def install_signal_handlers(self) -> None:  # noqa: D401 — we own SIGINT/SIGTERM
+        pass
 
 
 # === Global app state (set during lifespan) ===
@@ -368,13 +383,112 @@ def cli():
     app.state.effective_host = effective_host
     app.state.effective_port = effective_port
 
-    # === FIX-03 layer 2: belt-and-suspenders signal handlers ===
-    # Uvicorn installs its own SIGTERM/SIGINT handlers when it boots and triggers
-    # the lifespan shutdown (which restores fans via fanpilot_shutdown — layer 1).
-    # These handlers ONLY fire if uvicorn never reaches that stage (e.g., bind error,
-    # config load error). They log+exit so the OS doesn't terminate uncleanly.
-    # The actual safety net for kill -9 / power loss is the startup recovery query
-    # in fanpilot/tasks.py:fanpilot_loop (layer 3).
+    # ============================================================================
+    # BIND PRECEDENCE (documented contract — D-15d correction):
+    #   effective_host/port (computed above) = explicit CLI flag > config (env >
+    #   yaml > hardcoded). config itself already applies IPMILINK_SERVER_HOST/PORT
+    #   over yaml (see config._apply_env_overrides). So a value persisted to
+    #   config.yaml by the menu's change-bind action (D-15d) is OVERRIDDEN by an
+    #   env var or a CLI --host/--port on the next boot — env/CLI always win. The
+    #   Docker bind is unaffected: the container's CMD passes --host/--port argv
+    #   and never executes cli(), so a bad persisted config value cannot break it.
+    # ============================================================================
+
+    # === --reload dev fast path (REVIEWS MED) ===
+    # --reload needs uvicorn's own process supervisor (a reloader parent process),
+    # which is incompatible with the embedded uvicorn.Server/Config model below.
+    # When --reload is requested we fall back to the ORIGINAL uvicorn.run(reload=True)
+    # path and SKIP the console entirely: no port guard rewrite, no _NoSignalServer,
+    # no key listener. --reload is dev-only and intentionally bypasses the interactive
+    # console + single-instance guard.
+    if args.reload:
+        uvicorn_kwargs = dict(
+            host=effective_host, port=effective_port, reload=True, log_level="info"
+        )
+        if early_cfg is not None and early_cfg.server.https:
+            if not early_cfg.server.cert_file or not early_cfg.server.key_file:
+                print(
+                    "WARNING: server.https=true but cert_file/key_file are not set in config.yaml; "
+                    "run `ipmilink --gen-cert` first. Starting over plain HTTP.",
+                    file=sys.stderr,
+                )
+            else:
+                uvicorn_kwargs["ssl_certfile"] = early_cfg.server.cert_file
+                uvicorn_kwargs["ssl_keyfile"] = early_cfg.server.key_file
+        uvicorn.run("backend.main:app", **uvicorn_kwargs)
+        return
+
+    # Lazy import (E402-clean): the console module is the high-risk rich/keypress
+    # surface; import it only on the serve path, after the TTY-independent fast
+    # paths (reset-password / gen-cert / --reload) have already returned.
+    from backend.console import (
+        ConsoleUI,
+        is_interactive,
+        port_in_use,
+        start_key_listener,
+    )
+
+    # === Single-instance guard with error distinction (D-17 + REVIEWS MED) ===
+    # Distinguish "port already in use" (a second backend — refuse, don't fight over
+    # the BMC) from "address unavailable / not permitted" (bad host, IPv6-only,
+    # privileged port). port_in_use() returns True for the EADDRINUSE case; for the
+    # address-unavailable case we attempt the bind here and inspect errno/winerror.
+    if port_in_use(effective_host, effective_port):
+        print(
+            f"ERROR: {APP_NAME} refused to start — port {effective_port} is already "
+            f"in use on {effective_host} (another instance may be running).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    else:
+        # Probe the actual bind once to surface address-unavailable / not-permitted
+        # errors with a DISTINCT message (EADDRNOTAVAIL / WSAEADDRNOTAVAIL / EACCES).
+        import errno as _errno
+        import socket as _socket
+
+        _probe_host = (
+            "127.0.0.1" if effective_host in ("0.0.0.0", "::", "") else effective_host
+        )
+        _probe = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+        try:
+            _probe.bind((_probe_host, effective_port))
+        except OSError as e:
+            _eno = getattr(e, "errno", None)
+            _werr = getattr(e, "winerror", None)
+            _addr_unavailable = (
+                _eno in (_errno.EADDRNOTAVAIL, _errno.EACCES)
+                or _werr in (10049, 10013)  # WSAEADDRNOTAVAIL / WSAEACCES
+            )
+            if _addr_unavailable:
+                print(
+                    f"ERROR: {APP_NAME} cannot bind {effective_host}:{effective_port} — "
+                    f"address unavailable or not permitted.",
+                    file=sys.stderr,
+                )
+            else:
+                # An EADDRINUSE we lost the race to, or any other bind failure → in use.
+                print(
+                    f"ERROR: {APP_NAME} refused to start — port {effective_port} is already "
+                    f"in use on {effective_host} (another instance may be running).",
+                    file=sys.stderr,
+                )
+            sys.exit(1)
+        finally:
+            _probe.close()
+
+    # === FIX-03 / signal coordination (REVIEWS HIGH-4) ===
+    # Three regimes, documented:
+    #   1. BEFORE the server object exists (early boot / pre-serve failure): the
+    #      belt-and-suspenders _emergency_shutdown handlers below sys.exit(0) so a
+    #      Ctrl+C during boot still exits cleanly. (FIX-03 layer 2 — preserved.)
+    #   2. ONCE serving: the handlers are REPOINTED (not removed) to flip
+    #      server.should_exit on the loop via call_soon_threadsafe, so SIGINT/SIGTERM
+    #      run the FastAPI lifespan shutdown (fans restored — FIX-03 layer 1) instead
+    #      of a bare sys.exit. On Windows we additionally rely on _NoSignalServer +
+    #      a KeyboardInterrupt wrapper around asyncio.run() (the ProactorEventLoop
+    #      lacks add_signal_handler for SIGTERM).
+    #   3. The kill -9 / power-loss backstop stays the fanpilot startup-recovery query
+    #      (FIX-03 layer 3) — unchanged.
     def _emergency_shutdown(signum, _frame):
         logger.warning(
             "Signal %d received before uvicorn lifespan started — exiting", signum
@@ -384,32 +498,205 @@ def cli():
     signal.signal(signal.SIGTERM, _emergency_shutdown)
     signal.signal(signal.SIGINT, _emergency_shutdown)
 
-    # 04-W4-03: when config.server.https is on, hand uvicorn the configured cert/key so it
-    # terminates TLS. Paths come from early_cfg (env > yaml). Missing files surface as a
-    # uvicorn startup error rather than silently falling back to HTTP.
-    uvicorn_kwargs = dict(
-        host=effective_host,
-        port=effective_port,
-        reload=args.reload,
-        log_level="info",
-    )
-    if early_cfg is not None and early_cfg.server.https:
-        if not early_cfg.server.cert_file or not early_cfg.server.key_file:
-            print(
-                "WARNING: server.https=true but cert_file/key_file are not set in config.yaml; "
-                "run `ipmilink --gen-cert` first. Starting over plain HTTP.",
-                file=sys.stderr,
-            )
-        else:
-            uvicorn_kwargs["ssl_certfile"] = early_cfg.server.cert_file
-            uvicorn_kwargs["ssl_keyfile"] = early_cfg.server.key_file
+    # SSL kwargs shared by every restart iteration (recomputed below per-iteration so
+    # a persisted https flip is picked up on restart, but cert/key paths rarely change).
+    interactive = is_interactive()
 
-    uvicorn.run("backend.main:app", **uvicorn_kwargs)
+    async def _serve_forever() -> None:
+        """Main-thread asyncio entry: own the loop, run the console on a side thread,
+        and run uvicorn via an embedded _NoSignalServer with a should_exit-driven
+        exit/restart loop so every teardown flows through the FastAPI lifespan (D-08/D-12/D-15c).
+        """
+        loop = asyncio.get_running_loop()
+        # restart_requested is a one-element list so the closures below can mutate it
+        # without `nonlocal` gymnastics across the nested callback scopes.
+        restart_requested = [False]
+        server_box: list[_NoSignalServer | None] = [None]
+
+        # --- loop-maintained cached server snapshot (REVIEWS MED, integration_design A) ---
+        # get_servers() is called from console.dispatch (which runs ON this loop via
+        # call_soon_threadsafe). Calling asyncio.run() there would deadlock, and scheduling
+        # a coroutine onto the loop FROM the loop is awkward — so a tiny background task
+        # refreshes a plain-list cache and get_servers() returns it read-only.
+        servers_cache: list[dict] = []
+
+        async def _refresh_servers_cache() -> None:
+            while True:
+                try:
+                    rows = await db.fetchall(
+                        "SELECT name, host, is_online FROM servers ORDER BY name"
+                    )
+                    servers_cache.clear()
+                    for r in rows:
+                        servers_cache.append(
+                            {
+                                "name": r["name"],
+                                "host": r["host"],
+                                "status": "online" if r["is_online"] else "offline",
+                            }
+                        )
+                except Exception:
+                    # DB may not be connected yet on the first ticks — ignore and retry.
+                    pass
+                await asyncio.sleep(5)
+
+        cache_task = asyncio.create_task(_refresh_servers_cache())
+
+        # --- console callbacks (all run ON the loop thread; never mutate server.* off-loop) ---
+        def _request_exit() -> None:
+            srv = server_box[0]
+            if srv is not None:
+                srv.should_exit = True
+
+        def _request_restart() -> None:
+            srv = server_box[0]
+            restart_requested[0] = True
+            if srv is not None:
+                srv.should_exit = True
+
+        def _on_set_verbosity(level: str) -> None:
+            # D-11/D-25: apply at runtime (basicConfig is a no-op once handlers exist) AND
+            # persist to config.yaml's logging.level. IPMILINK_LOGGING_LEVEL still wins next
+            # boot (env > yaml — see config._apply_env_overrides), documented above.
+            from backend.core.logging_util import apply_log_level
+
+            apply_log_level(level)
+            try:
+                _persist_logging_level(level)
+            except Exception:
+                logger.warning("Could not persist logging level %s", level)
+
+        def _on_change_bind(host: str, port: int) -> None:
+            # D-15d: persist host/port to config.yaml's server block. Applies on the NEXT
+            # restart (the console already told the operator "restart required"). env/CLI
+            # still override on boot (documented above).
+            update_server_yaml({"host": host, "port": port})
+
+        console = None
+        render_thread = None
+        if interactive:
+            # D-24/D-07: only on a real TTY. Print the rich splash ONCE and set the
+            # app.state gate so lifespan (Task 1) skips its banner → no double banner.
+            from backend.core.branding import banner, credits_line
+
+            print(banner())
+            print(credits_line())
+            app.state.host_splash_shown = True
+
+            cur_level = (early_cfg.logging.level.upper() if early_cfg is not None else "INFO")
+            scheme = "https" if (early_cfg is not None and early_cfg.server.https) else "http"
+
+            console = ConsoleUI(
+                ws_manager=ws_manager,
+                get_url=lambda: f"{scheme}://{effective_host}:{effective_port}",  # D-15a
+                get_servers=lambda: list(servers_cache),  # D-15b — cached snapshot (async-safe)
+                on_exit=lambda: loop.call_soon_threadsafe(_request_exit),  # D-12
+                on_restart=lambda: loop.call_soon_threadsafe(_request_restart),  # D-15c
+                on_set_verbosity=_on_set_verbosity,  # D-11/D-25 (dispatch already on-loop)
+                on_change_bind=_on_change_bind,  # D-15d
+                verbosity=cur_level,
+            )
+            # Render loop on a DEDICATED (non-daemon) thread; key listener on a DAEMON
+            # thread that marshals each key onto the loop via call_soon_threadsafe.
+            render_thread = threading.Thread(target=console.run, daemon=False)
+            render_thread.start()
+            start_key_listener(loop, console.dispatch, stop_event=console._stop)
+        else:
+            # Non-TTY (Docker uvicorn-direct never reaches cli(); piped/headless host):
+            # banner already emitted in lifespan (Task 1). No key listener, no rich.Live,
+            # no busy-spin (D-07/D-24). Just serve plainly.
+            pass
+
+        # Repoint the signal handlers now that we have a live loop: flip should_exit so
+        # lifespan shutdown runs (fan restore) instead of bare sys.exit (regime 2 above).
+        def _signal_to_should_exit() -> None:
+            srv = server_box[0]
+            if srv is not None:
+                srv.should_exit = True
+
+        for _sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                loop.add_signal_handler(_sig, _signal_to_should_exit)
+            except (NotImplementedError, RuntimeError):
+                # Windows ProactorEventLoop lacks add_signal_handler for SIGTERM — the
+                # KeyboardInterrupt wrapper around asyncio.run() (in cli()) handles Ctrl+C
+                # by flipping should_exit on the live server instead.
+                pass
+
+        try:
+            while True:
+                # Re-read config each iteration so a persisted host/port (D-15d) applies on
+                # restart; the CLI flag still wins (precedence preserved).
+                iter_cfg = load_config()
+                iter_host = (
+                    args.host if args.host is not None else iter_cfg.server.host
+                )
+                iter_port = (
+                    args.port if args.port is not None else iter_cfg.server.port
+                )
+                app.state.effective_host = iter_host
+                app.state.effective_port = iter_port
+
+                cfg_kwargs: dict = {}
+                if iter_cfg.server.https and iter_cfg.server.cert_file and iter_cfg.server.key_file:
+                    cfg_kwargs["ssl_certfile"] = iter_cfg.server.cert_file
+                    cfg_kwargs["ssl_keyfile"] = iter_cfg.server.key_file
+
+                uconfig = uvicorn.Config(
+                    "backend.main:app",
+                    host=iter_host,
+                    port=iter_port,
+                    log_level="info",
+                    **cfg_kwargs,
+                )
+                server = _NoSignalServer(uconfig)
+                server_box[0] = server
+                restart_requested[0] = False
+
+                await server.serve()  # runs the FULL FastAPI lifespan (startup fans, etc.)
+
+                if not restart_requested[0]:
+                    break  # clean exit → lifespan shutdown already ran (fans restored)
+                logger.info("%s restarting in-process…", APP_NAME)
+        finally:
+            cache_task.cancel()
+            if console is not None:
+                console.stop()  # set _stop → render loop ends, key daemon returns
+            if render_thread is not None:
+                render_thread.join(timeout=5.0)
+
+    # asyncio.run() owns the loop on the MAIN thread. A KeyboardInterrupt (Ctrl+C on
+    # Windows, where add_signal_handler(SIGTERM) is unavailable) is translated into a
+    # clean teardown by flipping should_exit — never a bare sys.exit once serving.
+    try:
+        asyncio.run(_serve_forever())
+    except KeyboardInterrupt:
+        logger.info("KeyboardInterrupt — %s exiting", APP_NAME)
+
+
+def _persist_logging_level(level: str) -> None:
+    """Write logging.level to config.yaml (D-11 persistence). Full read-mutate-dump of the
+    logging: block only, mirroring update_server_yaml. IPMILINK_LOGGING_LEVEL wins on next boot."""
+    import yaml
+
+    from backend.core.config import _config_yaml_path
+
+    path = _config_yaml_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    raw: dict = {}
+    if path.exists():
+        with open(path, encoding="utf-8") as f:
+            raw = yaml.safe_load(f) or {}
+    log_block = raw.get("logging")
+    if not isinstance(log_block, dict):
+        log_block = {}
+    log_block["level"] = level.lower()
+    raw["logging"] = log_block
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.dump(raw, f, default_flow_style=False, sort_keys=False)
 
 
 def _reset_password():
-    import asyncio
-
     async def _do_reset():
         cfg = load_config()
         _db = Database(cfg.data.db_path)
