@@ -17,6 +17,7 @@ from fastapi import Cookie, Depends, FastAPI, WebSocket, WebSocketDisconnect, st
 from fastapi.staticfiles import StaticFiles
 
 from backend.core.auth import AuthManager, require_auth
+from backend.core.branding import APP_NAME, VERSION
 from backend.core.config import AppConfig, load_config, save_default_config, update_server_yaml
 from backend.core.database import Database
 from backend.core.modules import ModuleLoader
@@ -126,7 +127,7 @@ async def lifespan(app: FastAPI):
     # (e.g. from a test harness) without going through cli().
     effective_host = getattr(app.state, "effective_host", None) or config.server.host
     effective_port = getattr(app.state, "effective_port", None) or config.server.port
-    logger.info("IPMILink started on %s:%d", effective_host, effective_port)
+    logger.info("%s started on %s:%d", APP_NAME, effective_host, effective_port)
     if config.demo:
         logger.info("Demo mode active — 2 virtual servers with simulated data")
 
@@ -142,8 +143,8 @@ async def lifespan(app: FastAPI):
 # === FastAPI App ===
 
 app = FastAPI(
-    title="IPMILink",
-    version="2.0.0-alpha.1",
+    title=APP_NAME,
+    version=VERSION,
     lifespan=lifespan,
 )
 
@@ -244,7 +245,7 @@ def _mount_spa(app: FastAPI) -> None:
 # === CLI entry point ===
 
 def cli():
-    parser = argparse.ArgumentParser(description="IPMILink — IPMI Management Platform")
+    parser = argparse.ArgumentParser(description=f"{APP_NAME} — IPMI Management Platform")
     # default=None sentinels — lets us detect whether the user explicitly passed
     # --host/--port so config.yaml can supply the value when the flag is absent.
     parser.add_argument("--host", default=None, help="Bind host (default from config.yaml or 0.0.0.0)")

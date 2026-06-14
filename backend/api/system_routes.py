@@ -431,10 +431,11 @@ async def history_csv(server_id: str, sensor_name: str, range: str = "24h"):
 
 @router.get("/health")
 async def health():
+    from backend.core.branding import VERSION
     from backend.main import config, ws_manager, module_loader
     return {
         "status": "ok",
-        "version": "2.0.0-alpha.1",
+        "version": VERSION,
         "demo": config.demo,
         "websocket_connections": ws_manager.connection_count,
         "modules_loaded": len(module_loader.get_enabled_modules()),
