@@ -486,37 +486,56 @@ def test_last_key_not_set_by_ignored_special_key():
     assert ui.last_key == "v"
 
 
-# --- gap-closure r2: launch-splash pause so the big banner is actually seen (D-02) -------
+# --- gap-closure r3: big banner pinned in header → transient TTY splash + dwell removed ---
 
 
-def test_splash_seconds_constant_exists_and_is_positive():
-    """main.SPLASH_SECONDS exists and is a small positive pause (the splash dwell before Live)."""
+def test_no_transient_splash_constant_remains():
+    """The SPLASH_SECONDS dwell constant is GONE — the banner is now pinned in the header (r3).
+
+    The big banner lives permanently in the console header, so there is no pre-Live splash to dwell
+    on; the now-redundant SPLASH_SECONDS constant must not linger as dead config.
+    """
     import backend.main as main_mod
 
-    assert hasattr(main_mod, "SPLASH_SECONDS")
-    assert isinstance(main_mod.SPLASH_SECONDS, (int, float))
-    assert 0 < main_mod.SPLASH_SECONDS <= 5
+    assert not hasattr(main_mod, "SPLASH_SECONDS")
 
 
-def test_splash_pause_is_guarded_to_the_tty_path():
-    """The splash sleep(SPLASH_SECONDS) is reachable ONLY inside the interactive (TTY) branch.
+def test_tty_path_has_no_splash_print_or_dwell_but_keeps_gate():
+    """The interactive (TTY) branch no longer prints a transient splash or sleeps, but STILL sets
+    the host_splash_shown gate so lifespan (D-21) does not double-print the banner.
 
-    The non-TTY/Docker path (D-07/D-21) must emit the banner once and NEVER sleep. We assert the
-    sleep is lexically inside the `if interactive:` block of _serve_forever and that the constant
-    is used exactly once there — a static guard, so the test never actually sleeps.
+    r3 moved the big banner into the pinned header, so the flash-then-disappear pre-Live splash and
+    its dwell were removed. We assert statically (no actual run): the TTY branch sets the gate, the
+    redundant splash print / dwell are absent, and the render thread still starts.
     """
     import inspect
 
     import backend.main as main_mod
 
     src = inspect.getsource(main_mod.cli)
-    # the pause must reference the named constant (no magic number) and the print_banner_safe call
-    assert "SPLASH_SECONDS" in src
-    assert "time.sleep(SPLASH_SECONDS)" in src
-    # the sleep must come AFTER the banner emission and INSIDE the interactive branch, BEFORE the
-    # render thread starts (so the operator sees the big splash before Live takes the screen).
+    # the transient pre-Live splash print and the dwell must be GONE (banner is in the header now)
+    assert "print_banner_safe(banner())" not in src
+    assert "time.sleep(SPLASH_SECONDS)" not in src
+    assert "SPLASH_SECONDS" not in src
+    # the gate is STILL set on the TTY path so lifespan (D-21) does not double-print the banner,
+    # and the render thread (which renders the header-pinned banner) still starts after it.
     interactive_idx = src.index("if interactive:")
-    banner_idx = src.index("print_banner_safe(banner())")
-    sleep_idx = src.index("time.sleep(SPLASH_SECONDS)")
+    gate_idx = src.index("app.state.host_splash_shown = True")
     render_idx = src.index("render_thread = threading.Thread")
-    assert interactive_idx < banner_idx < sleep_idx < render_idx
+    assert interactive_idx < gate_idx < render_idx
+
+
+def test_lifespan_still_emits_banner_to_logs_when_gate_unset():
+    """D-21 preserved: lifespan still emits the banner ONCE to logs on the non-TTY/Docker path.
+
+    The gate (host_splash_shown) is set ONLY on the interactive TTY path; when it is unset
+    (Docker/piped) lifespan must still print the branded banner so `docker logs` captures it. We
+    assert the lifespan source keeps the gated print_banner_safe(render_banner_safe()) emission.
+    """
+    import inspect
+
+    import backend.main as main_mod
+
+    src = inspect.getsource(main_mod.lifespan)
+    assert 'getattr(app.state, "host_splash_shown", False)' in src
+    assert "print_banner_safe(render_banner_safe())" in src
