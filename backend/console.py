@@ -35,6 +35,27 @@ from datetime import datetime, timezone  # noqa: F401  (imported for handler/UI 
 
 logger = logging.getLogger("ipmilink.console")
 
+
+def _banner_line_count() -> int:
+    """Number of rows the big ANSI Shadow banner occupies (for sizing the pinned header).
+
+    Imported lazily inside the function so backend.console stays import-safe on Linux (pyfiglet is
+    a declared dep but the banner is only ever rendered on the interactive Windows host) and so a
+    broken pyfiglet install degrades to the plain APP_NAME line count instead of crashing the
+    header sizing. Computed from branding.banner() so HEADER_SIZE auto-adapts when APP_NAME changes
+    in 04.2 — never hardcode a guessed banner height.
+    """
+    from backend.core.branding import render_banner_safe
+
+    return len(render_banner_safe().splitlines())
+
+
+# Overhead rows the pinned header reserves BELOW the big banner: 1 blank separator + up to 2
+# wrapped help-bar rows (the 9 key hints exceed a ~76-col interior at 80 cols and legitimately wrap)
+# + 1 status line + 1 credits line + the Panel's 2 border rows = 7. Kept as a named constant so the
+# sizing math (HEADER_SIZE = banner rows + overhead) is explicit and auto-adapts to APP_NAME.
+_HEADER_OVERHEAD = 7
+
 # Sentinel returned by read_key() for a consumed special key (Windows arrow/function/nav, where
 # msvcrt.getwch() yields a '\x00'/'\xe0' prefix + a scan code). dispatch() treats it as a no-op so
 # arrow keys never collide with a real binding or surface as a confusing unknown-key event.
@@ -192,18 +213,21 @@ class DequeLogHandler(logging.Handler):
 class ConsoleUI:
     """Pinned-header + scrolling-log interactive console (D-01..D-04/D-11/D-13/D-14/D-15a/b/d/D-19).
 
-    Renders a fixed top header (compact banner + a help/shortcut bar listing every action key + a
-    status line with the active verbosity and the connected-client count + the credits line) over
-    a deque-backed scrolling-log body, via rich Live(screen=True) + Layout. Action keys dispatch to
-    sub-views (connected sessions / configured servers / show-URL / update-stub), cycle the runtime
-    verbosity (starting at INFO per D-04), and run the D-15d change-bind-host/port flow.
+    Renders a fixed top header (the big ANSI Shadow banner + a help/shortcut bar listing every
+    action key + a status line with the active verbosity and the connected-client count + the
+    credits line) over a deque-backed scrolling-log body, via rich Live(screen=True) + Layout.
+    Action keys dispatch to sub-views (connected sessions / configured servers / show-URL /
+    update-stub), cycle the runtime verbosity (starting at INFO per D-04), and run the D-15d
+    change-bind-host/port flow.
 
     SCROLLBACK / HANDLER tradeoffs are documented in the module docstring (Pitfall 1 / Pitfall 6).
-    NOTE (REVIEWS LOW / 04.1-04 clipping fix): the pinned header uses a SINGLE-LINE brand
-    (brand_title), NOT the multi-line figlet — the big figlet is the one-time launch splash only
-    (main.py). The header is a fixed HEADER_SIZE rows sized for brand + help bar + status + credits
-    so none of those is ever clipped; on a narrow terminal the help bar WRAPS (overflow="fold")
-    rather than truncating.
+    NOTE (04.1-04 gap-closure r3, user override of D-02 "poi compatto"): the big multi-line ANSI
+    Shadow banner is PINNED PERMANENTLY in the header (coloured), with the help bar + status +
+    credits below it — it is no longer a transient launch splash. HEADER_SIZE is computed from the
+    actual banner height (so it auto-adapts to APP_NAME in 04.2) plus an overhead that reserves the
+    blank separator + the help bar (which may WRAP to 2 rows at 80 cols) + status + credits + the
+    Panel borders, so NOTHING clips at 80 OR 120 cols; the body region (logs) flexes to fill the
+    rest. On a narrow terminal the help bar WRAPS (overflow="fold") rather than truncating.
 
     Callback-driven so it never imports backend.main — Plan 04 passes the real implementations:
       get_url()           -> dashboard address scheme://host:port (D-15a)
@@ -217,12 +241,13 @@ class ConsoleUI:
     # Re-exported so callers/tests reference the sentinel via the class (ConsoleUI.IGNORE_KEY).
     IGNORE_KEY = IGNORE_KEY
 
-    # Fixed height of the pinned-header Layout region, in rows. Sized for the COMPACT header at an
-    # 80-col terminal: 1 brand + up-to-2 wrapped help-bar rows (9 key hints exceed 76 interior
-    # cols and legitimately wrap) + 1 status + 1 credits = 5 content rows, + 2 panel-border rows.
-    # The big multi-line figlet is NOT in the header (it is the one-time splash in main.py), so
-    # this size never clips the help bar / status / credits (the 04.1-04 clipping regression).
-    HEADER_SIZE = 7
+    # Fixed height of the pinned-header Layout region, in rows. Computed from the ACTUAL big-banner
+    # height plus _HEADER_OVERHEAD (blank separator + up-to-2 wrapped help-bar rows + status +
+    # credits + 2 panel-border rows), NOT a hardcoded guess — so it auto-adapts when APP_NAME (and
+    # thus the banner's line count) changes in 04.2 and the big banner + help bar + status + credits
+    # never clip at 80 OR 120 cols (04.1-04 gap-closure r3). The body region (logs) flexes to fill
+    # whatever rows remain below the header.
+    HEADER_SIZE = _banner_line_count() + _HEADER_OVERHEAD
 
     def __init__(
         self,
@@ -257,13 +282,13 @@ class ConsoleUI:
         self._log_handler: logging.Handler | None = None
 
         # Lazy-import rich so the module stays import-safe on Linux (D-23). The Layout is built
-        # once: a fixed-size top header + a flexing body (D-01). HEADER_SIZE is sized for the
-        # COMPACT (single-line-brand) header so the help bar/status/credits are never clipped.
+        # once: a fixed-size top header + a flexing body (D-01). HEADER_SIZE is computed from the
+        # big banner's actual height + overhead so the banner + help bar/status/credits never clip.
         from rich.layout import Layout
 
         self.layout = Layout()
         self.layout.split_column(
-            # brand + help bar + status + credits (fixed, never scrolls); compact, no figlet
+            # big ANSI Shadow banner + help bar + status + credits (fixed, never scrolls)
             Layout(name="header", size=self.HEADER_SIZE),
             Layout(name="body"),  # log tail OR a sub-view table (flexes)
         )
@@ -295,23 +320,31 @@ class ConsoleUI:
     # --- rendering -------------------------------------------------------------------------
 
     def render_header(self):
-        """Build the pinned header: compact brand + help/shortcut bar + status + credits (D-01/D-02/D-10).
+        """Build the pinned header: the BIG ANSI Shadow banner + help bar + status + credits (D-01/D-02/D-10).
 
-        Uses a SINGLE-LINE brand (brand_title) — NOT the multi-line figlet — so the help bar,
-        status and credits below it are ALWAYS visible inside HEADER_SIZE rows (the 04.1-04
-        clipping fix). The big figlet stays the one-time launch splash (main.py). Key hints in the
-        help bar are bracket-escaped so '[v]'/'[q]' render literally instead of being eaten as rich
-        markup; colours are added with rich markup (D-02/D-05) and degrade to monochrome
-        automatically when the terminal lacks colour or NO_COLOR is set.
+        The big multi-line ANSI Shadow banner is PINNED PERMANENTLY (coloured bold cyan), with the
+        help/shortcut bar, the status line and the credits line stacked below it — this is the
+        04.1-04 gap-closure r3 user override of D-02's "poi compatto" (the banner stays visible all
+        session instead of being a one-time splash). HEADER_SIZE reserves enough rows (banner height
+        + overhead) that none of the banner / help bar / status / credits is ever clipped at 80 OR
+        120 cols. Key hints in the help bar are bracket-escaped so '[v]'/'[q]' render literally
+        instead of being eaten as rich markup; each banner line is escaped too so its block/box-draw
+        glyphs (█ ╗ ═ ║ …) never collide with rich markup. Colours are rich markup (D-02/D-05) and
+        degrade to monochrome automatically when the terminal lacks colour or NO_COLOR is set.
+
+        render_banner_safe() (not banner()) is used so a broken pyfiglet install degrades the header
+        to the plain APP_NAME line instead of crashing the render loop — the header must never die.
         """
         from rich.markup import escape
         from rich.panel import Panel
         from rich.text import Text
 
-        from backend.core.branding import AUTHOR, LICENSE, VERSION, brand_title
+        from backend.core.branding import AUTHOR, LICENSE, VERSION, render_banner_safe
 
-        # Brand as a single coloured line (no newlines) — the compact header (D-02).
-        brand = f"[bold cyan]{escape(brand_title(compact=True))}[/bold cyan]"
+        # The big ANSI Shadow banner, PINNED in the header (D-02 "a colori"). Escape EACH line so the
+        # block/box-draw glyphs never trip rich's markup parser, then colour the whole block cyan.
+        banner_lines = render_banner_safe().splitlines()
+        brand = "\n".join(f"[bold cyan]{escape(line)}[/bold cyan]" for line in banner_lines)
 
         # Bracket-escape the key hints so '[v]' etc. survive rich markup; colour only the keys.
         keys = [
@@ -330,26 +363,30 @@ class ConsoleUI:
         )
 
         last = self.last_key if self.last_key is not None else "-"
-        # While the D-15d bind editor is active, the status row becomes a live entry prompt that
+        # While the D-15d bind editor is active, the help row becomes a live entry prompt that
         # shows the host:port format, how to confirm/cancel, and the current buffer — so the
         # operator gets visible feedback for every keystroke (the editor reuses the key listener).
+        # It REPLACES the help bar (not the status/credits) so the bind editor never regresses.
         if self.input_mode == "bind":
-            status = (
+            action_line = (
                 "[bold yellow]Enter new bind as host:port[/bold yellow]  "
                 "[dim](Enter=confirm, ESC=cancel, Backspace=del):[/dim] "
                 f"[cyan]{escape(self.input_buffer)}[/cyan]"
             )
         else:
-            status = (
-                f"[dim]Verbosity:[/dim] [green]{escape(self.verbosity)}[/green]  "
-                f"[dim]|[/dim]  [dim]Clients:[/dim] {self.ws_manager.connection_count}  "
-                f"[dim]|[/dim]  [dim]last:[/dim] [magenta]{escape(str(last))}[/magenta]"
-            )
+            action_line = help_bar
+        status = (
+            f"[dim]Verbosity:[/dim] [green]{escape(self.verbosity)}[/green]  "
+            f"[dim]|[/dim]  [dim]Clients:[/dim] {self.ws_manager.connection_count}  "
+            f"[dim]|[/dim]  [dim]last:[/dim] [magenta]{escape(str(last))}[/magenta]"
+        )
         # Compact one-line credits for the PINNED header (the full credits_line() incl. the long
-        # repo URL is shown once in the launch splash — main.py — where it has the full width).
+        # repo URL is shown once in `docker logs` via lifespan — main.py — where it has full width).
         credits = f"[dim]{escape(f'{AUTHOR} · v{VERSION} · {LICENSE}')}[/dim]"
 
-        body = Text.from_markup("\n".join([brand, help_bar, status, credits]))
+        # banner block, a blank separator, then the action line (help bar OR bind prompt), status,
+        # credits. A leading blank separator gives the big banner breathing room from the help bar.
+        body = Text.from_markup("\n".join([brand, "", action_line, status, credits]))
         # no_wrap=False (default) so the help bar WRAPS rather than truncates on a narrow terminal
         # (REVIEWS LOW: graceful degrade); overflow="fold" keeps every char reachable.
         body.overflow = "fold"
