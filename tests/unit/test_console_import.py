@@ -24,12 +24,18 @@ def test_console_imports():
 
 
 def test_deque_log_handler_appends():
-    """DequeLogHandler.emit appends one formatted line per record to the bounded deque."""
+    """DequeLogHandler.emit appends one styled rich Text per record to the bounded deque (r8).
+
+    The handler now stores a rich Text (readable HH:MM:SS time + colour-coded level token via style
+    SPANS, markup-safe) instead of a formatted string, so we assert on the entry's PLAIN text: the
+    level name, the logger name and the message are all present (the colour spans are validated in
+    tests/unit/test_console_ui.py)."""
+    from rich.text import Text
+
     from backend.console import DequeLogHandler
 
     log_lines: deque = deque(maxlen=10)
     handler = DequeLogHandler(log_lines)
-    handler.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
     record = logging.LogRecord(
         name="ipmilink.test",
         level=logging.INFO,
@@ -41,7 +47,11 @@ def test_deque_log_handler_appends():
     )
     handler.emit(record)
     assert len(log_lines) == 1
-    assert log_lines[0] == "INFO hello console"
+    entry = log_lines[0]
+    assert isinstance(entry, Text)
+    assert "INFO" in entry.plain
+    assert "ipmilink.test" in entry.plain
+    assert "hello console" in entry.plain
 
 
 def test_key_listener_logs_on_read_key_exception(monkeypatch, caplog):

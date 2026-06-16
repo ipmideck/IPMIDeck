@@ -71,6 +71,29 @@ _WIN_EXTENDED_PREFIXES = ("\x00", "\xe0")
 _BIND_WILDCARDS = ("0.0.0.0", "::", "")
 
 
+# Per-severity colour for the on-screen log LEVEL token only (04.1-04 gap-closure r8 — the user
+# asked to colour "solo alla scritta info o altro", i.e. just the INFO/WARNING/… word). Applied as a
+# rich style SPAN on the level token (NOT markup), so it stays markup-safe and auto-degrades to
+# monochrome when the terminal lacks colour / NO_COLOR is set (rich does this by default — we never
+# force_terminal). An unknown level falls back to "" (no style) via LEVEL_STYLES.get(name, "").
+LEVEL_STYLES = {
+    "DEBUG": "dim cyan",
+    "INFO": "green",
+    "WARNING": "yellow",
+    "ERROR": "bold red",
+    "CRITICAL": "bold white on red",
+}
+
+# On-screen log timestamp format (r8 readability ask): just HH:MM:SS — no date, no ',mmm' millis.
+# This is the ON-SCREEN tail only; the full-history file/stderr logging after Live exits is
+# unaffected (it keeps its own basicConfig format).
+_SCREEN_TIME_FMT = "%H:%M:%S"
+
+# Default (neutral) style for a _push_log action-result line — no emphasis. Prominent/red/cyan
+# styles are passed explicitly by the call sites that want their result to stand out (r8).
+_PUSH_LOG_DEFAULT_STYLE = ""
+
+
 def browsable_host(host: str) -> str:
     """Map a bind-wildcard host to a browsable loopback address (D-15a).
 
@@ -190,13 +213,25 @@ def start_key_listener(
 
 
 class DequeLogHandler(logging.Handler):
-    """A logging.Handler that appends each formatted record to a bounded deque (D-01/D-25).
+    """A logging.Handler that appends each record as a STYLED rich Text to a bounded deque (D-01/D-25/r8).
 
     This is the on-screen log-tail feed for ConsoleUI: while the rich Live render owns the screen,
     log records land in the deque (rendered into the body region) instead of writing to stdout and
     corrupting the Live frame (RESEARCH Pitfall 6). The deque's ``maxlen`` bounds the on-screen
     scrollback (accepted tradeoff — see module docstring); the full history still goes to the
     normal log file/stderr handlers once Live exits.
+
+    R8 READABILITY + COLOUR: each record is stored as a ``rich.text.Text`` built from per-part STYLE
+    SPANS (NOT a formatted markup string), so the body can colour the level token and de-emphasise
+    the chrome while staying MARKUP-SAFE (r4) — brackets in the message are inert literal characters
+    that can NEVER trip rich's markup parser. The per-part styles are:
+      • timestamp (HH:MM:SS — readable, no date/millis) → ``dim``
+      • level name (padded) → :data:`LEVEL_STYLES` by severity (INFO green, WARNING yellow, …)
+      • logger name → ``dim``
+      • message (``record.getMessage()``) → default (no style)
+      • any exc_info/exc_text traceback → appended after the message as ``dim`` so multi-line
+        tracebacks still render in the body.
+    Colours degrade to monochrome automatically off-colour terminals (rich default; never forced).
     """
 
     def __init__(self, log_lines: deque) -> None:
@@ -205,9 +240,47 @@ class DequeLogHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
-            self.log_lines.append(self.format(record))
+            self.log_lines.append(self._build_text(record))
         except Exception:
             self.handleError(record)
+
+    def _build_text(self, record: logging.LogRecord):
+        """Build the styled rich Text for one record (r8) — markup-safe (.append spans, no markup).
+
+        Lazy-imports rich.text so the module stays import-safe on Linux (D-23): DequeLogHandler is
+        only ever constructed on the interactive Windows host inside run(), but the import is kept
+        inside the method so merely importing backend.console (or constructing a handler) never
+        requires rich at module-import time on a stripped POSIX image.
+        """
+        from rich.text import Text
+
+        # A self-contained Formatter (datefmt=HH:MM:SS) does the time + traceback formatting so the
+        # on-screen tail is independent of any handler-level formatter (the unit test constructs a
+        # bare DequeLogHandler with no setFormatter). formatTime/formatException live on Formatter,
+        # NOT on Handler, so we must format through one. Readable HH:MM:SS — no date, no comma-millis.
+        fmt = logging.Formatter(datefmt=_SCREEN_TIME_FMT)
+        ts = fmt.formatTime(record, _SCREEN_TIME_FMT)
+        level = record.levelname
+        text = Text()
+        text.append(ts, style="dim")
+        text.append(" ")
+        # Pad the level name to a fixed width so the columns line up; colour JUST the level token
+        # (the user asked for "solo alla scritta info o altro"). Unknown levels → "" (no style).
+        text.append(f"{level:<8}", style=LEVEL_STYLES.get(level, ""))
+        text.append(" ")
+        text.append(record.name, style="dim")
+        text.append(": ")
+        # The message is rendered VERBATIM with no style — getMessage() does the %-arg interpolation.
+        text.append(record.getMessage())
+        # Append any traceback (exc_info/exc_text) after the message so multi-line tracebacks from a
+        # real-R720 polling failure still render in the body. dim so they don't shout over messages.
+        exc_text = record.exc_text
+        if exc_text is None and record.exc_info:
+            exc_text = fmt.formatException(record.exc_info)
+        if exc_text:
+            text.append("\n")
+            text.append(exc_text, style="dim")
+        return text
 
 
 class ConsoleUI:
@@ -304,9 +377,26 @@ class ConsoleUI:
 
     # --- helpers ---------------------------------------------------------------------------
 
-    def _push_log(self, line: str) -> None:
-        """Surface a one-line action result (URL, update stub, change-bind confirmation) in the body."""
-        self.log_lines.append(line)
+    def _push_log(self, line: str, style: str = _PUSH_LOG_DEFAULT_STYLE) -> None:
+        """Surface a one-line action result (URL, update stub, change-bind confirmation) in the body.
+
+        R8: stores a styled ``rich.text.Text`` (consistent with DequeLogHandler now storing Text) so
+        an action result can stand out — e.g. the change-bind "restart required" confirmation in a
+        PROMINENT colour, an invalid bind in red, the URL in cyan. The Text is built with a STYLE
+        SPAN (NOT markup), so a line containing '[' is still inert/literal (markup-safety preserved).
+        ``style`` defaults to neutral (no emphasis); a plain string call still works (backward-compat).
+        Lazy-imports rich.text so the module stays import-safe on Linux (D-23).
+        """
+        from rich.text import Text
+
+        # Apply the style as a SPAN over the whole line (stylize) rather than the Text-object-level
+        # `style=` arg, so it composes cleanly when render_body() joins entries into one Text and the
+        # style travels with this line's character range (object-level style would not survive the
+        # join). An empty style is a no-op span (neutral default).
+        text = Text(line)
+        if style:
+            text.stylize(style)
+        self.log_lines.append(text)
 
     @staticmethod
     def _validate_bind(host: str, port_str: str) -> tuple[str, int] | None:
@@ -466,9 +556,17 @@ class ConsoleUI:
                     Text(str(srv.get("status", ""))),
                 )
             return table
-        # default: the scrolling-log view (last N lines of the deque). Text(...) — NOT a raw str —
-        # so arbitrary log content is rendered verbatim and markup-like text never trips the parser.
-        return Panel(Text("\n".join(self.log_lines)), title="Logs")
+        # default: the scrolling-log view (last N lines of the deque). The deque now holds styled
+        # rich Text entries (DequeLogHandler / _push_log both store Text — r8), so we JOIN them into
+        # ONE Text with newline separators rather than "\n".join()-ing strings. Any stray str entry
+        # (a backward-compat / future-regression raw push) is defensively coerced to Text(entry) so a
+        # mixed deque can never raise. Joining Text objects preserves every per-part style span and
+        # stays MARKUP-SAFE (Text is never parsed as markup), so the readable timestamp, the coloured
+        # level token and the prominent action-result lines all render while markup-like content in
+        # any line is still inert. Result remains a single renderable inside the Panel.
+        entries = [e if isinstance(e, Text) else Text(str(e)) for e in self.log_lines]
+        body = Text("\n").join(entries) if entries else Text("")
+        return Panel(body, title="Logs")
 
     # --- interaction -----------------------------------------------------------------------
 
@@ -519,12 +617,19 @@ class ConsoleUI:
         """
         result = self.parse_bind(self.input_buffer)
         if result is None:
-            self._push_log(f"Invalid host/port '{self.input_buffer}' — change cancelled")
+            # Rejection — red so the operator clearly sees the change was NOT applied (r8).
+            self._push_log(
+                f"Invalid host/port '{self.input_buffer}' — change cancelled", style="bold red"
+            )
             self._cancel_input()
             return
         host, port = result
         self.on_change_bind(host, port)
-        self._push_log(f"Bind set to {host}:{port} — restart required to apply (press r)")
+        # The user's MAIN r8 ask: make this action result stand out — bold green so the
+        # "restart required to apply" prompt is unmissable in the scrolling log body.
+        self._push_log(
+            f"Bind set to {host}:{port} — restart required to apply (press r)", style="bold green"
+        )
         self._cancel_input()
 
     def _dispatch_input(self, key: str) -> None:
@@ -595,14 +700,15 @@ class ConsoleUI:
             self.view = "servers"
         elif key == "u":
             # D-15a: push the (browsable) dashboard URL. get_url() already rewrites a wildcard
-            # bind to 127.0.0.1 (cli() uses browsable_url), so this is always navigable. We push
-            # it as PLAIN TEXT on purpose: the log body joins arbitrary strings into a single
-            # Panel, so injecting rich link markup ('[link=…]') here would force render_body to
-            # interpret '[...]' in EVERY log line (BMC output, etc.) and corrupt the frame. Plain
-            # text is the documented, least-invasive choice (browsability is the MUST; a clickable
-            # OSC-8 hyperlink is a nice-to-have not worth destabilising the log render for).
-            self._push_log(self.get_url())
+            # bind to 127.0.0.1 (cli() uses browsable_url), so this is always navigable. The URL is
+            # carried by a Text STYLE SPAN ("cyan", r8) so it stands out from ordinary log noise —
+            # NOT rich link markup ('[link=…]'): a Text span is inherently markup-safe (brackets in
+            # any other log line stay literal), whereas markup would force render_body to parse
+            # '[...]' in EVERY entry (BMC output, etc.) and could corrupt the frame. Browsability is
+            # the MUST; a clickable OSC-8 hyperlink is a nice-to-have not worth that risk.
+            self._push_log(self.get_url(), style="cyan")
         elif key == "g":
+            # Informational stub — neutral (default) style; not an alert (r8).
             self._push_log(
                 f"Current version {VERSION}. Online update check ships with the pip release."
             )
@@ -693,7 +799,11 @@ class ConsoleUI:
 
         console = Console()  # NEVER force_terminal/force_interactive (D-24)
         handler = DequeLogHandler(self.log_lines)
-        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        # No setFormatter needed (r8): DequeLogHandler now builds a styled rich Text per record in
+        # _build_text() (readable HH:MM:SS time + colour-coded level token via LEVEL_STYLES), using
+        # its own self-contained Formatter for the time/traceback — it does NOT consume a handler-
+        # level format string anymore. The full-history file/stderr logging after Live exits keeps
+        # its own basicConfig format (unaffected).
         self._log_handler = handler
         logging.getLogger().addHandler(handler)
         # r7 FLICKER FIX: suspend the pre-existing root StreamHandlers (basicConfig's stderr handler)

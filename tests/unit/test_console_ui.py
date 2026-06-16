@@ -142,10 +142,14 @@ def test_esc_returns_from_sub_view():
 
 
 def test_show_url_pushes_log():
-    """dispatch('u') pushes the dashboard URL into the log body (D-15a)."""
+    """dispatch('u') pushes the dashboard URL into the log body (D-15a).
+
+    r8: the deque now stores styled rich Text entries (so the URL can be coloured cyan), so the
+    assertion compares the entry's plain text rather than `== str`.
+    """
     ui, _ = _make_ui(get_url=lambda: "http://h:3000")
     ui.dispatch("u")
-    assert ui.log_lines[-1] == "http://h:3000"
+    assert ui.log_lines[-1].plain == "http://h:3000"
 
 
 # --- gap-closure r2: browsable URL host mapping (wildcard -> 127.0.0.1) -------------------
@@ -183,8 +187,9 @@ def test_show_url_is_browsable_when_bound_to_wildcard():
 
     ui, _ = _make_ui(get_url=lambda: browsable_url("http", "0.0.0.0", 8099))
     ui.dispatch("u")
-    assert ui.log_lines[-1] == "http://127.0.0.1:8099"
-    assert "0.0.0.0" not in ui.log_lines[-1]
+    # r8: the deque stores styled Text now — compare the plain text.
+    assert ui.log_lines[-1].plain == "http://127.0.0.1:8099"
+    assert "0.0.0.0" not in ui.log_lines[-1].plain
 
 
 def test_validate_bind_accepts_good_and_rejects_bad():
@@ -1104,3 +1109,263 @@ def test_interactive_startup_applies_initial_verbosity_and_suppresses_noise():
     # both are applied on the interactive path BEFORE the render loop starts
     assert interactive_idx < apply_idx < render_idx
     assert interactive_idx < suppress_idx < render_idx
+
+
+# --- 04.1-04 gap-closure r8: readable timestamp + colour-coded level token (markup-safe) ---
+#
+# The on-screen log body showed plain lines like
+#   2026-06-16 05:22:16,816 INFO ipmilink: <message>
+# rendered as a single markup-safe Text (r4). User requests for r8:
+#   (1) make the timestamp readable — show only HH:MM:SS (no date, no ',mmm' millis), and
+#   (2) colour-code the level token (INFO/WARNING/ERROR/…) and make action-result messages like
+#       "restart required" stand out.
+# The fix keeps the r4 markup-safety guarantee: DequeLogHandler now stores a rich Text built from
+# per-part STYLE SPANS (.append(part, style=...)) — never a '[markup]' string — so arbitrary log
+# content (brackets in object reprs / BMC output / SQL) can still NEVER trip rich's markup parser.
+# render_body() joins the Text entries (coercing any stray str defensively) into one renderable.
+
+
+def _emit_record(handler, level, msg, name="ipmilink.modules.sensors", exc_info=None):
+    """Build + emit a LogRecord through a handler and return the stored deque entry."""
+    record = logging.LogRecord(
+        name=name,
+        level=level,
+        pathname=__file__,
+        lineno=1,
+        msg=msg,
+        args=(),
+        exc_info=exc_info,
+    )
+    handler.emit(record)
+    return handler.log_lines[-1]
+
+
+def _span_style_for(text_obj, substring):
+    """Return the style of the FIRST Text span that covers `substring` (or None)."""
+    from rich.text import Text
+
+    assert isinstance(text_obj, Text)
+    plain = text_obj.plain
+    start = plain.index(substring)
+    end = start + len(substring)
+    for span in text_obj.spans:
+        if span.start <= start and span.end >= end:
+            return str(span.style)
+    return None
+
+
+def test_deque_handler_stores_text_with_readable_time_and_fields():
+    """DequeLogHandler.emit stores a rich Text whose plain text has HH:MM:SS (no date/millis),
+    the level name, the logger name and the message — readable timestamp + structured fields (r8)."""
+    import re
+
+    from rich.text import Text
+
+    from backend.console import DequeLogHandler
+
+    handler = DequeLogHandler(deque(maxlen=10))
+    entry = _emit_record(handler, logging.INFO, "sensor poll ok", name="ipmilink.modules.sensors")
+    assert isinstance(entry, Text)
+    plain = entry.plain
+    # HH:MM:SS present, and NO date / no comma-millis (the readable-time ask)
+    assert re.search(r"\b\d{2}:\d{2}:\d{2}\b", plain), f"no HH:MM:SS in {plain!r}"
+    assert re.search(r"\d{4}-\d{2}-\d{2}", plain) is None, f"date leaked into {plain!r}"
+    assert "," not in plain.split(" ", 1)[0], f"millis leaked into the time token in {plain!r}"
+    # the structured fields are all present
+    assert "INFO" in plain
+    assert "ipmilink.modules.sensors" in plain
+    assert "sensor poll ok" in plain
+
+
+def test_deque_handler_colours_level_token_by_severity():
+    """The level token carries the LEVEL_STYLES colour per severity; timestamp + logger name dim (r8).
+
+    Colour JUST the level token (the user: 'solo alla scritta info o altro'). The timestamp and the
+    logger name are de-emphasised (dim); the message itself stays default (no style)."""
+    from backend.console import LEVEL_STYLES, DequeLogHandler
+
+    handler = DequeLogHandler(deque(maxlen=10))
+
+    info = _emit_record(handler, logging.INFO, "ok")
+    assert LEVEL_STYLES["INFO"] in _span_style_for(info, "INFO")
+
+    warn = _emit_record(handler, logging.WARNING, "careful")
+    assert LEVEL_STYLES["WARNING"] in _span_style_for(warn, "WARNING")
+
+    err = _emit_record(handler, logging.ERROR, "boom")
+    assert LEVEL_STYLES["ERROR"] in _span_style_for(err, "ERROR")
+
+    dbg = _emit_record(handler, logging.DEBUG, "trace")
+    assert LEVEL_STYLES["DEBUG"] in _span_style_for(dbg, "DEBUG")
+
+    crit = _emit_record(handler, logging.CRITICAL, "fatal")
+    assert LEVEL_STYLES["CRITICAL"] in _span_style_for(crit, "CRITICAL")
+
+
+def test_level_styles_table_has_expected_severities():
+    """LEVEL_STYLES is a module-level dict mapping each severity to its colour (r8)."""
+    from backend.console import LEVEL_STYLES
+
+    assert LEVEL_STYLES["DEBUG"] == "dim cyan"
+    assert LEVEL_STYLES["INFO"] == "green"
+    assert LEVEL_STYLES["WARNING"] == "yellow"
+    assert LEVEL_STYLES["ERROR"] == "bold red"
+    assert LEVEL_STYLES["CRITICAL"] == "bold white on red"
+
+
+def test_deque_handler_dims_time_and_logger_name():
+    """The timestamp and the logger name are rendered dim (de-emphasised chrome), message default."""
+    from backend.console import DequeLogHandler
+
+    handler = DequeLogHandler(deque(maxlen=10))
+    entry = _emit_record(handler, logging.INFO, "hello world", name="ipmilink.console")
+    # the logger name span is dim
+    assert "dim" in (_span_style_for(entry, "ipmilink.console") or "")
+    # the message carries no styling span (default)
+    assert _span_style_for(entry, "hello world") in (None, "", "none")
+
+
+def test_deque_handler_record_with_markup_message_does_not_raise():
+    """A record whose message contains markup-like brackets is stored AND rendered without raising.
+
+    Markup-safety regression lock (r4 preserved through r8): the Text is built from STYLE SPANS via
+    .append(), never a '[markup]' string, so brackets in the message are literal and inert."""
+    from rich.console import Console
+    from rich.text import Text
+
+    from backend.console import DequeLogHandler
+
+    handler = DequeLogHandler(deque(maxlen=10))
+    entry = _emit_record(handler, logging.ERROR, "client [bold]X[/] failed [/notopen]")
+    assert isinstance(entry, Text)
+    assert "[bold]X[/]" in entry.plain  # the brackets survive verbatim
+    # rendering the Text must not raise MarkupError (it is not parsed as markup)
+    console = Console(width=80, record=True)
+    console.print(entry)
+    assert "[/notopen]" in console.export_text()
+
+
+def test_deque_handler_renders_exc_info_traceback_in_body():
+    """A record carrying exc_info renders its multi-line traceback in the body without raising (r8)."""
+    from rich.console import Console
+    from rich.text import Text
+
+    from backend.console import DequeLogHandler
+
+    handler = DequeLogHandler(deque(maxlen=10))
+    try:
+        raise ValueError("kaboom")
+    except ValueError:
+        import sys
+
+        exc = sys.exc_info()
+    entry = _emit_record(handler, logging.ERROR, "poll failed", exc_info=exc)
+    assert isinstance(entry, Text)
+    plain = entry.plain
+    assert "poll failed" in plain
+    # the traceback text is appended after the message (multi-line) and renders without raising
+    assert "Traceback" in plain
+    assert "ValueError" in plain
+    console = Console(width=120, record=True)
+    console.print(entry)
+    assert "kaboom" in console.export_text()
+
+
+def test_push_log_accepts_style_and_stores_styled_text():
+    """_push_log(line, style=...) stores a rich Text carrying that style; default style is neutral."""
+    from rich.text import Text
+
+    ui, _ = _make_ui()
+    ui._push_log("plain default line")
+    default_entry = ui.log_lines[-1]
+    assert isinstance(default_entry, Text)
+    assert default_entry.plain == "plain default line"
+
+    ui._push_log("Bind set to h:1 — restart required to apply (press r)", style="bold green")
+    styled = ui.log_lines[-1]
+    assert isinstance(styled, Text)
+    assert "bold green" in _span_style_for(styled, "restart required")
+
+
+def test_change_bind_commit_uses_prominent_style():
+    """The change-bind success 'restart required' line is stored in a PROMINENT style (user's ask)."""
+    ui, calls = _make_ui()
+    ui.dispatch("b")
+    for ch in "0.0.0.0:8100":
+        ui.dispatch(ch)
+    ui.dispatch("\r")
+    assert calls["change_bind"] == [("0.0.0.0", 8100)]
+    entry = ui.log_lines[-1]
+    assert "restart required" in entry.plain
+    # the whole confirmation is a prominent (bold green) span
+    assert "bold green" in _span_style_for(entry, "restart required")
+
+
+def test_invalid_bind_is_red():
+    """An invalid host/port confirmation is stored in red so the operator sees the rejection (r8)."""
+    ui, calls = _make_ui()
+    ui.dispatch("b")
+    for ch in "0.0.0.0:abc":
+        ui.dispatch(ch)
+    ui.dispatch("\r")
+    assert calls["change_bind"] == []
+    entry = ui.log_lines[-1]
+    assert "Invalid" in entry.plain
+    assert "red" in _span_style_for(entry, "Invalid")
+
+
+def test_url_line_is_cyan():
+    """The 'u' show-URL line is stored cyan so the address stands out from ordinary log noise (r8)."""
+    ui, _ = _make_ui(get_url=lambda: "http://127.0.0.1:8099")
+    ui.dispatch("u")
+    entry = ui.log_lines[-1]
+    assert entry.plain == "http://127.0.0.1:8099"
+    assert "cyan" in _span_style_for(entry, "http://127.0.0.1:8099")
+
+
+def test_update_stub_line_is_default_or_dim():
+    """The 'g' update-stub line is neutral (default/dim) — informational, not an alert (r8)."""
+    from rich.text import Text
+
+    ui, _ = _make_ui()
+    ui.dispatch("g")
+    entry = ui.log_lines[-1]
+    assert isinstance(entry, Text)
+    assert VERSION in entry.plain
+    style = _span_style_for(entry, VERSION)
+    assert style in (None, "", "none") or "dim" in style
+
+
+def test_render_body_log_view_joins_text_entries_single_renderable():
+    """render_body (log view) joins the deque Text entries into a SINGLE renderable, no raise (r8)."""
+    ui, _ = _make_ui()
+    ui.dispatch("u")  # a styled Text entry
+    ui.dispatch("g")  # another entry
+    out = _render_body_text(ui, width=80)
+    assert "http://h:3000" in out
+    assert VERSION in out
+
+
+def test_render_body_log_view_coerces_stray_str_entries():
+    """A mixed deque (Text + a defensively-stored str) still renders without raising (r8 coercion).
+
+    Older callers / a future regression could push a raw str; render_body must coerce it to Text so
+    the join never raises on a mixed deque."""
+    ui, _ = _make_ui()
+    # a raw str pushed directly (bypassing _push_log) and a styled Text entry
+    ui.log_lines.append("a raw string entry [/]")  # stray str with markup-like chars
+    ui.dispatch("u")  # styled Text
+    out = _render_body_text(ui, width=80)
+    assert "a raw string entry [/]" in out  # the stray str renders verbatim (coerced, not parsed)
+    assert "http://h:3000" in out
+
+
+def test_render_body_log_view_handler_text_with_markup_message_renders():
+    """A handler-stored Text whose message has markup chars renders in the body view without raising."""
+    from backend.console import DequeLogHandler
+
+    ui, _ = _make_ui()
+    handler = DequeLogHandler(ui.log_lines)
+    _emit_record(handler, logging.ERROR, "boom [bold]x[/] [/notopen]")
+    out = _render_body_text(ui, width=80)
+    assert "[/notopen]" in out  # the level-coloured line renders verbatim, no MarkupError
