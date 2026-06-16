@@ -633,15 +633,55 @@ class ConsoleUI:
             logging.getLogger().removeHandler(self._log_handler)
             self._log_handler = None
 
+    @staticmethod
+    def _suspend_stream_handlers() -> list[logging.Handler]:
+        """Remove the root logger's StreamHandlers so logging does not fight the Live frame (r7).
+
+        FLICKER FIX (04.1-04 gap-closure r7): run() adds a DequeLogHandler so log records render in
+        the body region, but the pre-existing StreamHandler (installed by logging.basicConfig() in
+        lifespan) was NEVER removed. Every record then went to BOTH handlers — the StreamHandler
+        wrote straight to stderr, bypassing rich Live's redirect and fighting the screen frame
+        (visible flicker), and the frequent multi-line ERROR tracebacks (real-R720 polling failures)
+        escaped the box → frame breakdown (raw logs outside the borders). This snapshots and removes
+        every root StreamHandler (EXCLUDING the DequeLogHandler — which is a logging.Handler, not a
+        StreamHandler, but the explicit guard keeps it safe) so while Live owns the screen logging
+        goes ONLY to the deque (rendered in the body). Returns the removed handlers for restore().
+
+        Idempotent: 0 stream handlers → returns [] (no-op). Safe across restarts: run() is called
+        per restart and each call removes+restores ITS OWN snapshot. Never reached off a TTY (run()
+        returns early on `not is_interactive()`), so the Docker/non-TTY path keeps its stderr logs.
+        """
+        saved: list[logging.Handler] = []
+        root_logger = logging.getLogger()
+        for h in list(root_logger.handlers):
+            if isinstance(h, logging.StreamHandler) and not isinstance(h, DequeLogHandler):
+                saved.append(h)
+                root_logger.removeHandler(h)
+        return saved
+
+    @staticmethod
+    def _restore_stream_handlers(saved: list[logging.Handler]) -> None:
+        """Re-add the StreamHandlers suspended by _suspend_stream_handlers() (restore on Live exit).
+
+        Restores normal stderr logging once Live releases the screen. restore([]) is a no-op so the
+        zero-stream-handler case (and a double restore) never raises.
+        """
+        root_logger = logging.getLogger()
+        for h in saved:
+            root_logger.addHandler(h)
+
     def run(self) -> None:
         """Run the interactive render loop — no-op off a TTY (D-24/D-07).
 
         Gates on is_interactive() first: on a non-TTY (Docker/systemd/piped) it returns immediately
         and the caller keeps plain scrolling logs. On a TTY it installs a DequeLogHandler on the
         root logger so log records render in the body instead of fighting the Live frame (Pitfall
-        6), then runs Live(screen=True) until stop() is signalled, and in finally calls stop() to
-        remove the handler so normal logging is restored. Logs still flow to the normal log
-        file/stderr for the full history once Live exits.
+        6), SUSPENDS the pre-existing root StreamHandlers for the lifetime of Live so log records
+        go ONLY to the deque (r7 flicker fix — the StreamHandler was bypassing Live's redirect and
+        fighting the frame), then runs Live(screen=True) until stop() is signalled. In finally it
+        calls stop() (removes the DequeLogHandler) and restores the suspended StreamHandlers so
+        normal stdout/stderr logging resumes. Logs still flow to the normal log file/stderr for the
+        full history once Live exits.
         """
         if not is_interactive():
             return
@@ -656,6 +696,10 @@ class ConsoleUI:
         handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
         self._log_handler = handler
         logging.getLogger().addHandler(handler)
+        # r7 FLICKER FIX: suspend the pre-existing root StreamHandlers (basicConfig's stderr handler)
+        # for the lifetime of Live so log records go ONLY to the deque (rendered in the body) and
+        # never bypass Live's redirect to fight the frame. Restored in finally. See the helper.
+        saved_stream_handlers = self._suspend_stream_handlers()
         try:
             with Live(
                 self.layout,
@@ -683,3 +727,6 @@ class ConsoleUI:
                     time.sleep(0.25)
         finally:
             self.stop()  # remove the DequeLogHandler — restore normal stdout logging
+            # r7: restore the StreamHandlers suspended above so normal stderr logging resumes once
+            # Live has released the screen (idempotent — restore([]) is a no-op on the 0-handler case).
+            self._restore_stream_handlers(saved_stream_handlers)

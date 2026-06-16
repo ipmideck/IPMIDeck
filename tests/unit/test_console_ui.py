@@ -495,6 +495,145 @@ def test_stop_sets_event_and_removes_handler():
         logging.getLogger().removeHandler(handler)
 
 
+# --- gap-closure r7: suspend root StreamHandlers while Live owns the screen (flicker fix) -
+#
+# ROOT CAUSE of the host-UAT flicker / frame-breakdown: run() ADDED a DequeLogHandler to the root
+# logger but did NOT remove the pre-existing StreamHandler (installed by logging.basicConfig() in
+# lifespan). Every log record then went to BOTH handlers: the StreamHandler wrote straight to stderr
+# — bypassing rich Live's redirect and fighting the screen frame (visible flicker) — and the frequent
+# multi-line ERROR tracebacks (real-R720 polling failures) escaped the box → frame breakdown (raw
+# logs outside the borders). The fix suspends the root StreamHandlers for the lifetime of Live so
+# logging goes ONLY to the DequeLogHandler (rendered in the body), then restores them on exit.
+
+
+def test_suspend_stream_handlers_removes_streamhandler_keeps_deque():
+    """_suspend_stream_handlers() removes root StreamHandlers but leaves the DequeLogHandler attached.
+
+    While Live owns the screen, the pre-existing stderr StreamHandler must be removed so log records
+    do not bypass rich's redirect and fight the frame (the flicker bug). The DequeLogHandler — which
+    feeds the on-screen body — must stay attached (it subclasses Handler, not StreamHandler, but the
+    explicit guard keeps it safe regardless).
+    """
+    from backend.console import DequeLogHandler
+
+    ui, _ = _make_ui()
+    root = logging.getLogger()
+    stream = logging.StreamHandler()
+    deque_handler = DequeLogHandler(deque(maxlen=10))
+    root.addHandler(stream)
+    root.addHandler(deque_handler)
+    try:
+        saved = ui._suspend_stream_handlers()
+        # the stderr StreamHandler was removed and captured for later restore
+        assert stream in saved
+        assert stream not in root.handlers
+        # the DequeLogHandler is NOT suspended — it still feeds the on-screen body
+        assert deque_handler not in saved
+        assert deque_handler in root.handlers
+        # restore re-adds exactly what was suspended
+        ui._restore_stream_handlers(saved)
+        assert stream in root.handlers
+    finally:
+        root.removeHandler(stream)
+        root.removeHandler(deque_handler)
+
+
+def test_suspend_stream_handlers_is_noop_with_zero_stream_handlers():
+    """With no root StreamHandler attached, _suspend_stream_handlers() is a no-op (idempotent).
+
+    Safe across restarts: run() is called per restart and each call removes+restores its own
+    snapshot; a boot with zero stream handlers (e.g. handlers not yet installed) returns []
+    and restore([]) does nothing.
+    """
+    ui, _ = _make_ui()
+    root = logging.getLogger()
+    # snapshot + strip any handlers the test runner may have attached so this is deterministic
+    pre_existing = [h for h in root.handlers if isinstance(h, logging.StreamHandler)]
+    for h in pre_existing:
+        root.removeHandler(h)
+    try:
+        saved = ui._suspend_stream_handlers()
+        assert saved == []
+        # restore of an empty snapshot must not raise and must not add anything
+        before = list(root.handlers)
+        ui._restore_stream_handlers(saved)
+        assert list(root.handlers) == before
+    finally:
+        for h in pre_existing:
+            root.addHandler(h)
+
+
+def test_run_suspends_and_restores_stream_handlers(monkeypatch):
+    """run() suspends root StreamHandlers while Live is active and restores them in finally.
+
+    End-to-end (no real Live/TTY): a dummy stderr StreamHandler is attached to the root logger; run()
+    must remove it for the duration of the (stubbed) Live block and re-add it on exit. We capture the
+    root handler set from INSIDE the render loop to prove the StreamHandler is gone while Live owns
+    the screen, and assert it is back after run() returns.
+    """
+    import backend.console as console_mod
+
+    ui, _ = _make_ui()
+    root = logging.getLogger()
+    stream = logging.StreamHandler()
+    root.addHandler(stream)
+
+    # Force the interactive gate True so run() proceeds (no real TTY in CI).
+    monkeypatch.setattr(console_mod, "is_interactive", lambda: True)
+
+    # Stub rich Console + Live so run() touches no real screen.
+    import rich.console as _rich_console
+    import rich.live as _rich_live
+
+    class _FakeLive:
+        def __init__(self, *_a, **_k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+    monkeypatch.setattr(_rich_console, "Console", lambda *_a, **_k: object())
+    monkeypatch.setattr(_rich_live, "Live", _FakeLive)
+
+    # Stub the layout writes (object() renderables would choke a real Layout).
+    class _FakeLayout(dict):
+        def __getitem__(self, _k):
+            class _Region:
+                def update(self, _v):
+                    pass
+
+            return _Region()
+
+    monkeypatch.setattr(ui, "layout", _FakeLayout())
+    monkeypatch.setattr(ui, "render_header", lambda: object())
+
+    handlers_during_live: list = []
+
+    def _capture_then_stop():
+        # capture the live root-handler set, then end the loop deterministically
+        handlers_during_live.extend(root.handlers)
+        ui._stop.set()
+        return object()
+
+    monkeypatch.setattr(ui, "render_body", _capture_then_stop)
+
+    import time as _time
+
+    monkeypatch.setattr(_time, "sleep", lambda _s: None)
+
+    try:
+        ui.run()
+        # WHILE Live owned the screen the stderr StreamHandler was suspended (only the deque feeds)
+        assert stream not in handlers_during_live, "StreamHandler not suspended during Live (flicker)"
+        # AFTER run() returns it is restored so normal stderr logging resumes
+        assert stream in root.handlers, "StreamHandler not restored after run() (logging lost)"
+    finally:
+        root.removeHandler(stream)
+
+
 # --- 04.1-04 gap-closure r3: big banner PINNED in header, nothing clips (concern 1) ------
 
 
