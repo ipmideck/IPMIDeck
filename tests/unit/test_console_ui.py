@@ -35,11 +35,34 @@ def _render_header_text(ui, width: int = 80) -> str:
     return console.export_text()
 
 
+def _render_body_text(ui, width: int = 80) -> str:
+    """Render ui.render_body() through a fixed-width recording rich Console and return plain text.
+
+    This is what Live(screen=True) does every frame: it materialises the renderable, parsing rich
+    markup. A log line / table cell / bind buffer containing markup-like text ('[/]', '[bold]x[/]')
+    would raise rich.errors.MarkupError HERE, killing the render thread and freezing the console
+    (the 04.1-04 r4 host-UAT bug). The fix renders all arbitrary text as PLAIN Text, so this never
+    raises. Rendered through a recording console so the regression is deterministic (no real Live).
+    """
+    from rich.console import Console
+
+    console = Console(width=width, record=True)
+    console.print(ui.render_body())
+    return console.export_text()
+
+
 class _FakeWSManager:
-    """Minimal ws_manager stand-in: empty sessions, zero clients."""
+    """Minimal ws_manager stand-in: empty sessions, zero clients.
+
+    Accepts an optional sessions list so a regression test can feed a session row whose IP /
+    User-Agent contains markup-like text ('[') and assert the sessions table still renders.
+    """
+
+    def __init__(self, sessions_data: list[dict] | None = None) -> None:
+        self._sessions_data = sessions_data if sessions_data is not None else []
 
     def sessions(self) -> list[dict]:
-        return []
+        return self._sessions_data
 
     @property
     def connection_count(self) -> int:
@@ -539,3 +562,181 @@ def test_lifespan_still_emits_banner_to_logs_when_gate_unset():
     src = inspect.getsource(main_mod.lifespan)
     assert 'getattr(app.state, "host_splash_shown", False)' in src
     assert "print_banner_safe(render_banner_safe())" in src
+
+
+# --- 04.1-04 gap-closure r4: markup-safe rendering (the console-freeze regression) -------
+#
+# ROOT CAUSE of the host-UAT freeze: render_body() built the log view as
+# Panel("\n".join(self.log_lines)) — rich parses that string as CONSOLE MARKUP by default. A log
+# line containing markup-like text (an unmatched '[/]', a mismatched '[/italic]', any '[tag]') makes
+# rich raise rich.errors.MarkupError at RENDER time, inside the while-loop under Live(screen=True).
+# The exception propagates out of the render thread → the Live screen freezes and never re-renders
+# (the header 'last:' indicator stays frozen, "nothing shows"). Same hazard for table cells (an odd
+# session IP / User-Agent / hostname) and the bind-edit buffer (arbitrary typed chars). The fix
+# renders ALL arbitrary text as PLAIN rich Text, so markup is never parsed and the render can never
+# crash. These tests LOCK that: each renders the offending content WITHOUT raising.
+
+
+def test_render_body_log_view_survives_markup_like_lines():
+    """render_body (log view) with markup-like log lines renders WITHOUT raising (freeze lock).
+
+    A bare '[/]', a mismatched '[/italic]', an unclosed '[' and a Python list repr would each make
+    rich raise MarkupError if the log body were parsed as markup. Rendered as plain Text they are
+    inert — this is the direct regression lock for the host-UAT console freeze.
+    """
+    ui, _ = _make_ui()
+    for line in (
+        "client [bold]X[/] connected",
+        "[/]",
+        "mismatch [bold]x[/italic]",
+        "unclosed [",
+        "params=['a', 'b']",
+        "[/notopen]",
+    ):
+        ui.log_lines.append(line)
+    out = _render_body_text(ui, width=80)
+    # the literal text survives (rendered verbatim, not eaten as markup)
+    assert "[/]" in out
+    assert "unclosed [" in out
+    assert "params=['a', 'b']" in out
+
+
+def test_render_body_sessions_view_survives_markup_in_cells():
+    """render_body (sessions view) with a session whose IP/User-Agent contains '[' renders safely."""
+    ws = _FakeWSManager(
+        sessions_data=[
+            {
+                "ip": "[/]",
+                "connected_since": "2026-06-16T00:00:00Z",
+                "user_agent": "Mozilla [bold]X[/] /5.0",
+            }
+        ]
+    )
+    ui, _ = _make_ui(ws_manager=ws)
+    ui.view = "sessions"
+    out = _render_body_text(ui, width=120)
+    assert "[/]" in out  # the odd IP renders verbatim, no MarkupError
+
+
+def test_render_body_servers_view_survives_markup_in_cells():
+    """render_body (servers view) with a hostname containing '[' renders without raising."""
+    ui, _ = _make_ui(
+        get_servers=lambda: [{"name": "srv-[/]", "host": "host[bold]", "status": "online"}]
+    )
+    ui.view = "servers"
+    out = _render_body_text(ui, width=120)
+    assert "srv-[/]" in out  # the odd name renders verbatim
+
+
+def test_render_header_bind_buffer_survives_markup_chars():
+    """Typing markup-like chars ('[', '[/]') into the bind buffer does not crash the header render."""
+    ui, _ = _make_ui()
+    ui.dispatch("b")
+    for ch in "[/]:80":
+        ui.dispatch(ch)
+    # the buffer holds the raw chars and the header still renders without raising
+    assert "[/]" in ui.input_buffer
+    out = _render_header_text(ui, width=80)
+    assert "host:port" in out  # still in the bind-entry prompt, render succeeded
+
+
+# --- 04.1-04 gap-closure r4: resilient render loop (a bad frame must NOT kill the loop) ---
+
+
+def test_run_loop_survives_a_render_exception(monkeypatch):
+    """A single render exception is caught and the run() loop keeps going (never freezes again).
+
+    Belt-and-suspenders: even if some future renderable raises, the per-frame render is guarded so
+    the render thread can never die from a bad frame. We monkeypatch render_body to raise on the
+    FIRST call then succeed, force the TTY gate + stub Live/Console so no real screen is touched,
+    and assert the loop ran MORE than once (it survived the raise) and stop() cleaned up.
+    """
+    import backend.console as console_mod
+
+    ui, _ = _make_ui()
+
+    # Force the interactive gate True so run() proceeds (no real TTY in CI).
+    monkeypatch.setattr(console_mod, "is_interactive", lambda: True)
+
+    # Stub rich Console + Live so run() touches no real screen. run() imports them locally
+    # (`from rich.console import Console` / `from rich.live import Live`), so patch the source
+    # modules directly — that is what the local import resolves to.
+    import rich.console as _rich_console
+    import rich.live as _rich_live
+
+    class _FakeLive:
+        def __init__(self, *_a, **_k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+    monkeypatch.setattr(_rich_console, "Console", lambda *_a, **_k: object())
+    monkeypatch.setattr(_rich_live, "Live", _FakeLive)
+
+    calls = {"render_header": 0, "render_body": 0}
+    real_stop = ui._stop
+
+    def _fake_header():
+        calls["render_header"] += 1
+        return object()
+
+    def _fake_body():
+        calls["render_body"] += 1
+        if calls["render_body"] == 1:
+            raise ValueError("simulated bad frame — must NOT kill the loop")
+        # after surviving the first bad frame, signal stop so the test is deterministic+fast
+        real_stop.set()
+        return object()
+
+    # The Layout.update path would choke on our object() stubs; stub the layout writes too.
+    class _FakeLayout(dict):
+        def __getitem__(self, _k):
+            class _Region:
+                def update(self, _v):
+                    pass
+
+            return _Region()
+
+    monkeypatch.setattr(ui, "layout", _FakeLayout())
+    monkeypatch.setattr(ui, "render_header", _fake_header)
+    monkeypatch.setattr(ui, "render_body", _fake_body)
+    # run() does `import time` locally, so patch the stdlib module's sleep to be instant — the
+    # loop stays fast and deterministic (the stop event is what actually ends it, not the sleep).
+    import time as _time
+
+    monkeypatch.setattr(_time, "sleep", lambda _s: None)
+
+    ui.run()  # must return normally (loop survived the raise, then stop() ended it)
+
+    # render_body was called at least twice: the raising frame + the surviving frame.
+    assert calls["render_body"] >= 2, "render loop did not survive the bad frame (froze)"
+    assert ui._stop.is_set() is True  # stop() ran in finally → handler removed, clean teardown
+
+
+# --- 04.1-04 gap-closure r4: initial verbosity actually applied on the interactive path ---
+
+
+def test_interactive_startup_applies_initial_verbosity_and_suppresses_noise():
+    """The interactive (TTY) startup path applies the initial level AND tames noisy loggers (D-04).
+
+    The status showed 'Verbosity: INFO' but DEBUG aiosqlite/uvicorn spam still flooded the body —
+    the displayed level was never enforced on the console path. We assert (statically, no run) that
+    cli()'s interactive branch calls apply_log_level(<initial level>) + suppress_noisy_loggers()
+    BEFORE the render thread starts, so INFO is real and the flood is tamed at baseline.
+    """
+    import inspect
+
+    import backend.main as main_mod
+
+    src = inspect.getsource(main_mod.cli)
+    interactive_idx = src.index("if interactive:")
+    apply_idx = src.index("apply_log_level(", interactive_idx)
+    suppress_idx = src.index("suppress_noisy_loggers(", interactive_idx)
+    render_idx = src.index("render_thread = threading.Thread", interactive_idx)
+    # both are applied on the interactive path BEFORE the render loop starts
+    assert interactive_idx < apply_idx < render_idx
+    assert interactive_idx < suppress_idx < render_idx

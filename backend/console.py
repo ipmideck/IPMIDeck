@@ -393,9 +393,21 @@ class ConsoleUI:
         return Panel(body, title=Text.from_markup("[bold]Console[/bold]"))
 
     def render_body(self):
-        """Render the body for the active view: the log tail, the sessions table, or the server table."""
+        """Render the body for the active view: the log tail, the sessions table, or the server table.
+
+        MARKUP-SAFETY (04.1-04 gap-closure r4 — the console-freeze fix): every piece of arbitrary
+        text rendered here (log lines, table cell values) is wrapped in rich.text.Text, which does
+        NOT parse console markup. Previously the log body was Panel("\\n".join(self.log_lines)) —
+        rich parses that string as MARKUP by default, so a log line containing an unmatched '[/]', a
+        mismatched '[/italic]' or any '[tag]' (object reprs, SQL, BMC output all contain brackets)
+        raised rich.errors.MarkupError at render time, inside the while-loop under Live(screen=True).
+        That exception killed the render thread → the screen froze and never re-rendered (the 'last:'
+        indicator stuck, "nothing shows"). Wrapping the content in Text makes brackets inert literal
+        characters, so an arbitrary log line / IP / User-Agent / hostname can NEVER crash the render.
+        """
         from rich.panel import Panel
         from rich.table import Table
+        from rich.text import Text
 
         if self.view == "sessions":
             table = Table(title="Connected sessions")  # D-14/D-19
@@ -403,10 +415,11 @@ class ConsoleUI:
             table.add_column("Connected since")
             table.add_column("User-Agent")
             for row in self.ws_manager.sessions():
+                # Text() per cell so an odd IP / User-Agent containing '[' is literal, not markup.
                 table.add_row(
-                    str(row.get("ip", "")),
-                    str(row.get("connected_since", "")),
-                    str(row.get("user_agent", "")),
+                    Text(str(row.get("ip", ""))),
+                    Text(str(row.get("connected_since", ""))),
+                    Text(str(row.get("user_agent", ""))),
                 )
             return table
         if self.view == "servers":
@@ -415,14 +428,16 @@ class ConsoleUI:
             table.add_column("Host")
             table.add_column("Status")
             for srv in self.get_servers():
+                # Text() per cell so an odd server name / hostname containing '[' can't crash render.
                 table.add_row(
-                    str(srv.get("name", "")),
-                    str(srv.get("host", "")),
-                    str(srv.get("status", "")),
+                    Text(str(srv.get("name", ""))),
+                    Text(str(srv.get("host", ""))),
+                    Text(str(srv.get("status", ""))),
                 )
             return table
-        # default: the scrolling-log view (last N lines of the deque)
-        return Panel("\n".join(self.log_lines), title="Logs")
+        # default: the scrolling-log view (last N lines of the deque). Text(...) — NOT a raw str —
+        # so arbitrary log content is rendered verbatim and markup-like text never trips the parser.
+        return Panel(Text("\n".join(self.log_lines)), title="Logs")
 
     # --- interaction -----------------------------------------------------------------------
 
@@ -611,8 +626,20 @@ class ConsoleUI:
                 redirect_stderr=True,
             ):
                 while not self._stop.is_set():
-                    self.layout["header"].update(self.render_header())
-                    self.layout["body"].update(self.render_body())
+                    # RESILIENT RENDER (04.1-04 gap-closure r4 — belt-and-suspenders): guard the
+                    # per-frame render so a SINGLE bad frame can NEVER kill the render thread again
+                    # (that was the console-freeze bug — a MarkupError from a log line propagated out
+                    # of this loop, the thread died, the screen froze). Markup-safety in
+                    # render_body()/render_header() is the primary fix; this is the safety net for
+                    # any future renderable that could raise. On a render error we log it (to the
+                    # module logger AND, since the DequeLogHandler is attached, into the on-screen
+                    # body) and continue — the loop keeps running until stop() is signalled. We
+                    # deliberately do NOT guard the loop condition itself, so _stop still exits.
+                    try:
+                        self.layout["header"].update(self.render_header())
+                        self.layout["body"].update(self.render_body())
+                    except Exception:
+                        logger.exception("Console render frame failed — continuing")
                     time.sleep(0.25)
         finally:
             self.stop()  # remove the DequeLogHandler — restore normal stdout logging

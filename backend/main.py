@@ -635,6 +635,18 @@ def cli():
             cur_level = (early_cfg.logging.level.upper() if early_cfg is not None else "INFO")
             scheme = "https" if (early_cfg is not None and early_cfg.server.https) else "http"
 
+            # D-04/D-11 (04.1-04 gap-closure r4): ACTUALLY apply the initial verbosity on the
+            # interactive path BEFORE the render thread starts. lifespan() does _setup_logging +
+            # suppress_noisy_loggers, but that only runs LATER inside server.serve(); until then the
+            # console showed "Verbosity: INFO" while DEBUG aiosqlite/uvicorn spam still flooded the
+            # body — the displayed level was never enforced. Applying it here (root + handlers via
+            # apply_log_level) makes the status real and tames the noise at baseline so the console
+            # opens quiet. Idempotent with lifespan's later call; the 'v' toggle re-applies on demand.
+            from backend.core.logging_util import apply_log_level
+
+            apply_log_level(cur_level)
+            suppress_noisy_loggers()
+
             console = ConsoleUI(
                 ws_manager=ws_manager,
                 # D-15a: map a wildcard bind (0.0.0.0/::/"") to a browsable 127.0.0.1 so 'u'
