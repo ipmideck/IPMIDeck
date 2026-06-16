@@ -353,7 +353,15 @@ def _mount_spa(app: FastAPI) -> None:
 
 # === CLI entry point ===
 
-def cli():
+def _build_arg_parser() -> argparse.ArgumentParser:
+    """Build the cli() argument parser (factored out so the subcommand routing is unit-testable).
+
+    Subcommands (r7): `start` is the primary serve command; `serve` is kept as a deprecated alias;
+    a bare invocation (no command) also serves. Only `reset-password` short-circuits in cli() (along
+    with the --gen-cert / --reload flag early-returns). So `ipmideck start`, `ipmideck`, and
+    `ipmideck --host H --port P` all reach the serve path, while `ipmideck reset-password` does not.
+    Docker's `uvicorn backend.main:app` never calls cli(), so it is unaffected.
+    """
     parser = argparse.ArgumentParser(description=f"{APP_NAME} — IPMI Management Platform")
     # default=None sentinels — lets us detect whether the user explicitly passed
     # --host/--port so config.yaml can supply the value when the flag is absent.
@@ -370,9 +378,16 @@ def cli():
     )
 
     subparsers = parser.add_subparsers(dest="command")
-    subparsers.add_parser("serve", help="Start the server (default)")
+    # `start` is the primary serve command; bare (no command) also serves.
+    subparsers.add_parser("start", help="Start the server (default)")
+    # `serve` kept as a deprecated alias of `start` so existing docs/scripts keep working.
+    subparsers.add_parser("serve", help="Start the server (deprecated alias of `start`)")
     subparsers.add_parser("reset-password", help="Reset admin password")
+    return parser
 
+
+def cli():
+    parser = _build_arg_parser()
     args = parser.parse_args()
 
     if args.demo:

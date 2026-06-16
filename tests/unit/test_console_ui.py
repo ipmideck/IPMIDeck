@@ -470,6 +470,63 @@ def test_cli_wires_get_bind_with_effective_host_port():
     assert "get_bind=lambda: (effective_host, effective_port)" in src
 
 
+# --- gap-closure r7: ipmideck entry point + `start` subcommand (additive) ----------------
+
+
+def test_arg_parser_start_bare_and_flags_resolve_to_serve():
+    """`start`, bare (no command), `serve`, and `--port` all resolve to the serve path (r7).
+
+    The cli() dispatch only short-circuits on `reset-password` (and the flag early-returns); every
+    other command — including the new `start` and a bare invocation — falls through to serve. We
+    assert the parsed command is in {None, 'start', 'serve'} for each so `ipmideck start`,
+    `ipmideck`, and `ipmideck --port 8080` all serve.
+    """
+    from backend.main import _build_arg_parser
+
+    parser = _build_arg_parser()
+    for argv in (["start"], [], ["serve"], ["--port", "8080"], ["--host", "127.0.0.1"]):
+        args = parser.parse_args(argv)
+        assert args.command in (None, "start", "serve"), f"{argv} did not resolve to the serve path"
+
+
+def test_arg_parser_reset_password_resolves_to_reset():
+    """`reset-password` parses to the reset-password command (the only short-circuit, unchanged)."""
+    from backend.main import _build_arg_parser
+
+    parser = _build_arg_parser()
+    args = parser.parse_args(["reset-password"])
+    assert args.command == "reset-password"
+
+
+def test_arg_parser_start_with_flags_keeps_host_port():
+    """`--host 127.0.0.1 --port 8080 start` carries the bind flags through (serve with flags).
+
+    Global flags precede the subcommand (argparse convention — --host/--port are top-level options,
+    same placement that already worked for `serve`). The flags resolve and the command still serves.
+    """
+    from backend.main import _build_arg_parser
+
+    parser = _build_arg_parser()
+    args = parser.parse_args(["--host", "127.0.0.1", "--port", "8080", "start"])
+    assert args.command == "start"
+    assert args.host == "127.0.0.1"
+    assert args.port == 8080
+
+
+def test_pyproject_has_both_ipmilink_and_ipmideck_entry_points():
+    """pyproject.toml [project.scripts] declares BOTH ipmilink and ipmideck → backend.main:cli (r7).
+
+    The ipmideck command is added alongside the existing ipmilink one (both kept) so `ipmideck` and
+    `ipmideck start` serve once the operator re-runs `pip install -e .`. File-content assertion.
+    """
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    text = (root / "pyproject.toml").read_text(encoding="utf-8")
+    assert 'ipmilink = "backend.main:cli"' in text
+    assert 'ipmideck = "backend.main:cli"' in text
+
+
 # --- gap-closure r7: change-bind persist failure must surface (not be silently swallowed) -
 
 

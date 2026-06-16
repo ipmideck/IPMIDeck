@@ -34,7 +34,11 @@ dev = [
 ]
 
 [project.scripts]
+# Both console entry points map to the same cli(). `ipmideck` is the current brand
+# (Memory: canonical name IPMIDeck); `ipmilink` is kept for backward compatibility so
+# existing installs/docs keep working. Re-run `pip install -e .` to register `ipmideck`.
 ipmilink = "backend.main:cli"
+ipmideck = "backend.main:cli"
 
 [tool.setuptools.packages.find]
 include = ["backend*"]
