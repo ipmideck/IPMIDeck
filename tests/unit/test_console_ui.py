@@ -331,94 +331,117 @@ def test_bind_edit_ignores_special_key_sentinel():
     assert ui.input_mode == "bind"
 
 
-# --- gap-closure r5: change-bind editor pre-fills the CURRENT bind (D-15d) ----------------
+# --- gap-closure r6: change-bind editor SHOWS the current bind as a read-only label -------
+#   (UX correction of r5 — the editable buffer starts EMPTY, NOT pre-filled, so typing the new
+#    value shows immediately; r5 pre-filled the buffer and the operator's typing "did nothing")
 
 
-def test_b_prefills_current_bind_from_get_bind():
-    """With get_bind wired, 'b' enters bind-edit mode pre-filled with the current 'host:port'.
+def test_b_starts_with_empty_buffer_even_with_get_bind():
+    """With get_bind wired, 'b' enters bind-edit mode with an EMPTY buffer (NOT pre-filled, r6).
 
-    The operator edits FROM the value in effect (RAW bind host, e.g. 0.0.0.0 — not the browsable
-    127.0.0.1 mapping) instead of an empty buffer.
+    r5 pre-filled the buffer with the current 'host:port' which confused the operator (typing
+    appeared to do nothing). r6: the current bind is shown only as a read-only LABEL; the editable
+    buffer starts empty so the typed value shows immediately.
     """
     ui, _ = _make_ui(get_bind=lambda: ("0.0.0.0", 8000))
     ui.dispatch("b")
     assert ui.input_mode == "bind"
-    assert ui.input_buffer == "0.0.0.0:8000"
+    assert ui.input_buffer == ""  # EMPTY — not pre-filled with the current bind
 
 
-def test_b_header_shows_current_bind_text():
-    """The bind-edit header prompt labels the CURRENT bind so the operator sees what they edit."""
+def test_b_header_shows_current_bind_label_and_empty_new_field():
+    """The bind-edit header LABELS the current bind (read-only) and shows the empty new-value field.
+
+    The prompt must contain the word 'current' and the current 'host:port' text as a label, while
+    the editable 'new:' field starts empty (typing shows there). The big banner stays pinned.
+    """
     ui, _ = _make_ui(get_bind=lambda: ("0.0.0.0", 8000))
     ui.dispatch("b")
-    out = _render_header_text(ui, width=80)
-    # the current bind value is surfaced in the prompt AND pre-filled in the editable buffer
-    assert "0.0.0.0:8000" in out
+    out = _render_header_text(ui, width=120)
+    # the current bind is surfaced as a read-only label
     assert "current" in out
+    assert "0.0.0.0:8000" in out
+    # the editable new-value field is present (empty so far) — the buffer drives it
+    assert ui.input_buffer == ""
     # the big banner stays pinned even while editing (r3 — banner is permanent, not transient)
     assert "█" in out
 
 
-def test_b_prefilled_edit_then_enter_commits_edited_value():
-    """Editing the pre-filled buffer (backspace the port) then Enter calls on_change_bind w/ edit.
+def test_b_empty_buffer_typed_value_is_the_new_bind_and_enter_commits():
+    """Typing into the (empty) buffer builds exactly the typed string; Enter commits that value.
 
-    Start from the pre-filled '0.0.0.0:8000', delete the last digit and type '1' → '0.0.0.0:8001',
-    confirm → on_change_bind('0.0.0.0', 8001).
+    The buffer starts empty, so the typed '127.0.0.1:8080' IS the new bind (no clearing of a
+    pre-fill). Enter calls on_change_bind('127.0.0.1', 8080) and pushes 'restart required'.
     """
     ui, calls = _make_ui(get_bind=lambda: ("0.0.0.0", 8000))
     ui.dispatch("b")
-    assert ui.input_buffer == "0.0.0.0:8000"
-    ui.dispatch("\x08")  # backspace the trailing '0'
-    ui.dispatch("1")  # → 0.0.0.0:8001
-    assert ui.input_buffer == "0.0.0.0:8001"
+    assert ui.input_buffer == ""
+    for ch in "127.0.0.1:8080":
+        ui.dispatch(ch)
+    assert ui.input_buffer == "127.0.0.1:8080"  # exactly the typed value, nothing prepended
     ui.dispatch("\r")
-    assert calls["change_bind"] == [("0.0.0.0", 8001)]
+    assert calls["change_bind"] == [("127.0.0.1", 8080)]
     assert "restart required" in ui.log_lines[-1]
     assert ui.input_mode is None
     assert ui.input_buffer == ""
 
 
-def test_b_prefilled_esc_cancels_and_next_b_rereads_current():
-    """ESC cancels the pre-filled editor (no callback, buffer reset); a later 'b' re-reads current.
-
-    ESC must restore input_mode=None and clear the buffer so the next 'b' re-reads get_bind fresh
-    (so a bind that changed between presses is reflected, not a stale leftover).
-    """
+def test_b_esc_cancels_and_next_b_still_empty_with_fresh_current_label():
+    """ESC cancels the editor (no callback, buffer empty); a later 'b' is still empty with a fresh
+    current-bind label re-read from get_bind."""
     current = {"value": ("0.0.0.0", 8000)}
     ui, calls = _make_ui(get_bind=lambda: current["value"])
     ui.dispatch("b")
-    ui.dispatch("\x08")  # mutate the buffer so we can prove ESC resets it
+    ui.dispatch("9")  # type something so we can prove ESC clears it
     ui.dispatch("\x1b")  # ESC cancels
     assert calls["change_bind"] == []
     assert ui.input_mode is None
     assert ui.input_buffer == ""
-    # the live bind changed between presses — the next 'b' must re-read it fresh, not reuse stale.
+    # the live bind changed between presses — the next 'b' label re-reads it fresh (buffer empty).
     current["value"] = ("127.0.0.1", 9000)
     ui.dispatch("b")
-    assert ui.input_buffer == "127.0.0.1:9000"
+    assert ui.input_buffer == ""
+    out = _render_header_text(ui, width=120)
+    assert "127.0.0.1:9000" in out  # the LABEL reflects the live bind, re-read on each 'b'
+    assert "current" in out
 
 
-def test_b_without_get_bind_is_empty_buffer_backward_compat():
-    """Backward-compat: a ConsoleUI WITHOUT get_bind (None) starts 'b' with an empty buffer."""
+def test_b_without_get_bind_is_empty_buffer_no_current_label():
+    """Backward-compat: a ConsoleUI WITHOUT get_bind (None) starts 'b' empty with NO current label."""
     ui, _ = _make_ui()  # _make_ui passes no get_bind → defaults to None
     assert ui.get_bind is None
     ui.dispatch("b")
     assert ui.input_mode == "bind"
-    assert ui.input_buffer == ""  # existing behavior preserved, no crash
+    assert ui.input_buffer == ""  # empty buffer, no crash
+    out = _render_header_text(ui, width=80)
+    assert "host:port" in out  # generic prompt
+    assert "current" not in out  # no current-bind label when get_bind is None
 
 
-def test_b_prefilled_buffer_with_markup_chars_renders_safely():
-    """A pre-filled bind buffer containing markup-ish chars renders the header without raising."""
-    # a (synthetic) host with markup-like chars exercises the round-4 escaping on the pre-fill path
+def test_b_current_label_with_markup_chars_renders_safely():
+    """A current-bind value containing markup-ish chars renders the header label without raising."""
+    # a (synthetic) host with markup-like chars exercises the round-4 escaping on the label path
     ui, _ = _make_ui(get_bind=lambda: ("[bold]h[/]", 8000))
     ui.dispatch("b")
-    assert ui.input_buffer == "[bold]h[/]:8000"
-    out = _render_header_text(ui, width=80)  # must not raise MarkupError
-    assert "8000" in out  # the pre-filled value still renders verbatim
+    assert ui.input_buffer == ""  # buffer stays empty; only the LABEL carries the current bind
+    out = _render_header_text(ui, width=120)  # must not raise MarkupError
+    assert "8000" in out  # the current-bind label still renders verbatim
     assert "current" in out
 
 
-def test_get_bind_failure_degrades_to_empty_buffer():
-    """A get_bind that raises must not break entering edit mode — degrade to an empty buffer."""
+def test_b_typed_value_with_markup_chars_renders_safely():
+    """A typed buffer containing markup-ish chars renders the header without raising (markup-safe)."""
+    ui, _ = _make_ui(get_bind=lambda: ("0.0.0.0", 8000))
+    ui.dispatch("b")
+    for ch in "[/]:80":
+        ui.dispatch(ch)
+    assert "[/]" in ui.input_buffer
+    out = _render_header_text(ui, width=120)  # must not raise MarkupError
+    assert "current" in out  # the label is still shown alongside the typed value
+
+
+def test_get_bind_failure_degrades_to_no_current_label():
+    """A get_bind that raises must not break edit mode — omit the label, keep the empty buffer."""
 
     def _boom():
         raise RuntimeError("bind unavailable")
@@ -430,13 +453,14 @@ def test_get_bind_failure_degrades_to_empty_buffer():
     # the header still renders (falls back to the generic host:port prompt) without raising
     out = _render_header_text(ui, width=80)
     assert "host:port" in out
+    assert "current" not in out  # the failing get_bind omits the current label
 
 
 def test_cli_wires_get_bind_with_effective_host_port():
-    """cli() passes get_bind=lambda: (effective_host, effective_port) to ConsoleUI (D-15d r5).
+    """cli() passes get_bind=lambda: (effective_host, effective_port) to ConsoleUI (D-15d).
 
-    Static source assertion (no run): the change-bind editor must be wired to the RAW effective
-    bind, NOT the browsable get_url mapping, so it pre-fills the actual value being edited.
+    Static source assertion (no run): the change-bind editor's current-bind LABEL must be wired to
+    the RAW effective bind, NOT the browsable get_url mapping, so it shows the actual value in effect.
     """
     import inspect
 
