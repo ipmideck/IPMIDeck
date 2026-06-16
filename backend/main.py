@@ -658,6 +658,12 @@ def cli():
                 on_set_verbosity=_on_set_verbosity,  # D-11/D-25 (dispatch already on-loop)
                 on_change_bind=_on_change_bind,  # D-15d
                 verbosity=cur_level,
+                # D-15d r5: pre-fill the change-bind editor with the CURRENT raw bind so the
+                # operator edits from the value in effect. RAW host (effective_host, e.g. 0.0.0.0)
+                # — NOT the browsable 127.0.0.1 get_url mapping — because this is the actual bind
+                # being edited. A change-bind+restart starts a new session that recomputes
+                # effective_host/port, so this naturally reflects the current bind each run.
+                get_bind=lambda: (effective_host, effective_port),
             )
             # Render loop on a DEDICATED (non-daemon) thread; key listener on a DAEMON
             # thread that marshals each key onto the loop via call_soon_threadsafe.

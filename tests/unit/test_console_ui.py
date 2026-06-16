@@ -331,6 +331,121 @@ def test_bind_edit_ignores_special_key_sentinel():
     assert ui.input_mode == "bind"
 
 
+# --- gap-closure r5: change-bind editor pre-fills the CURRENT bind (D-15d) ----------------
+
+
+def test_b_prefills_current_bind_from_get_bind():
+    """With get_bind wired, 'b' enters bind-edit mode pre-filled with the current 'host:port'.
+
+    The operator edits FROM the value in effect (RAW bind host, e.g. 0.0.0.0 — not the browsable
+    127.0.0.1 mapping) instead of an empty buffer.
+    """
+    ui, _ = _make_ui(get_bind=lambda: ("0.0.0.0", 8000))
+    ui.dispatch("b")
+    assert ui.input_mode == "bind"
+    assert ui.input_buffer == "0.0.0.0:8000"
+
+
+def test_b_header_shows_current_bind_text():
+    """The bind-edit header prompt labels the CURRENT bind so the operator sees what they edit."""
+    ui, _ = _make_ui(get_bind=lambda: ("0.0.0.0", 8000))
+    ui.dispatch("b")
+    out = _render_header_text(ui, width=80)
+    # the current bind value is surfaced in the prompt AND pre-filled in the editable buffer
+    assert "0.0.0.0:8000" in out
+    assert "current" in out
+    # the big banner stays pinned even while editing (r3 — banner is permanent, not transient)
+    assert "█" in out
+
+
+def test_b_prefilled_edit_then_enter_commits_edited_value():
+    """Editing the pre-filled buffer (backspace the port) then Enter calls on_change_bind w/ edit.
+
+    Start from the pre-filled '0.0.0.0:8000', delete the last digit and type '1' → '0.0.0.0:8001',
+    confirm → on_change_bind('0.0.0.0', 8001).
+    """
+    ui, calls = _make_ui(get_bind=lambda: ("0.0.0.0", 8000))
+    ui.dispatch("b")
+    assert ui.input_buffer == "0.0.0.0:8000"
+    ui.dispatch("\x08")  # backspace the trailing '0'
+    ui.dispatch("1")  # → 0.0.0.0:8001
+    assert ui.input_buffer == "0.0.0.0:8001"
+    ui.dispatch("\r")
+    assert calls["change_bind"] == [("0.0.0.0", 8001)]
+    assert "restart required" in ui.log_lines[-1]
+    assert ui.input_mode is None
+    assert ui.input_buffer == ""
+
+
+def test_b_prefilled_esc_cancels_and_next_b_rereads_current():
+    """ESC cancels the pre-filled editor (no callback, buffer reset); a later 'b' re-reads current.
+
+    ESC must restore input_mode=None and clear the buffer so the next 'b' re-reads get_bind fresh
+    (so a bind that changed between presses is reflected, not a stale leftover).
+    """
+    current = {"value": ("0.0.0.0", 8000)}
+    ui, calls = _make_ui(get_bind=lambda: current["value"])
+    ui.dispatch("b")
+    ui.dispatch("\x08")  # mutate the buffer so we can prove ESC resets it
+    ui.dispatch("\x1b")  # ESC cancels
+    assert calls["change_bind"] == []
+    assert ui.input_mode is None
+    assert ui.input_buffer == ""
+    # the live bind changed between presses — the next 'b' must re-read it fresh, not reuse stale.
+    current["value"] = ("127.0.0.1", 9000)
+    ui.dispatch("b")
+    assert ui.input_buffer == "127.0.0.1:9000"
+
+
+def test_b_without_get_bind_is_empty_buffer_backward_compat():
+    """Backward-compat: a ConsoleUI WITHOUT get_bind (None) starts 'b' with an empty buffer."""
+    ui, _ = _make_ui()  # _make_ui passes no get_bind → defaults to None
+    assert ui.get_bind is None
+    ui.dispatch("b")
+    assert ui.input_mode == "bind"
+    assert ui.input_buffer == ""  # existing behavior preserved, no crash
+
+
+def test_b_prefilled_buffer_with_markup_chars_renders_safely():
+    """A pre-filled bind buffer containing markup-ish chars renders the header without raising."""
+    # a (synthetic) host with markup-like chars exercises the round-4 escaping on the pre-fill path
+    ui, _ = _make_ui(get_bind=lambda: ("[bold]h[/]", 8000))
+    ui.dispatch("b")
+    assert ui.input_buffer == "[bold]h[/]:8000"
+    out = _render_header_text(ui, width=80)  # must not raise MarkupError
+    assert "8000" in out  # the pre-filled value still renders verbatim
+    assert "current" in out
+
+
+def test_get_bind_failure_degrades_to_empty_buffer():
+    """A get_bind that raises must not break entering edit mode — degrade to an empty buffer."""
+
+    def _boom():
+        raise RuntimeError("bind unavailable")
+
+    ui, _ = _make_ui(get_bind=_boom)
+    ui.dispatch("b")
+    assert ui.input_mode == "bind"
+    assert ui.input_buffer == ""
+    # the header still renders (falls back to the generic host:port prompt) without raising
+    out = _render_header_text(ui, width=80)
+    assert "host:port" in out
+
+
+def test_cli_wires_get_bind_with_effective_host_port():
+    """cli() passes get_bind=lambda: (effective_host, effective_port) to ConsoleUI (D-15d r5).
+
+    Static source assertion (no run): the change-bind editor must be wired to the RAW effective
+    bind, NOT the browsable get_url mapping, so it pre-fills the actual value being edited.
+    """
+    import inspect
+
+    import backend.main as main_mod
+
+    src = inspect.getsource(main_mod.cli)
+    assert "get_bind=lambda: (effective_host, effective_port)" in src
+
+
 def test_restart_dispatch_calls_callback():
     """dispatch('r') invokes the on_restart callback (D-15c)."""
     ui, calls = _make_ui()

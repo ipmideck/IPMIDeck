@@ -236,6 +236,9 @@ class ConsoleUI:
       on_restart()        -> clean in-process restart (D-15c)
       on_set_verbosity(l) -> apply_log_level + persist the chosen level (D-11/D-25)
       on_change_bind(h,p) -> persist host/port + "restart required" (D-15d)
+      get_bind()          -> current (host, port) so the change-bind editor pre-fills the RAW bind
+                             value being edited (D-15d r5); OPTIONAL — None keeps the empty-buffer
+                             behaviour for backward compatibility.
     """
 
     # Re-exported so callers/tests reference the sentinel via the class (ConsoleUI.IGNORE_KEY).
@@ -260,6 +263,7 @@ class ConsoleUI:
         on_change_bind,
         verbosity: str = "INFO",
         max_log_lines: int = 500,
+        get_bind=None,
     ) -> None:
         self.ws_manager = ws_manager
         self.get_url = get_url
@@ -268,6 +272,10 @@ class ConsoleUI:
         self.on_restart = on_restart
         self.on_set_verbosity = on_set_verbosity
         self.on_change_bind = on_change_bind
+        # OPTIONAL (D-15d r5): returns the current (host, port) so the change-bind editor pre-fills
+        # the RAW bind value being edited. None (default) keeps the empty-buffer behaviour so any
+        # caller/test that omits it is unaffected (backward compatible).
+        self.get_bind = get_bind
         self.verbosity = verbosity  # D-04: default/quiet == INFO
         self.log_lines: deque = deque(maxlen=max_log_lines)
         self.view = "log"  # "log" | "sessions" | "servers"
@@ -367,12 +375,29 @@ class ConsoleUI:
         # shows the host:port format, how to confirm/cancel, and the current buffer — so the
         # operator gets visible feedback for every keystroke (the editor reuses the key listener).
         # It REPLACES the help bar (not the status/credits) so the bind editor never regresses.
+        # D-15d r5: when get_bind is wired the prompt also LABELS the current bind (and the buffer
+        # is pre-filled with it) so the operator edits from the value already in effect. The buffer
+        # is bracket-escaped (round-4 markup-safety) so a pre-filled value with '[' never crashes.
         if self.input_mode == "bind":
-            action_line = (
-                "[bold yellow]Enter new bind as host:port[/bold yellow]  "
-                "[dim](Enter=confirm, ESC=cancel, Backspace=del):[/dim] "
-                f"[cyan]{escape(self.input_buffer)}[/cyan]"
-            )
+            current = None
+            if self.get_bind is not None:
+                try:
+                    ch, cp = self.get_bind()
+                    current = f"{ch}:{cp}"
+                except Exception:
+                    current = None
+            if current is not None:
+                action_line = (
+                    f"[bold yellow]Change bind (current {escape(current)})[/bold yellow]  "
+                    "[dim]— edit and Enter to apply, ESC cancel, Backspace del:[/dim] "
+                    f"[cyan]{escape(self.input_buffer)}[/cyan]"
+                )
+            else:
+                action_line = (
+                    "[bold yellow]Enter new bind as host:port[/bold yellow]  "
+                    "[dim](Enter=confirm, ESC=cancel, Backspace=del):[/dim] "
+                    f"[cyan]{escape(self.input_buffer)}[/cyan]"
+                )
         else:
             action_line = help_bar
         status = (
@@ -455,15 +480,30 @@ class ConsoleUI:
         return ConsoleUI._validate_bind(host, port_str)
 
     def _enter_bind_edit(self) -> None:
-        """Enter the keystroke-driven bind editor (key 'b'): flip input_mode, clear the buffer.
+        """Enter the keystroke-driven bind editor (key 'b'): flip input_mode, seed the buffer.
 
         Deliberately does NO blocking I/O — it only sets state. While input_mode == "bind" the
         normal action keys are suspended and dispatch() routes each keypress to input_buffer, so
         the existing key listener drives the edit and the asyncio loop thread is NEVER blocked
         (the old input()-based prompt blocked the loop and fought the key thread → console freeze).
+
+        D-15d r5: if get_bind is wired the buffer is PRE-FILLED with the CURRENT bind formatted as
+        "{host}:{port}" — using the RAW bind host (e.g. 0.0.0.0), NOT the browsable 127.0.0.1
+        mapping, because this is the actual value being edited — so the operator sees and edits from
+        the current value (Backspace/edit from there). get_bind being None (no callback, or a future
+        caller that omits it) or raising falls back to the empty buffer (backward compatible). The
+        prompt re-reads get_bind on EVERY 'b' so it always reflects the live bind (after a
+        change-bind+restart the next session recomputes it).
         """
         self.input_mode = "bind"
         self.input_buffer = ""
+        if self.get_bind is not None:
+            try:
+                host, port = self.get_bind()
+                self.input_buffer = f"{host}:{port}"
+            except Exception:
+                # Never let a misbehaving callback break entering edit mode — degrade to empty.
+                self.input_buffer = ""
 
     def _cancel_input(self) -> None:
         """Leave any input mode without committing (ESC) — clears the editor state."""
