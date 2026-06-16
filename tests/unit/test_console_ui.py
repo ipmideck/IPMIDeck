@@ -470,6 +470,35 @@ def test_cli_wires_get_bind_with_effective_host_port():
     assert "get_bind=lambda: (effective_host, effective_port)" in src
 
 
+# --- gap-closure r7: change-bind persist failure must surface (not be silently swallowed) -
+
+
+def test_cli_change_bind_callback_guards_persist_failure():
+    """cli()'s _on_change_bind wraps update_server_yaml in try/except + logger.warning (r7).
+
+    Static source assertion (no run — _on_change_bind is a closure nested in cli()/_serve_forever):
+    a file-write failure (PermissionError/OSError) when persisting the new bind to config.yaml must
+    NOT be silently swallowed. Previously the operator only saw "restart required" with no hint that
+    the persist failed. The guard mirrors the existing _on_set_verbosity pattern (try/except +
+    logger.warning) so a persist failure is logged (and, while Live owns the screen, shown in the
+    body via the DequeLogHandler) instead of lost.
+    """
+    import inspect
+
+    import backend.main as main_mod
+
+    src = inspect.getsource(main_mod.cli)
+    change_bind_idx = src.index("def _on_change_bind(")
+    # the change-bind callback body must contain a try/except guarding the persist + a warning log.
+    # Window the source from the def to the NEXT callback def so we assert against this body only.
+    next_def_idx = src.index("\n        console = ", change_bind_idx)
+    body = src[change_bind_idx:next_def_idx]
+    assert "try:" in body, "_on_change_bind must guard update_server_yaml in try/except"
+    assert "update_server_yaml(" in body
+    assert "except Exception" in body, "_on_change_bind must catch persist failures"
+    assert "logger.warning(" in body, "_on_change_bind must surface persist failure via logger.warning"
+
+
 def test_restart_dispatch_calls_callback():
     """dispatch('r') invokes the on_restart callback (D-15c)."""
     ui, calls = _make_ui()

@@ -619,7 +619,16 @@ def cli():
             # D-15d: persist host/port to config.yaml's server block. Applies on the NEXT
             # restart (the console already told the operator "restart required"). env/CLI
             # still override on boot (documented above).
-            update_server_yaml({"host": host, "port": port})
+            #
+            # r7: guard the persist in try/except + logger.warning, mirroring _on_set_verbosity.
+            # A file-write failure (PermissionError/OSError on a read-only/locked config.yaml) was
+            # previously swallowed silently — the operator saw "restart required" with no hint the
+            # persist failed. The warning is logged (and, while Live owns the screen, rendered into
+            # the body via the DequeLogHandler) so a failed persist is surfaced, not lost.
+            try:
+                update_server_yaml({"host": host, "port": port})
+            except Exception as e:
+                logger.warning("Failed to persist bind %s:%d — %s", host, port, e)
 
         console = None
         render_thread = None
