@@ -407,6 +407,46 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _reexec_args(argv: list[str]) -> list[str]:
+    """Strip --host/--port (and the -p alias) + their values from argv for the restart re-exec (r10).
+
+    The restart (key 'r') re-execs a FRESH process via `python -m backend.main <args>` so it re-reads
+    config.yaml — where the change-bind flow (D-15d) JUST persisted the new host/port. If we passed
+    the ORIGINAL --host/--port CLI override through, the new process would re-bind the OLD value and
+    the change-bind would never take effect. So this drops the bind flags (and their value tokens),
+    letting config.yaml supply the bind, while keeping every OTHER arg verbatim (e.g. `start`,
+    `--demo`, `--config <path>`, `--reload`).
+
+    Handles BOTH forms:
+      • space-separated  `--host 0.0.0.0`  /  `--port 8080`  /  `-p 8080`  → drop the flag AND the
+        following value token.
+      • combined equals  `--host=0.0.0.0`  /  `--port=8080`  /  `-p=8080`  → drop just the one token.
+
+    Pure (returns a NEW list, never mutates argv) so it is unit-testable without any process spawn.
+    The `-p` short alias is handled defensively: the current parser does not define it, but stripping
+    it is harmless if absent and robust if it is ever added as a --port alias.
+    """
+    # Flags whose VALUE is a separate following token (space-separated form).
+    _value_flags = {"--host", "--port", "-p"}
+    # Combined `--flag=value` prefixes to drop as a single token.
+    _equals_prefixes = ("--host=", "--port=", "-p=")
+
+    out: list[str] = []
+    skip_next = False
+    for tok in argv:
+        if skip_next:
+            # This token is the VALUE of a just-dropped space-separated bind flag — drop it too.
+            skip_next = False
+            continue
+        if tok in _value_flags:
+            skip_next = True  # drop this flag AND its following value token
+            continue
+        if tok.startswith(_equals_prefixes):
+            continue  # combined form: the value is in this same token, drop the whole thing
+        out.append(tok)
+    return out
+
+
 def _make_graceful_signal_handler(server_box: list):
     """Build the cross-platform SIGINT/SIGTERM handler used by cli() (factored out so it is unit-testable).
 
@@ -758,9 +798,19 @@ def cli():
         # cause), leaving the emergency sys.exit handler installed → Ctrl+C traceback.
 
         try:
+            # SINGLE serve, then either a clean exit or a process RE-EXEC restart (r10). uvicorn
+            # 0.42's serve() is single-shot and cannot be safely re-awaited in the same loop — the
+            # old in-process re-serve loop rebound nothing (site unreachable on BOTH binds) and a
+            # failure left the loop dead while the non-daemon render thread kept the process alive →
+            # 'r'/'q'/Ctrl+C froze. We now do what the operator did by hand: serve once; on a restart
+            # request, tear the console down and re-exec a FRESH process that re-reads config.yaml
+            # (the change-bind persisted the new bind there). The while True stays only so the
+            # structure/finally is unchanged — there is no second iteration in practice (a clean exit
+            # breaks; a restart re-execs the process).
             while True:
-                # Re-read config each iteration so a persisted host/port (D-15d) applies on
-                # restart; the CLI flag still wins (precedence preserved).
+                # Re-read config so a persisted host/port (D-15d) applies; the CLI flag still wins
+                # (precedence preserved). On a restart the re-exec'd process re-reads it again with
+                # the --host/--port override STRIPPED (see _reexec_args), so the persisted bind takes.
                 iter_cfg = load_config()
                 iter_host = (
                     args.host if args.host is not None else iter_cfg.server.host
@@ -787,13 +837,47 @@ def cli():
                 server_box[0] = server
                 restart_requested[0] = False
 
-                await server.serve()  # runs the FULL FastAPI lifespan (startup fans, etc.)
+                await server.serve()  # full FastAPI lifespan: startup → serve → shutdown (fan restore)
 
                 if not restart_requested[0]:
-                    break  # clean exit → lifespan shutdown already ran (fans restored)
-                logger.info("%s restarting in-process…", APP_NAME)
+                    break  # clean exit; lifespan shutdown already ran (fans restored — FIX-03 L1)
+
+                # RESTART requested: graceful shutdown already happened inside serve() above (the
+                # lifespan fan-restore ran — FIX-03 layer 1 NOT regressed); now re-exec a fresh
+                # process. cache_task is cancelled in finally on the way out; we also stop it here so
+                # it does not linger between the teardown and the execv image replacement.
+                logger.info(
+                    "%s performing graceful restart via process re-exec…", APP_NAME
+                )
+                cache_task.cancel()
+                # 1) Tear down the console FIRST so rich Live(screen=True) exits and the alternate
+                #    screen is restored BEFORE the new process starts (otherwise the terminal is left
+                #    corrupted). Idempotent: the finally below tolerates an already-stopped console.
+                if console is not None:
+                    console.stop()
+                if render_thread is not None:
+                    render_thread.join(timeout=5.0)
+                    render_thread = None
+                console = None
+                # 2) Re-exec. Build argv that re-runs cli() in a FRESH process which re-reads
+                #    config.yaml (the change-bind persisted the new host/port there). _reexec_args
+                #    STRIPS --host/--port so the persisted bind wins over the old CLI override.
+                import os
+
+                argv = [sys.executable, "-m", "backend.main"] + _reexec_args(sys.argv[1:])
+                try:
+                    os.execv(sys.executable, argv)
+                except OSError as e:
+                    logger.error("os.execv failed (%s); falling back to subprocess", e)
+                    import subprocess
+
+                    try:
+                        subprocess.Popen(argv, shell=False)
+                    except Exception as e2:
+                        logger.error("subprocess restart fallback failed (%s)", e2)
+                    sys.exit(0)
         finally:
-            cache_task.cancel()
+            cache_task.cancel()  # idempotent — already cancelled on the restart path
             if console is not None:
                 console.stop()  # set _stop → render loop ends, key daemon returns
             if render_thread is not None:
