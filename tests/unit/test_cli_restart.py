@@ -1,22 +1,29 @@
-"""CLI restart-via-re-exec tests (04.1-04 gap-closure r10).
+"""CLI restart tests (04.1-04 gap-closure r10 + r11 platform split).
 
-Locks the r10 fix for the BROKEN in-process restart (key 'r'):
+r10 replaced the BROKEN in-process re-serve (key 'r') with a graceful shutdown + console teardown
++ process re-exec. r11 makes that re-exec PLATFORM-AWARE because Windows has no true exec():
 
-  Pressing 'r' used to re-create a uvicorn Server and re-await server.serve() in the SAME asyncio
-  loop. uvicorn 0.42's serve() is single-shot and cannot be safely re-run in the same loop → the
-  rebind failed (site unreachable on BOTH old and new bind) and any exception left the loop dead
-  while the non-daemon render thread kept the process alive → 'r'/'q'/Ctrl+C froze. The robust fix
-  is what the operator did manually: graceful shutdown (lifespan fan-restore runs inside serve())
-  → tear down the console → re-exec a FRESH process that re-reads config.yaml (the change-bind
-  persisted the new bind there) and binds the new port.
+  POSIX (sys.platform != "win32"):
+    os.execv replaces the process IN PLACE (same PID, controlling terminal inherited) — reliable.
+    Restart re-execs `python -m backend.main` with --host/--port STRIPPED so the re-read config.yaml
+    (where change-bind persisted the new bind) supplies the host/port. OSError → subprocess fallback.
 
-These are PURE/behavioral assertions. No real server is served, no real os.execv is called, no real
-process is spawned — _reexec_args is a pure function, and the re-exec ordering is asserted at source
-level (the restart block must tear the console down BEFORE os.execv and use _reexec_args). The real
-restart is validated in host UAT.
+  Windows (sys.platform == "win32"):
+    os.execv is EMULATED as spawn-child + exit-parent. For an INTERACTIVE console app the console /
+    stdin handoff breaks (host UAT: pressing 'r' kept the OLD bind, then froze — r/ESC/Ctrl+C dead).
+    So on Windows we do NOT execv and do NOT spawn: we print a clear "run `ipmideck start` again to
+    restart" message and exit cleanly, letting the user's proven manual shell relaunch re-read config.
+
+The platform branch is factored into the module-level `_do_restart(...)` helper so it is unit-testable
+WITHOUT serving a real server, calling a real os.execv, or spawning a real process: execv/popen are
+INJECTED and the platform is passed explicitly. The graceful-shutdown ordering (serve() before the
+restart action) and the console teardown (stop/join before the restart action) are asserted at source
+level against cli(). The real restart is validated in host UAT.
 """
 
 from __future__ import annotations
+
+import sys
 
 import backend.main as main
 
@@ -95,69 +102,162 @@ def test_main_module_has_dunder_main_guard():
     assert "cli()" in src[guard_idx:], "the __main__ guard must call cli()"
 
 
-# --- restart block ordering: console teardown BEFORE os.execv, using _reexec_args -----------------
+# --- _do_restart: platform split (POSIX re-exec vs Windows clean-exit message) ---------------------
 
 
-def test_restart_block_tears_down_console_before_execv_and_uses_reexec_args():
-    """The restart path must: stop the console + join the render thread BEFORE os.execv, and build
-    the re-exec argv from _reexec_args (so the new process re-reads the persisted config.yaml bind).
+def test_do_restart_posix_calls_execv_with_stripped_args(monkeypatch):
+    """POSIX path: _do_restart calls os.execv with `python -m backend.main` + _reexec_args(args).
 
-    Source-level ordering guard (no real serve/execv): we locate the restart re-exec section in
-    cli() and assert console.stop() and render_thread.join(...) appear BEFORE the os.execv call, and
-    that the argv passed to execv runs `python -m backend.main` + _reexec_args(...). This keeps the
-    alternate screen restored before the new process starts (otherwise the terminal is corrupted)."""
+    execv is INJECTED (mock) so nothing is actually exec'd. We assert the exact argv: the interpreter,
+    the `-m backend.main` re-launch, and the bind-stripped tail (so config.yaml supplies the bind)."""
+    calls: dict = {}
+
+    def fake_execv(path, argv):
+        calls["path"] = path
+        calls["argv"] = argv
+
+    def fake_popen(argv, **kwargs):  # must NOT be used on the happy POSIX path
+        calls["popen"] = argv
+
+    main._do_restart(
+        platform="linux",
+        argv_tail=["start", "--host", "0.0.0.0", "--port", "8080"],
+        execv=fake_execv,
+        popen=fake_popen,
+    )
+
+    assert calls["path"] == sys.executable
+    assert calls["argv"] == [
+        sys.executable,
+        "-m",
+        "backend.main",
+        "start",  # --host/--port stripped by _reexec_args
+    ]
+    assert "popen" not in calls, "the happy POSIX path must not spawn a subprocess"
+
+
+def test_do_restart_posix_falls_back_to_subprocess_on_execv_oserror(monkeypatch):
+    """POSIX path: if injected execv raises OSError, _do_restart spawns via popen then exits(0).
+
+    execv can fail (rare: bad interpreter path). The fallback must spawn a replacement so 'r' still
+    restarts, then exit the original. SystemExit(0) is expected and asserted."""
+    calls: dict = {}
+
+    def fake_execv(path, argv):
+        raise OSError("simulated execv failure")
+
+    def fake_popen(argv, **kwargs):
+        calls["popen"] = argv
+
+    import pytest
+
+    with pytest.raises(SystemExit) as exc:
+        main._do_restart(
+            platform="linux",
+            argv_tail=["start"],
+            execv=fake_execv,
+            popen=fake_popen,
+        )
+    assert exc.value.code == 0
+    assert calls["popen"] == [sys.executable, "-m", "backend.main", "start"]
+
+
+def test_do_restart_windows_does_not_execv_or_spawn_and_returns(capsys):
+    """Windows path: _do_restart must NOT call execv and NOT spawn — it prints a relaunch hint, returns.
+
+    Windows has no true exec(); the emulated spawn-child/exit-parent breaks the interactive console
+    handoff (host UAT: child froze, old bind kept). The reliable path is the user's manual relaunch,
+    so we exit cleanly with a clear message instead of exec/spawn."""
+    called = {"execv": False, "popen": False}
+
+    def fake_execv(path, argv):
+        called["execv"] = True
+
+    def fake_popen(argv, **kwargs):
+        called["popen"] = True
+
+    # Must NOT raise SystemExit — it returns so the caller's finally (teardown) runs cleanly.
+    ret = main._do_restart(
+        platform="win32",
+        argv_tail=["start", "--host", "0.0.0.0", "--port", "8080"],
+        execv=fake_execv,
+        popen=fake_popen,
+    )
+    assert ret is None
+    assert called["execv"] is False, "Windows must NOT os.execv (emulated exec breaks the console)"
+    assert called["popen"] is False, "Windows must NOT spawn a subprocess"
+
+    out = capsys.readouterr().out
+    # The message must clearly tell the operator to relaunch with the product command.
+    assert "ipmideck start" in out, "Windows restart must hint the manual relaunch command"
+    assert main.APP_NAME in out
+
+
+def test_do_restart_default_execv_and_popen_are_real_stdlib():
+    """_do_restart's injected execv/popen default to the real os.execv / subprocess.Popen.
+
+    The production call site relies on the defaults; tests inject mocks. Source-level guard that the
+    defaults reference the stdlib functions (so we never accidentally default to a no-op)."""
+    import inspect
+
+    src = inspect.getsource(main._do_restart)
+    assert "os.execv" in src
+    assert "subprocess.Popen" in src
+
+
+# --- restart block ordering in cli(): serve() + console teardown BEFORE the restart action ---------
+
+
+def test_restart_block_calls_do_restart_with_platform_and_argv(monkeypatch):
+    """cli()'s restart path delegates to _do_restart(...) passing the current platform + sys.argv tail.
+
+    Source-level guard: the restart path must call _do_restart with sys.platform and sys.argv[1:] so
+    the platform split (POSIX execv vs Windows clean-exit) is honored and the re-exec uses the live
+    argv. (Running cli() would serve a real server — assert at source.)"""
     import inspect
 
     src = inspect.getsource(main.cli)
-    # the re-exec uses os.execv with `-m backend.main` and the stripped args from _reexec_args
-    assert "os.execv(" in src, "restart must re-exec the process via os.execv"
-    assert '"-m", "backend.main"' in src or "'-m', 'backend.main'" in src
-    assert "_reexec_args(" in src, "the re-exec argv must be built from _reexec_args"
-
-    execv_idx = src.index("os.execv(")
-    # console teardown must come BEFORE the execv (alt screen restored first)
-    stop_idx = src.rindex("console.stop()", 0, execv_idx)
-    join_idx = src.rindex(".join(", 0, execv_idx)
-    assert stop_idx < execv_idx, "console.stop() must run before os.execv (restore alt screen)"
-    assert join_idx < execv_idx, "render_thread.join() must run before os.execv"
+    assert "_do_restart(" in src, "the restart path must delegate to _do_restart"
+    assert "sys.platform" in src, "the platform must be passed so POSIX/Windows split is honored"
+    assert "sys.argv[1:]" in src, "the live argv tail must be passed to _do_restart"
 
 
-def test_restart_block_falls_back_to_subprocess_on_execv_oserror():
-    """If os.execv raises OSError the restart falls back to subprocess.Popen + sys.exit(0).
+def test_restart_block_tears_down_console_before_do_restart():
+    """The restart path must stop the console + join the render thread BEFORE calling _do_restart.
 
-    execv can fail (rare: bad interpreter path / platform quirk). The block must catch OSError and
-    spawn a replacement via subprocess before exiting, so 'r' still restarts. Source-level guard."""
+    On Windows _do_restart prints + returns; on POSIX it execs. EITHER way the alternate screen must
+    already be restored (console.stop + render_thread.join) before the restart action, or the terminal
+    is left corrupted / the new process inherits a Live-owned screen. Source-level ordering guard."""
     import inspect
 
     src = inspect.getsource(main.cli)
-    execv_idx = src.index("os.execv(")
-    tail = src[execv_idx:]
-    assert "except OSError" in tail, "execv failure must be caught"
-    assert "subprocess.Popen(" in tail, "the fallback must spawn via subprocess.Popen"
-    assert "sys.exit(0)" in tail, "after the subprocess fallback the original process must exit"
+    do_idx = src.index("_do_restart(")
+    stop_idx = src.rindex("console.stop()", 0, do_idx)
+    join_idx = src.rindex(".join(", 0, do_idx)
+    assert stop_idx < do_idx, "console.stop() must run before _do_restart (restore alt screen)"
+    assert join_idx < do_idx, "render_thread.join() must run before _do_restart"
 
 
 def test_restart_block_no_in_process_reserve():
-    """The dead in-process re-serve message must be GONE — restart is now a process re-exec (r10).
+    """The dead in-process re-serve message must be GONE — restart is a process re-exec / clean exit.
 
     The old loop logged 'restarting in-process…' and re-awaited serve() in the same loop (the bug).
-    That path is removed; the restart re-execs instead. We assert the in-process restart log line is
-    no longer present in cli()."""
+    That path is removed. We assert the in-process restart log line is no longer present in cli()."""
     import inspect
 
     src = inspect.getsource(main.cli)
     assert "restarting in-process" not in src
 
 
-def test_restart_block_runs_serve_before_reexec():
-    """Graceful shutdown (fan restore in lifespan) runs inside serve() BEFORE the re-exec (FIX-03 L1).
+def test_restart_block_runs_serve_before_restart_action():
+    """Graceful shutdown (fan restore in lifespan) runs inside serve() BEFORE the restart action.
 
-    The restart must NOT skip or reorder the graceful shutdown: `await server.serve()` (which runs
-    the full FastAPI lifespan including the fan-restore shutdown) must appear before the os.execv
-    re-exec. Source-level guard so we never regress the safety-critical fan restore."""
+    The restart must NOT skip or reorder the graceful shutdown: `await server.serve()` (which runs the
+    full FastAPI lifespan including the fan-restore shutdown — FIX-03 L1) must appear before the
+    _do_restart call. Source-level guard so we never regress the safety-critical fan restore."""
     import inspect
 
     src = inspect.getsource(main.cli)
     serve_idx = src.index("await server.serve()")
-    execv_idx = src.index("os.execv(")
-    assert serve_idx < execv_idx, "serve() (graceful lifespan shutdown) must run before re-exec"
+    do_idx = src.index("_do_restart(")
+    assert serve_idx < do_idx, "serve() (graceful lifespan shutdown) must run before the restart"

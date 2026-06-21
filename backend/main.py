@@ -447,6 +447,64 @@ def _reexec_args(argv: list[str]) -> list[str]:
     return out
 
 
+def _do_restart(platform: str, argv_tail: list[str], execv=None, popen=None) -> None:
+    """Perform the post-teardown restart action, PLATFORM-SPLIT (04.1-04 gap-closure r11).
+
+    The caller (_serve_forever) has ALREADY run the graceful shutdown (lifespan fan-restore inside
+    server.serve() — FIX-03 L1) and torn the console down (rich Live alternate screen restored) before
+    calling this. This function only decides HOW to relaunch:
+
+      • POSIX (platform != "win32"):
+        os.execv replaces the process IN PLACE (same PID, controlling terminal inherited) — reliable.
+        Re-exec `python -m backend.main` + _reexec_args(argv_tail) so the fresh process re-reads
+        config.yaml (where change-bind persisted the new host/port) with --host/--port STRIPPED, so the
+        persisted bind wins over the old CLI override. If execv raises OSError (rare: bad interpreter
+        path / platform quirk), fall back to subprocess + sys.exit(0) so 'r' still restarts.
+
+      • Windows (platform == "win32"):
+        Windows has NO true exec(); os.execv is EMULATED as spawn-child + exit-parent, and for an
+        INTERACTIVE console app the console/stdin handoff breaks (host UAT: pressing 'r' kept the OLD
+        bind and then froze — r/ESC/Ctrl+C dead until the terminal was closed). The reliable path is the
+        operator's proven manual flow: do NOT execv and do NOT spawn — print a clear relaunch hint and
+        RETURN cleanly so the caller's finally (cache_task cancel, idempotent console.stop/join) runs and
+        the process exits normally; the user reruns `ipmideck start` in their shell (a fresh process that
+        re-reads config.yaml and binds the new host/port).
+
+    execv/popen are INJECTABLE so this is unit-testable without a real exec or process spawn; they
+    default to the real stdlib os.execv / subprocess.Popen used in production.
+    """
+    if platform == "win32":
+        # Windows has no true exec(); emulated exec/subprocess hand the interactive console off
+        # unreliably (observed: child froze, old bind retained). The reliable path is the user's
+        # manual flow: exit cleanly and let the shell relaunch a fresh process (which re-reads
+        # config.yaml and binds the new host/port).
+        print()
+        print(f"{APP_NAME}: restart required to apply the new bind.")
+        print("  Run  ipmideck start  again to restart.")
+        print()
+        return  # caller's finally runs (teardown) → asyncio.run returns → cli() returns → clean exit
+
+    # POSIX: in-place re-exec a fresh process with the bind flags stripped.
+    import os
+
+    if execv is None:
+        execv = os.execv
+    argv = [sys.executable, "-m", "backend.main"] + _reexec_args(argv_tail)
+    try:
+        execv(sys.executable, argv)
+    except OSError as e:
+        logger.error("os.execv failed (%s); falling back to subprocess", e)
+        import subprocess
+
+        if popen is None:
+            popen = subprocess.Popen
+        try:
+            popen(argv, shell=False)
+        except Exception as e2:
+            logger.error("subprocess restart fallback failed (%s)", e2)
+        sys.exit(0)
+
+
 def _make_graceful_signal_handler(server_box: list):
     """Build the cross-platform SIGINT/SIGTERM handler used by cli() (factored out so it is unit-testable).
 
@@ -843,39 +901,29 @@ def cli():
                     break  # clean exit; lifespan shutdown already ran (fans restored — FIX-03 L1)
 
                 # RESTART requested: graceful shutdown already happened inside serve() above (the
-                # lifespan fan-restore ran — FIX-03 layer 1 NOT regressed); now re-exec a fresh
-                # process. cache_task is cancelled in finally on the way out; we also stop it here so
-                # it does not linger between the teardown and the execv image replacement.
-                logger.info(
-                    "%s performing graceful restart via process re-exec…", APP_NAME
-                )
+                # lifespan fan-restore ran — FIX-03 layer 1 NOT regressed); now relaunch (platform
+                # split — r11). cache_task is cancelled in finally on the way out; we also stop it here
+                # so it does not linger between the teardown and the (POSIX) execv image replacement.
+                logger.info("%s performing graceful restart…", APP_NAME)
                 cache_task.cancel()
                 # 1) Tear down the console FIRST so rich Live(screen=True) exits and the alternate
-                #    screen is restored BEFORE the new process starts (otherwise the terminal is left
-                #    corrupted). Idempotent: the finally below tolerates an already-stopped console.
+                #    screen is restored BEFORE the relaunch (otherwise the terminal is left corrupted /
+                #    a Windows clean-exit message would be hidden by the Live screen). Idempotent: the
+                #    finally below tolerates an already-stopped console.
                 if console is not None:
                     console.stop()
                 if render_thread is not None:
                     render_thread.join(timeout=5.0)
                     render_thread = None
                 console = None
-                # 2) Re-exec. Build argv that re-runs cli() in a FRESH process which re-reads
-                #    config.yaml (the change-bind persisted the new host/port there). _reexec_args
-                #    STRIPS --host/--port so the persisted bind wins over the old CLI override.
-                import os
-
-                argv = [sys.executable, "-m", "backend.main"] + _reexec_args(sys.argv[1:])
-                try:
-                    os.execv(sys.executable, argv)
-                except OSError as e:
-                    logger.error("os.execv failed (%s); falling back to subprocess", e)
-                    import subprocess
-
-                    try:
-                        subprocess.Popen(argv, shell=False)
-                    except Exception as e2:
-                        logger.error("subprocess restart fallback failed (%s)", e2)
-                    sys.exit(0)
+                # 2) Relaunch, PLATFORM-SPLIT (r11): POSIX re-execs in place via os.execv (reliable —
+                #    same PID, controlling terminal inherited); Windows has no true exec() so it prints
+                #    a clear "run `ipmideck start` again" hint and RETURNS (falls through to break) —
+                #    emulated exec/spawn breaks the interactive console handoff (host UAT: child froze,
+                #    old bind kept). On POSIX _do_restart never returns (execv replaces the image, or it
+                #    exits via the subprocess fallback); on Windows it returns and we break out cleanly.
+                _do_restart(platform=sys.platform, argv_tail=sys.argv[1:])
+                break  # Windows: relaunch message printed; exit cleanly so the shell can relaunch.
         finally:
             cache_task.cancel()  # idempotent — already cancelled on the restart path
             if console is not None:
