@@ -398,6 +398,22 @@ class ConsoleUI:
             text.stylize(style)
         self.log_lines.append(text)
 
+    def _show_log(self, line: str, style: str = _PUSH_LOG_DEFAULT_STYLE) -> None:
+        """Push an action-result line AND switch back to the log view so it is actually visible (r10).
+
+        ROOT CAUSE (04.1-04 gap-closure r10, concern 2): the show-URL ('u'), update-stub ('g') and
+        change-bind ('b' → commit) actions pushed a line into the deque via _push_log() but did NOT
+        change self.view. While the operator was in the 's' (servers) or 'c' (sessions) sub-view the
+        body renders the TABLE, so the freshly pushed line was HIDDEN behind it ("I pressed u and
+        nothing happened"). This helper does both: it pushes the line (delegating to _push_log so the
+        style/markup-safety contract is identical) and flips view back to "log" so the result is on
+        screen. Idempotent when already on the log view (a plain re-assignment). 'c'/'s' still open
+        their sub-views and 'q'/ESC still return to log — those are unchanged; only the action results
+        force the log view so they are never hidden.
+        """
+        self._push_log(line, style=style)
+        self.view = "log"
+
     @staticmethod
     def _validate_bind(host: str, port_str: str) -> tuple[str, int] | None:
         """Pure, stdin-free validation for the D-15d change-bind flow (so it is unit-testable).
@@ -617,8 +633,10 @@ class ConsoleUI:
         """
         result = self.parse_bind(self.input_buffer)
         if result is None:
-            # Rejection — red so the operator clearly sees the change was NOT applied (r8).
-            self._push_log(
+            # Rejection — red so the operator clearly sees the change was NOT applied (r8). r10:
+            # _show_log so the rejection is visible even if 'b' was pressed from a sub-view (the
+            # editor REPLACES the action map but the underlying view could be servers/sessions).
+            self._show_log(
                 f"Invalid host/port '{self.input_buffer}' — change cancelled", style="bold red"
             )
             self._cancel_input()
@@ -626,8 +644,9 @@ class ConsoleUI:
         host, port = result
         self.on_change_bind(host, port)
         # The user's MAIN r8 ask: make this action result stand out — bold green so the
-        # "restart required to apply" prompt is unmissable in the scrolling log body.
-        self._push_log(
+        # "restart required to apply" prompt is unmissable in the scrolling log body. r10: _show_log
+        # so the confirmation switches back to the log view (it was hidden behind a sub-view table).
+        self._show_log(
             f"Bind set to {host}:{port} — restart required to apply (press r)", style="bold green"
         )
         self._cancel_input()
@@ -705,11 +724,13 @@ class ConsoleUI:
             # NOT rich link markup ('[link=…]'): a Text span is inherently markup-safe (brackets in
             # any other log line stay literal), whereas markup would force render_body to parse
             # '[...]' in EVERY entry (BMC output, etc.) and could corrupt the frame. Browsability is
-            # the MUST; a clickable OSC-8 hyperlink is a nice-to-have not worth that risk.
-            self._push_log(self.get_url(), style="cyan")
+            # the MUST; a clickable OSC-8 hyperlink is a nice-to-have not worth that risk. r10:
+            # _show_log so the URL switches back to the log view (it was hidden behind a sub-view).
+            self._show_log(self.get_url(), style="cyan")
         elif key == "g":
-            # Informational stub — neutral (default) style; not an alert (r8).
-            self._push_log(
+            # Informational stub — neutral (default) style; not an alert (r8). r10: _show_log so the
+            # stub line is visible even when pressed from the servers/sessions sub-view.
+            self._show_log(
                 f"Current version {VERSION}. Online update check ships with the pip release."
             )
         elif key == "b":

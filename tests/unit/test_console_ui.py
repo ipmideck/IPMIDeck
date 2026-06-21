@@ -1369,3 +1369,105 @@ def test_render_body_log_view_handler_text_with_markup_message_renders():
     _emit_record(handler, logging.ERROR, "boom [bold]x[/] [/notopen]")
     out = _render_body_text(ui, width=80)
     assert "[/notopen]" in out  # the level-coloured line renders verbatim, no MarkupError
+
+
+# --- 04.1-04 gap-closure r10: action results switch back to the log view so they are visible ---
+#
+# ROOT CAUSE (concern 2): pressing 'u' (URL), 'g' (update stub), or committing a change-bind pushed
+# a line into the log deque but did NOT switch the view. While the operator is in the 's' (servers)
+# or 'c' (sessions) sub-view, the body shows the TABLE — so the freshly pushed line is HIDDEN behind
+# it ("I pressed u and nothing happened"). The fix adds a _show_log() helper that pushes the line AND
+# flips view back to "log" so the result is always visible. Used by 'u', 'g', and BOTH _commit_bind
+# branches. 'c'/'s' still open their sub-views; 'q'/ESC still return to log. Idempotent on log view.
+
+
+def test_show_log_pushes_line_and_switches_to_log_view():
+    """_show_log(line) pushes the line into the deque AND flips the view back to 'log'."""
+    ui, _ = _make_ui()
+    ui.view = "servers"
+    ui._show_log("hello result")
+    assert ui.view == "log"
+    assert ui.log_lines[-1].plain == "hello result"
+
+
+def test_show_log_carries_style():
+    """_show_log(line, style=...) stores the styled Text (same styling contract as _push_log)."""
+    ui, _ = _make_ui()
+    ui.view = "sessions"
+    ui._show_log("Bind set to h:1 — restart required to apply (press r)", style="bold green")
+    assert ui.view == "log"
+    assert "bold green" in _span_style_for(ui.log_lines[-1], "restart required")
+
+
+def test_show_log_idempotent_when_already_on_log_view():
+    """_show_log() on the log view leaves the view 'log' and still pushes (no toggle/regression)."""
+    ui, _ = _make_ui()
+    assert ui.view == "log"
+    ui._show_log("already here")
+    assert ui.view == "log"
+    assert ui.log_lines[-1].plain == "already here"
+
+
+def test_url_from_servers_view_switches_back_to_log():
+    """dispatch('u') while in the servers sub-view switches to log so the URL is visible (r10)."""
+    from rich.text import Text
+
+    ui, _ = _make_ui(get_url=lambda: "http://127.0.0.1:8099")
+    ui.view = "servers"
+    ui.dispatch("u")
+    assert ui.view == "log"  # switched back so the pushed URL is not hidden behind the table
+    last = ui.log_lines[-1]
+    assert isinstance(last, Text)
+    assert last.plain == "http://127.0.0.1:8099"
+
+
+def test_update_stub_from_sessions_view_switches_back_to_log():
+    """dispatch('g') while in the sessions sub-view switches to log so the stub line is visible (r10)."""
+    ui, _ = _make_ui()
+    ui.view = "sessions"
+    ui.dispatch("g")
+    assert ui.view == "log"
+    assert VERSION in ui.log_lines[-1]
+
+
+def test_commit_bind_invalid_from_servers_view_switches_back_to_log():
+    """An invalid bind committed from the servers sub-view switches to log + shows the red error (r10)."""
+    ui, calls = _make_ui()
+    ui.view = "servers"
+    ui.dispatch("b")  # bind editor REPLACES the action map but view stays 'servers' underneath
+    for ch in "0.0.0.0:abc":
+        ui.dispatch(ch)
+    ui.dispatch("\r")  # commit invalid
+    assert calls["change_bind"] == []
+    assert ui.view == "log"  # the invalid message is now visible, not hidden behind the table
+    entry = ui.log_lines[-1]
+    assert "Invalid" in entry.plain
+    assert "red" in _span_style_for(entry, "Invalid")
+
+
+def test_commit_bind_valid_from_sessions_view_switches_back_to_log():
+    """A valid bind committed from the sessions sub-view switches to log, calls the callback, shows green."""
+    ui, calls = _make_ui()
+    ui.view = "sessions"
+    ui.dispatch("b")
+    for ch in "127.0.0.1:8081":
+        ui.dispatch(ch)
+    ui.dispatch("\r")  # commit valid
+    assert calls["change_bind"] == [("127.0.0.1", 8081)]
+    assert ui.view == "log"  # the 'restart required' confirmation is visible, not behind the table
+    entry = ui.log_lines[-1]
+    assert "restart required" in entry.plain
+    assert "bold green" in _span_style_for(entry, "restart required")
+
+
+def test_sub_view_keys_still_open_their_views():
+    """'c' and 's' still open their sub-views (the _show_log fix must not break sub-view entry, r10)."""
+    ui, _ = _make_ui()
+    ui.dispatch("c")
+    assert ui.view == "sessions"
+    ui.dispatch("\x1b")  # ESC back to log
+    assert ui.view == "log"
+    ui.dispatch("s")
+    assert ui.view == "servers"
+    ui.dispatch("q")  # q back to log
+    assert ui.view == "log"
