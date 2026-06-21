@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import getpass
 import logging
 import signal
@@ -66,16 +67,36 @@ def _silence_proactor_connreset() -> None:
 
 
 class _NoSignalServer(uvicorn.Server):
-    """Embedded uvicorn server that does NOT install its own signal handlers (D-08).
+    """Embedded uvicorn server that does NOT touch OS signal handlers (D-08).
 
     cli() runs this on the main thread via asyncio.run() alongside the interactive console.
     We own SIGINT/SIGTERM in cli() so a Ctrl+C / docker stop flips server.should_exit (lifespan
-    shutdown runs → fans restored) instead of uvicorn pre-empting the teardown. Overriding
-    install_signal_handlers() to a no-op is the documented pattern (RESEARCH Pattern 3).
+    shutdown runs → fans restored) instead of uvicorn pre-empting the teardown.
+
+    Two layers are neutralised because uvicorn versions differ in HOW they capture signals:
+      • install_signal_handlers() — the legacy hook (RESEARCH Pattern 3). Overridden to a no-op.
+        Newer uvicorn (0.42) no longer defines it, so this override is harmless/defensive there.
+      • capture_signals() — the contextmanager used by `Server.serve()` in current uvicorn. Its
+        default SAVES the live SIGINT/SIGTERM handlers, installs uvicorn's own `handle_exit`, then
+        on __exit__ RESTORES the saved handlers AND RE-RAISES the captured signal via
+        `signal.raise_signal(...)`. That re-raise landed on cli()'s _emergency_shutdown →
+        sys.exit(0) AFTER serve() returned, dumping the ugly `SystemExit: 0` +
+        `asyncio.CancelledError` traceback on Ctrl+C (04.1-04 r9). On Windows the cli() graceful
+        repoint via loop.add_signal_handler silently failed (ProactorEventLoop doesn't support it),
+        so the emergency handler stayed installed and got hit. Overriding capture_signals() to a
+        bare yield means uvicorn installs/restores/re-raises NOTHING — cli()'s signal.signal handler
+        (cross-platform) owns SIGINT/SIGTERM and flips should_exit for a clean lifespan shutdown.
     """
 
     def install_signal_handlers(self) -> None:  # noqa: D401 — we own SIGINT/SIGTERM
         pass
+
+    @contextlib.contextmanager
+    def capture_signals(self):  # noqa: D401 — cli() owns SIGINT/SIGTERM (no capture/restore/re-raise)
+        # Intentionally a plain yield: do NOT let uvicorn capture, restore, or re-raise OS signals.
+        # See the class docstring — the default re-raise hit _emergency_shutdown → sys.exit(0) and
+        # produced the Ctrl+C SystemExit/CancelledError traceback (r9).
+        yield
 
 
 # === Global app state (set during lifespan) ===
@@ -386,6 +407,31 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _make_graceful_signal_handler(server_box: list):
+    """Build the cross-platform SIGINT/SIGTERM handler used by cli() (factored out so it is unit-testable).
+
+    Returns a ``handler(signum, frame)`` closing over ``server_box`` (a one-element list shared with
+    _serve_forever, which sets server_box[0] to the live _NoSignalServer once serving):
+      • server_box[0] is a live server  → flip server.should_exit = True. uvicorn exits its serve
+        loop, the FastAPI lifespan shutdown runs (fans restored — FIX-03 layer 1), asyncio.run()
+        returns and the process exits cleanly. No sys.exit, so no SystemExit traceback (r9).
+      • server_box[0] is None (pre-serve Ctrl+C, early boot before the server object exists)
+        → sys.exit(0): nothing to flip, exit cleanly (FIX-03 layer 2 — preserved).
+
+    Installed via signal.signal (NOT loop.add_signal_handler) so it works on Windows (ProactorEventLoop
+    lacks add_signal_handler) AND POSIX — that mismatch was the r9 root cause.
+    """
+
+    def _graceful_signal(signum, _frame):
+        srv = server_box[0]
+        if srv is not None:
+            srv.should_exit = True  # graceful: uvicorn loop exits → lifespan shutdown → fan restore
+        else:
+            sys.exit(0)  # pre-serve: nothing to flip, exit cleanly
+
+    return _graceful_signal
+
+
 def cli():
     parser = _build_arg_parser()
     args = parser.parse_args()
@@ -540,27 +586,30 @@ def cli():
         finally:
             _probe.close()
 
-    # === FIX-03 / signal coordination (REVIEWS HIGH-4) ===
-    # Three regimes, documented:
-    #   1. BEFORE the server object exists (early boot / pre-serve failure): the
-    #      belt-and-suspenders _emergency_shutdown handlers below sys.exit(0) so a
-    #      Ctrl+C during boot still exits cleanly. (FIX-03 layer 2 — preserved.)
-    #   2. ONCE serving: the handlers are REPOINTED (not removed) to flip
-    #      server.should_exit on the loop via call_soon_threadsafe, so SIGINT/SIGTERM
-    #      run the FastAPI lifespan shutdown (fans restored — FIX-03 layer 1) instead
-    #      of a bare sys.exit. On Windows we additionally rely on _NoSignalServer +
-    #      a KeyboardInterrupt wrapper around asyncio.run() (the ProactorEventLoop
-    #      lacks add_signal_handler for SIGTERM).
+    # === FIX-03 / signal coordination (REVIEWS HIGH-4; r9 cross-platform rewrite) ===
+    # ONE cross-platform handler (_make_graceful_signal_handler), installed via signal.signal so it
+    # works on BOTH Windows AND POSIX (loop.add_signal_handler is unsupported on the Windows
+    # ProactorEventLoop — the r9 root cause: the old repoint silently failed there, so the emergency
+    # sys.exit handler stayed installed and got hit by uvicorn's capture_signals re-raise → ugly
+    # SystemExit/CancelledError traceback). Three regimes, documented:
+    #   1. BEFORE the server object exists (early boot / pre-serve failure): the handler sees
+    #      server_box[0] is None and sys.exit(0)s so a Ctrl+C during boot still exits cleanly
+    #      (FIX-03 layer 2 — preserved).
+    #   2. ONCE serving (server_box[0] is the live _NoSignalServer): the SAME handler flips
+    #      server.should_exit = True, so SIGINT/SIGTERM make uvicorn exit its serve loop and run the
+    #      FastAPI lifespan shutdown (fans restored — FIX-03 layer 1) instead of a bare sys.exit.
+    #      _NoSignalServer.capture_signals() is a no-op (see the class) so uvicorn never restores or
+    #      re-raises the signal — no traceback. The KeyboardInterrupt wrapper around asyncio.run()
+    #      stays as a backstop.
     #   3. The kill -9 / power-loss backstop stays the fanpilot startup-recovery query
     #      (FIX-03 layer 3) — unchanged.
-    def _emergency_shutdown(signum, _frame):
-        logger.warning(
-            "Signal %d received before uvicorn lifespan started — exiting", signum
-        )
-        sys.exit(0)
-
-    signal.signal(signal.SIGTERM, _emergency_shutdown)
-    signal.signal(signal.SIGINT, _emergency_shutdown)
+    # server_box is shared with _serve_forever (it sets server_box[0] once the server is live), so the
+    # handler — installed BEFORE the loop starts — flips should_exit on the live server when serving
+    # and only sys.exit()s in the pre-serve window. Defined here in cli() so it can see server_box.
+    server_box: list[_NoSignalServer | None] = [None]
+    _graceful_signal = _make_graceful_signal_handler(server_box)
+    signal.signal(signal.SIGTERM, _graceful_signal)
+    signal.signal(signal.SIGINT, _graceful_signal)
 
     # SSL kwargs shared by every restart iteration (recomputed below per-iteration so
     # a persisted https flip is picked up on restart, but cert/key paths rarely change).
@@ -575,7 +624,9 @@ def cli():
         # restart_requested is a one-element list so the closures below can mutate it
         # without `nonlocal` gymnastics across the nested callback scopes.
         restart_requested = [False]
-        server_box: list[_NoSignalServer | None] = [None]
+        # server_box is the SAME one-element list cli() closed its signal handler over (r9): the
+        # handler reads server_box[0] to decide should_exit-flip (serving) vs sys.exit (pre-serve).
+        # We set server_box[0] to the live server inside the serve loop below.
 
         # --- loop-maintained cached server snapshot (REVIEWS MED, integration_design A) ---
         # get_servers() is called from console.dispatch (which runs ON this loop via
@@ -700,21 +751,11 @@ def cli():
             # no busy-spin (D-07/D-24). Just serve plainly.
             pass
 
-        # Repoint the signal handlers now that we have a live loop: flip should_exit so
-        # lifespan shutdown runs (fan restore) instead of bare sys.exit (regime 2 above).
-        def _signal_to_should_exit() -> None:
-            srv = server_box[0]
-            if srv is not None:
-                srv.should_exit = True
-
-        for _sig in (signal.SIGINT, signal.SIGTERM):
-            try:
-                loop.add_signal_handler(_sig, _signal_to_should_exit)
-            except (NotImplementedError, RuntimeError):
-                # Windows ProactorEventLoop lacks add_signal_handler for SIGTERM — the
-                # KeyboardInterrupt wrapper around asyncio.run() (in cli()) handles Ctrl+C
-                # by flipping should_exit on the live server instead.
-                pass
+        # r9: NO loop.add_signal_handler repoint here anymore. cli() already installed the
+        # cross-platform _make_graceful_signal_handler via signal.signal BEFORE asyncio.run(); it
+        # reads the shared server_box and flips should_exit once we set server_box[0] below. The old
+        # add_signal_handler repoint silently failed on the Windows ProactorEventLoop (its root
+        # cause), leaving the emergency sys.exit handler installed → Ctrl+C traceback.
 
         try:
             while True:
@@ -758,9 +799,11 @@ def cli():
             if render_thread is not None:
                 render_thread.join(timeout=5.0)
 
-    # asyncio.run() owns the loop on the MAIN thread. A KeyboardInterrupt (Ctrl+C on
-    # Windows, where add_signal_handler(SIGTERM) is unavailable) is translated into a
-    # clean teardown by flipping should_exit — never a bare sys.exit once serving.
+    # asyncio.run() owns the loop on the MAIN thread. The cross-platform _graceful_signal handler
+    # (signal.signal, installed above) flips should_exit on Ctrl+C/SIGTERM so serve() returns and the
+    # lifespan shutdown runs cleanly. This KeyboardInterrupt except stays as a BACKSTOP for any
+    # SIGINT that still surfaces as a Python KeyboardInterrupt before the handler runs (it logs and
+    # returns rather than letting a traceback escape) — never a bare sys.exit once serving (r9).
     try:
         asyncio.run(_serve_forever())
     except KeyboardInterrupt:
