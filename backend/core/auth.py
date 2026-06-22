@@ -19,7 +19,7 @@ from fastapi import HTTPException, Request
 from backend.core.crypto import _set_secure_permissions, decrypt, encrypt
 from backend.core.database import Database
 
-logger = logging.getLogger("ipmilink.auth")
+logger = logging.getLogger("ipmideck.auth")
 
 SESSION_EXPIRY_SECONDS = 86400  # 24h default
 
@@ -49,6 +49,9 @@ class AuthManager:
         Identical to the old get_encryption_key() derivation, so it can decrypt
         credentials that were encrypted before the file-key migration.
         """
+        # FROZEN legacy constant (04.2 D-06): this PBKDF2 salt is the decryption key derivation for
+        # pre-04.2 encrypted BMC credentials. Renaming it (despite the IPMILink->IPMIDeck rebrand)
+        # would make every existing encrypted credential undecryptable. Do NOT change the bytes.
         return hashlib.pbkdf2_hmac(
             "sha256", db_secret.encode(), b"ipmilink-cred-enc", 100000, dklen=32
         )
