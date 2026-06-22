@@ -1114,7 +1114,7 @@ def test_interactive_startup_applies_initial_verbosity_and_suppresses_noise():
 # --- 04.1-04 gap-closure r8: readable timestamp + colour-coded level token (markup-safe) ---
 #
 # The on-screen log body showed plain lines like
-#   2026-06-16 05:22:16,816 INFO ipmilink: <message>
+#   2026-06-16 05:22:16,816 INFO ipmideck: <message>
 # rendered as a single markup-safe Text (r4). User requests for r8:
 #   (1) make the timestamp readable — show only HH:MM:SS (no date, no ',mmm' millis), and
 #   (2) colour-code the level token (INFO/WARNING/ERROR/…) and make action-result messages like
@@ -1125,7 +1125,7 @@ def test_interactive_startup_applies_initial_verbosity_and_suppresses_noise():
 # render_body() joins the Text entries (coercing any stray str defensively) into one renderable.
 
 
-def _emit_record(handler, level, msg, name="ipmilink.modules.sensors", exc_info=None):
+def _emit_record(handler, level, msg, name="ipmideck.modules.sensors", exc_info=None):
     """Build + emit a LogRecord through a handler and return the stored deque entry."""
     record = logging.LogRecord(
         name=name,
@@ -1164,7 +1164,7 @@ def test_deque_handler_stores_text_with_readable_time_and_fields():
     from backend.console import DequeLogHandler
 
     handler = DequeLogHandler(deque(maxlen=10))
-    entry = _emit_record(handler, logging.INFO, "sensor poll ok", name="ipmilink.modules.sensors")
+    entry = _emit_record(handler, logging.INFO, "sensor poll ok", name="ipmideck.modules.sensors")
     assert isinstance(entry, Text)
     plain = entry.plain
     # HH:MM:SS present, and NO date / no comma-millis (the readable-time ask)
@@ -1173,7 +1173,7 @@ def test_deque_handler_stores_text_with_readable_time_and_fields():
     assert "," not in plain.split(" ", 1)[0], f"millis leaked into the time token in {plain!r}"
     # the structured fields are all present
     assert "INFO" in plain
-    assert "ipmilink.modules.sensors" in plain
+    assert "ipmideck.modules.sensors" in plain
     assert "sensor poll ok" in plain
 
 
@@ -1218,9 +1218,9 @@ def test_deque_handler_dims_time_and_logger_name():
     from backend.console import DequeLogHandler
 
     handler = DequeLogHandler(deque(maxlen=10))
-    entry = _emit_record(handler, logging.INFO, "hello world", name="ipmilink.console")
+    entry = _emit_record(handler, logging.INFO, "hello world", name="ipmideck.console")
     # the logger name span is dim
-    assert "dim" in (_span_style_for(entry, "ipmilink.console") or "")
+    assert "dim" in (_span_style_for(entry, "ipmideck.console") or "")
     # the message carries no styling span (default)
     assert _span_style_for(entry, "hello world") in (None, "", "none")
 

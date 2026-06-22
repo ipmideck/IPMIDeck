@@ -139,7 +139,7 @@ async def test_initialize_greenfield_creates_file_key(tmp_path):
     from backend.core.auth import AuthManager
     from backend.core.database import Database
 
-    db = Database(str(tmp_path / "ipmilink.db"))
+    db = Database(str(tmp_path / "ipmideck.db"))
     await db.connect()
     am = AuthManager(db)
     await am.initialize()
@@ -164,7 +164,7 @@ async def test_initialize_migrates_app_secret_to_file_key(tmp_path):
     secret = "f00dface" * 8
     old_key = hashlib.pbkdf2_hmac("sha256", secret.encode(), b"ipmilink-cred-enc", 100000, dklen=32)
 
-    db = Database(str(tmp_path / "ipmilink.db"))
+    db = Database(str(tmp_path / "ipmideck.db"))
     await db.connect()
     await db.set_config("app_secret", secret)
     await db.execute(
@@ -199,7 +199,7 @@ async def test_initialize_dual_exist_wrong_key_keeps_app_secret(tmp_path):
     secret = "abad1dea" * 8
     old_key = hashlib.pbkdf2_hmac("sha256", secret.encode(), b"ipmilink-cred-enc", 100000, dklen=32)
 
-    db = Database(str(tmp_path / "ipmilink.db"))
+    db = Database(str(tmp_path / "ipmideck.db"))
     await db.connect()
     await db.set_config("app_secret", secret)
     await db.execute(
@@ -229,7 +229,7 @@ async def test_initialize_dual_exist_correct_key_finishes_migration(tmp_path):
     from backend.core.database import Database
 
     new_key = b"\x07" * 32  # the durable file key
-    db = Database(str(tmp_path / "ipmilink.db"))
+    db = Database(str(tmp_path / "ipmideck.db"))
     await db.connect()
     # Rows already re-encrypted with new_key; app_secret lingering from the crash.
     await db.set_config("app_secret", "dead" * 16)
@@ -258,7 +258,7 @@ async def test_get_encryption_key_before_init_raises(tmp_path):
     from backend.core.auth import AuthManager
     from backend.core.database import Database
 
-    db = Database(str(tmp_path / "ipmilink.db"))
+    db = Database(str(tmp_path / "ipmideck.db"))
     await db.connect()
     am = AuthManager(db)
     with pytest.raises(RuntimeError):

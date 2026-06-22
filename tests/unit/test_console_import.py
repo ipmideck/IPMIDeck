@@ -37,7 +37,7 @@ def test_deque_log_handler_appends():
     log_lines: deque = deque(maxlen=10)
     handler = DequeLogHandler(log_lines)
     record = logging.LogRecord(
-        name="ipmilink.test",
+        name="ipmideck.test",
         level=logging.INFO,
         pathname=__file__,
         lineno=1,
@@ -50,7 +50,7 @@ def test_deque_log_handler_appends():
     entry = log_lines[0]
     assert isinstance(entry, Text)
     assert "INFO" in entry.plain
-    assert "ipmilink.test" in entry.plain
+    assert "ipmideck.test" in entry.plain
     assert "hello console" in entry.plain
 
 
@@ -71,7 +71,7 @@ def test_key_listener_logs_on_read_key_exception(monkeypatch, caplog):
 
     stop_event = threading.Event()
     dispatched: list = []
-    with caplog.at_level(logging.WARNING, logger="ipmilink.console"):
+    with caplog.at_level(logging.WARNING, logger="ipmideck.console"):
         t = console_mod.start_key_listener(
             loop=None, dispatch=dispatched.append, stop_event=stop_event
         )

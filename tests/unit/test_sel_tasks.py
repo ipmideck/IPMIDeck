@@ -37,7 +37,7 @@ async def test_sel_warning_names_exception_class(caplog):
         prev_ctx = None
     set_ctx(ModuleContext(db=None, ipmi=_RaisingIPMI(), ws=None, config=None))
     try:
-        with caplog.at_level(logging.WARNING, logger="ipmilink.modules.sel"):
+        with caplog.at_level(logging.WARNING, logger="ipmideck.modules.sel"):
             await sel_tasks._poll_one_server(
                 {"id": "1", "host": "192.0.2.10", "username": "u", "password": "p"}
             )
