@@ -69,7 +69,7 @@ i18n
     react: { useSuspense: false },
     detection: {
       order: ["localStorage", "navigator"],
-      lookupLocalStorage: "ipmilink-language",
+      lookupLocalStorage: "ipmideck-language",
       caches: ["localStorage"],
       convertDetectedLanguage,
     },

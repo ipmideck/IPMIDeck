@@ -68,7 +68,7 @@ export function Sidebar() {
             IL
           </div>
           <div>
-            <span className="text-sm font-semibold">IPMILink</span>
+            <span className="text-sm font-semibold">IPMIDeck</span>
             <span className="ml-1 text-xs text-muted-foreground">v2</span>
           </div>
         </div>

@@ -3,7 +3,7 @@ import { persist } from "zustand/middleware";
 
 /**
  * Onboarding-tour state (UX-02). Mirrors theme-store's persist pattern: the
- * "seen" flag is persisted under `ipmilink-tour-seen` so the guided tour only
+ * "seen" flag is persisted under `ipmideck-tour-seen` so the guided tour only
  * auto-runs once per browser; the transient `run` flag drives react-joyride and
  * is intentionally NOT persisted (partialize keeps only `seen`).
  */
@@ -22,6 +22,6 @@ export const useTourStore = create<TourState>()(
       markSeen: () => set({ seen: true, run: false }),
       start: () => set({ run: true }),
     }),
-    { name: "ipmilink-tour-seen", partialize: (s) => ({ seen: s.seen }) }
+    { name: "ipmideck-tour-seen", partialize: (s) => ({ seen: s.seen }) }
   )
 );

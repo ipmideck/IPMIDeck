@@ -17,7 +17,7 @@ export const useThemeStore = create<ThemeState>()(
         applyTheme(theme);
       },
     }),
-    { name: "ipmilink-theme" }
+    { name: "ipmideck-theme" }
   )
 );
 

@@ -2,7 +2,7 @@
  * Thin in-memory mirror of i18next's active language.
  *
  * Intentionally NOT wrapped in Zustand storage middleware: the i18next
- * browser-languagedetector already owns the `ipmilink-language` localStorage
+ * browser-languagedetector already owns the `ipmideck-language` localStorage
  * key (caches: ["localStorage"]). A second writer against the same key would
  * cause a hydration race that flips the language on reload. i18next is the
  * single source of truth; this store only reflects it for components that
