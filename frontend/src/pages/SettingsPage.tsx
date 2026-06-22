@@ -295,7 +295,7 @@ export default function SettingsPage() {
   };
 
   // 04-W6-03: Backup & Restore card. Backup POSTs to /api/system/backup and streams a
-  // zip (ipmilink.db + config.yaml + encryption.key) — use the native fetch + blob path,
+  // zip (ipmideck.db + config.yaml + encryption.key) — use the native fetch + blob path,
   // NOT the @/api/client wrapper, because the body is a binary stream. Restore uploads the
   // zip as a RAW application/zip body to /api/system/restore (staged + applied on next
   // restart) — no python-multipart dep. The restore CTA is gated behind an inline red
@@ -312,7 +312,7 @@ export default function SettingsPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `ipmilink-backup-${new Date().toISOString().replace(/[:.]/g, "-")}.zip`;
+      a.download = `ipmideck-backup-${new Date().toISOString().replace(/[:.]/g, "-")}.zip`;
       document.body.appendChild(a);
       a.click();
       a.remove();

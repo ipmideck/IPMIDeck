@@ -23,7 +23,7 @@ def generate_self_signed(cert_dir: Path) -> tuple[Path, Path]:
     cert_dir = Path(cert_dir)
     cert_dir.mkdir(parents=True, exist_ok=True)
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "ipmilink.local")])
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "ipmideck.local")])
     cert = (
         x509.CertificateBuilder()
         .subject_name(name)
@@ -36,7 +36,7 @@ def generate_self_signed(cert_dir: Path) -> tuple[Path, Path]:
         .add_extension(
             x509.SubjectAlternativeName([
                 x509.DNSName("localhost"),
-                x509.DNSName("ipmilink.local"),
+                x509.DNSName("ipmideck.local"),
             ]),
             critical=False,
         )

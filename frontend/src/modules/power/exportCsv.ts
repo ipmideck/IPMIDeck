@@ -23,7 +23,7 @@ export function exportSensorCsv(
     `&range=${encodeURIComponent(range)}`;
   const a = document.createElement("a");
   a.href = url;
-  a.download = `ipmilink-${sensorName.replace(/[ /]/g, "_")}-${range}.csv`;
+  a.download = `ipmideck-${sensorName.replace(/[ /]/g, "_")}-${range}.csv`;
   document.body.appendChild(a);
   a.click();
   a.remove();
