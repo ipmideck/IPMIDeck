@@ -1,8 +1,8 @@
-# Contributing to IPMILink
+# Contributing to IPMIDeck
 
 ## Running tests / pre-commit gate
 
-IPMILink enforces a **local** pre-commit gate (`.githooks/pre-commit`). It runs, in
+IPMIDeck enforces a **local** pre-commit gate (`.githooks/pre-commit`). It runs, in
 order: `ruff` lint → backend `pytest` (with the coverage gate) → i18n parity →
 frontend `vitest`. A commit is blocked if any step fails.
 

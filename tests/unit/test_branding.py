@@ -4,7 +4,7 @@ Verifies the branding module exposes the five constants and that the FastAPI app
 title/version + the unauthenticated /api/health version all SOURCE from branding (not a
 hardcoded literal). The /api/health check is BEHAVIORAL (REVIEWS MED: prefer behavior over
 source-grep) — it drives the real route via TestClient under the demo/temp-DB `client`
-fixture (auth-OFF), so the real data/ipmilink.db and BMC are never touched.
+fixture (auth-OFF), so the real data/ipmideck.db and BMC are never touched.
 
 asyncio_mode="auto" (pyproject) => async tests need NO decorator. These tests are sync.
 """
@@ -22,8 +22,10 @@ def test_brand_constants_present_and_nonempty():
         val = getattr(branding, name)
         assert isinstance(val, str), f"{name} must be a str"
         assert val.strip(), f"{name} must be non-empty"
-    # 04.1 console/backend rename: the single brand constant now reads "IPMIDeck" (the web UI /
-    # package name / logger namespaces stay "ipmilink" until the full 04.2 rebrand).
+    # As of 04.2 the rebrand is complete: the single brand constant plus the web UI, PyPI
+    # package, env-var prefix and logger namespaces all read "IPMIDeck"/"ipmideck". The only
+    # surviving pre-rebrand identifiers are the two locked-legacy constants (the frozen crypto
+    # salt and the restore-only legacy backup arcname), which live elsewhere by design.
     assert branding.APP_NAME == "IPMIDeck"
 
 

@@ -1,8 +1,8 @@
-# IPMILink
+# IPMIDeck
 
 **Web-based IPMI management platform — monitor sensors, control fans, manage power, all from your browser.**
 
-IPMILink is a self-hosted dashboard that connects to your servers' BMC (Baseboard Management Controller) via IPMI. It provides real-time sensor monitoring, intelligent fan curve control (FanPilot), remote power management, and hardware event logs — no CLI required.
+IPMIDeck is a self-hosted dashboard that connects to your servers' BMC (Baseboard Management Controller) via IPMI. It provides real-time sensor monitoring, intelligent fan curve control (FanPilot), remote power management, and hardware event logs — no CLI required.
 
 > Looking for the legacy V1 (simple fan speed control)? See the [`v1-legacy`](../../tree/v1-legacy) branch.
 
@@ -48,10 +48,10 @@ IPMILink is a self-hosted dashboard that connects to your servers' BMC (Baseboar
 
 ```bash
 docker run -d \
-  --name ipmilink \
+  --name ipmideck \
   --network host \
-  -v ipmilink-data:/data \
-  ipmilink/ipmilink:latest
+  -v ipmideck-data:/data \
+  ipmideck/ipmideck:latest
 ```
 
 Open `http://<your-ip>:3000` and follow the setup wizard.
@@ -61,8 +61,8 @@ Open `http://<your-ip>:3000` and follow the setup wizard.
 ### pip
 
 ```bash
-pip install ipmilink
-ipmilink serve
+pip install ipmideck
+ipmideck serve
 ```
 
 Requires `ipmitool` installed on the system.
@@ -84,14 +84,14 @@ Requires `ipmitool` installed on the system.
 
 ## Configuration
 
-Configuration is auto-generated at first run in `/data/config.yaml` (Docker) or `~/.ipmilink/config.yaml` (pip).
+Configuration is auto-generated at first run in `/data/config.yaml` (Docker) or `~/.ipmideck/config.yaml` (pip).
 
-Every setting can be overridden with environment variables using the `IPMILINK_` prefix:
+Every setting can be overridden with environment variables using the `IPMIDECK_` prefix:
 
 ```bash
-IPMILINK_SERVER_PORT=8080
-IPMILINK_FANPILOT_SAFETY_THRESHOLD=90
-IPMILINK_DATA_RETENTION_DAYS=180
+IPMIDECK_SERVER_PORT=8080
+IPMIDECK_FANPILOT_SAFETY_THRESHOLD=90
+IPMIDECK_DATA_RETENTION_DAYS=180
 ```
 
 See [`PRD.md`](PRD.md) for the full configuration reference.
@@ -148,7 +148,7 @@ npm run dev
 ## Project Structure
 
 ```
-ipmilink/
+ipmideck/
 ├── backend/
 │   ├── main.py              # FastAPI app entry point
 │   ├── ipmi/                # IPMI engine + command builders

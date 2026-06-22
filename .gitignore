@@ -43,7 +43,7 @@ credentials.json
 Thumbs.db
 
 # Docker
-ipmilink-data/
+ipmideck-data/
 
 # Local data directory
 data/
@@ -63,6 +63,11 @@ CLAUDE.md
 IPMI-COMMANDS-INTEGRATION.md
 mockup.html
 PRD.md
+
+# impeccable design-tooling context (local-only, like the docs above)
+PRODUCT.md
+DESIGN.md
+.impeccable/
 
 # Temp files
 *.tmp
