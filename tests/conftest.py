@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-"""Shared pytest fixtures for the IPMILink backend test suite.
+"""Shared pytest fixtures for the IPMIDeck backend test suite.
 
 Strategy A (lifespan-driven TestClient) for the integration fixtures, plus a Strategy C
 (:memory: + manual globals) `auth_manager` fixture for focused crypto/auth unit tests.
 
 WHY env vars are set BEFORE importing `backend.main` (RESEARCH Pitfall 3):
-  backend.main.lifespan() calls load_config(), which defaults IPMILINK_DATA_DIR to ./data on
-  Windows and would open the REAL data/ipmilink.db and (non-demo) shell out to ipmitool. Setting
+  backend.main.lifespan() calls load_config(), which defaults IPMIDECK_DATA_DIR to ./data on
+  Windows and would open the REAL data/ipmideck.db and (non-demo) shell out to ipmitool. Setting
   the temp-DB + demo env via monkeypatch.setenv BEFORE the `from backend.main import app` import
   reroutes the DB into tmp_path and selects DemoIPMIService (no ipmitool, no real BMC).
 
-WHY auth-OFF is done via set_auth_enabled(False) and NOT IPMILINK_AUTH_ENABLED (REVIEWS HIGH #1):
-  IPMILINK_AUTH_ENABLED only sets config.auth.enabled (config.py). The runtime gate
+WHY auth-OFF is done via set_auth_enabled(False) and NOT IPMIDECK_AUTH_ENABLED (REVIEWS HIGH #1):
+  IPMIDECK_AUTH_ENABLED only sets config.auth.enabled (config.py). The runtime gate
   require_auth -> AuthManager.is_auth_enabled() reads the DB key `auth_enabled` (auth.py), which
   DEFAULTS to "true" on a fresh temp DB. The env var is INERT for the gate. To genuinely open
   routes the `client` fixture writes the DB config via `bm.auth.set_auth_enabled(False)` AFTER the
@@ -43,9 +43,9 @@ def _set_temp_env(tmp_path, monkeypatch) -> None:
 
     Must be called BEFORE importing/booting the app (Pitfall 3).
     """
-    monkeypatch.setenv("IPMILINK_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("IPMILINK_DEMO", "true")
-    monkeypatch.setenv("IPMILINK_DATA_DB_PATH", str(tmp_path / "ipmilink.db"))
+    monkeypatch.setenv("IPMIDECK_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("IPMIDECK_DEMO", "true")
+    monkeypatch.setenv("IPMIDECK_DATA_DB_PATH", str(tmp_path / "ipmideck.db"))
 
 
 @pytest.fixture
@@ -65,7 +65,7 @@ def client_auth(tmp_path, monkeypatch):
 def client(tmp_path, monkeypatch):
     """Auth-OFF TestClient. Auth is disabled by writing the DB config via
     bm.auth.set_auth_enabled(False) AFTER the lifespan has entered (REVIEWS HIGH #1) — the
-    IPMILINK_AUTH_ENABLED env var is INERT for the runtime gate, so it is deliberately NOT used
+    IPMIDECK_AUTH_ENABLED env var is INERT for the runtime gate, so it is deliberately NOT used
     to open routes. After this fixture, GET /api/servers returns 200 (not 401).
     """
     _set_temp_env(tmp_path, monkeypatch)
@@ -99,7 +99,7 @@ async def auth_manager(tmp_path):
     from backend.core.auth import AuthManager
     from backend.core.database import Database
 
-    db = Database(str(tmp_path / "ipmilink.db"))
+    db = Database(str(tmp_path / "ipmideck.db"))
     await db.connect()
     am = AuthManager(db)
     await am.initialize()

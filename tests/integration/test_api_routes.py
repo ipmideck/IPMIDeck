@@ -1,13 +1,13 @@
 """API integration tests (TEST-04) — FastAPI TestClient against the real ASGI stack.
 
 These tests drive backend.main.app through its real lifespan over an ISOLATED temp SQLite
-DB in demo mode (no production data/ipmilink.db, no ipmitool, no real BMC — RESEARCH Pitfall 3).
+DB in demo mode (no production data/ipmideck.db, no ipmitool, no real BMC — RESEARCH Pitfall 3).
 They use the conftest harness fixtures (03-01):
 
   * client_auth — auth ENABLED (DB default auth_enabled="true"): the genuine guarded-route
     fixture used for the 401 -> setup -> 200 flow AND the localized login-failure test.
   * client      — auth DISABLED via bm.auth.set_auth_enabled(False) AFTER lifespan (REVIEWS
-    HIGH #1: IPMILINK_AUTH_ENABLED is INERT for the runtime gate, which reads the DB). With
+    HIGH #1: IPMIDECK_AUTH_ENABLED is INERT for the runtime gate, which reads the DB). With
     this fixture the guarded /api/servers routes are OPEN (200, not 401).
 
 REVIEWS-driven choices (03-REVIEWS.md):
@@ -73,7 +73,7 @@ def test_server_crud_roundtrip(client):
     """Create -> list (present) -> delete (absent) through the genuinely auth-OFF `client`.
 
     Works ONLY because the `client` fixture wrote auth_enabled=false to the DB after lifespan
-    (HIGH #1); under auth-ON these guarded routes would 401. No request reaches data/ipmilink.db
+    (HIGH #1); under auth-ON these guarded routes would 401. No request reaches data/ipmideck.db
     (temp DB via the conftest env overrides). create_server's auth.get_encryption_key dependency
     is available because lifespan initialized bm.auth.
     """
