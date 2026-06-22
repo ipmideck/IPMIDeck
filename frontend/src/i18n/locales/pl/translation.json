@@ -284,7 +284,7 @@
     "creatorRole": "Twórca i programista",
     "sponsor": "Wesprzyj",
     "about": {
-      "title": "O IPMILink",
+      "title": "O IPMIDeck",
       "madeWith": "Stworzono z <0></0> dla społeczności homelab"
     },
     "fanpilot": {
@@ -364,8 +364,8 @@
     "save": "Zapisz"
   },
   "setup": {
-    "welcomeTitle": "Witaj w IPMILink",
-    "welcomeBody": "IPMILink pozwala monitorować i zarządzać serwerami przez IPMI z jednego, eleganckiego panelu. Skonfigurujmy wszystko w kilku szybkich krokach.",
+    "welcomeTitle": "Witaj w IPMIDeck",
+    "welcomeBody": "IPMIDeck pozwala monitorować i zarządzać serwerami przez IPMI z jednego, eleganckiego panelu. Skonfigurujmy wszystko w kilku szybkich krokach.",
     "getStarted": "Rozpocznij",
     "steps": {
       "welcome": "Witaj",
@@ -381,11 +381,11 @@
     },
     "auth": {
       "title": "Wymagać logowania?",
-      "subtitle": "Wybierz, czy IPMILink jest chroniony nazwą użytkownika i hasłem, czy otwarty dla każdego w Twojej sieci. Możesz to zmienić później w Ustawieniach.",
+      "subtitle": "Wybierz, czy IPMIDeck jest chroniony nazwą użytkownika i hasłem, czy otwarty dla każdego w Twojej sieci. Możesz to zmienić później w Ustawieniach.",
       "yesTitle": "Tak — wymagaj logowania",
       "yesDescription": "Chroń panel nazwą użytkownika i hasłem.",
       "noTitle": "Nie — otwarty dostęp",
-      "noDescription": "Każdy w Twojej sieci lokalnej może używać IPMILink bez logowania.",
+      "noDescription": "Każdy w Twojej sieci lokalnej może używać IPMIDeck bez logowania.",
       "yourCredentials": "Twoje dane logowania",
       "usernamePlaceholder": "Nazwa użytkownika",
       "passwordPlaceholder": "Hasło",
@@ -414,12 +414,12 @@
     },
     "done": {
       "title": "Wszystko gotowe!",
-      "body": "IPMILink jest gotowy. Twój serwer został dodany i wkrótce zacznie zbierać dane czujników.",
+      "body": "IPMIDeck jest gotowy. Twój serwer został dodany i wkrótce zacznie zbierać dane czujników.",
       "goToDashboard": "Przejdź do panelu"
     }
   },
   "login": {
-    "title": "Zaloguj się do IPMILink",
+    "title": "Zaloguj się do IPMIDeck",
     "subtitle": "Wprowadź dane logowania, aby uzyskać dostęp do panelu.",
     "usernamePlaceholder": "Nazwa użytkownika",
     "passwordPlaceholder": "Hasło",
@@ -606,8 +606,8 @@
     "commandBody": "Naciśnij Cmd+K (lub Ctrl+K), aby szybko wyszukać strony, serwery i akcje. Naciśnij ?, aby zobaczyć wszystkie skróty."
   },
   "alert": {
-    "criticalTitle": "IPMILink — Zdarzenie krytyczne",
-    "warningTitle": "IPMILink — Ostrzeżenie",
+    "criticalTitle": "IPMIDeck — Zdarzenie krytyczne",
+    "warningTitle": "IPMIDeck — Ostrzeżenie",
     "fanpilotRecovered": "FanPilot przywrócił BMC-auto na {{name}} (serwer offline)"
   }
 }

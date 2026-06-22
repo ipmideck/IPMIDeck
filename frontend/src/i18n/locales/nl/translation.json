@@ -284,7 +284,7 @@
     "creatorRole": "Maker en ontwikkelaar",
     "sponsor": "Sponsor",
     "about": {
-      "title": "Over IPMILink",
+      "title": "Over IPMIDeck",
       "madeWith": "Gemaakt met <0></0> voor de homelab-gemeenschap"
     },
     "fanpilot": {
@@ -364,8 +364,8 @@
     "save": "Opslaan"
   },
   "setup": {
-    "welcomeTitle": "Welkom bij IPMILink",
-    "welcomeBody": "Met IPMILink kun je je servers via IPMI monitoren en beheren vanaf één mooi dashboard. Laten we alles in een paar snelle stappen instellen.",
+    "welcomeTitle": "Welkom bij IPMIDeck",
+    "welcomeBody": "Met IPMIDeck kun je je servers via IPMI monitoren en beheren vanaf één mooi dashboard. Laten we alles in een paar snelle stappen instellen.",
     "getStarted": "Aan de slag",
     "steps": {
       "welcome": "Welkom",
@@ -381,11 +381,11 @@
     },
     "auth": {
       "title": "Aanmelden vereisen?",
-      "subtitle": "Kies of IPMILink wordt beschermd met een gebruikersnaam en wachtwoord, of open blijft voor iedereen op je netwerk. Je kunt dit later wijzigen in Instellingen.",
+      "subtitle": "Kies of IPMIDeck wordt beschermd met een gebruikersnaam en wachtwoord, of open blijft voor iedereen op je netwerk. Je kunt dit later wijzigen in Instellingen.",
       "yesTitle": "Ja — aanmelden vereisen",
       "yesDescription": "Bescherm het dashboard met een gebruikersnaam en wachtwoord.",
       "noTitle": "Nee — open toegang",
-      "noDescription": "Iedereen op je LAN kan IPMILink gebruiken zonder aan te melden.",
+      "noDescription": "Iedereen op je LAN kan IPMIDeck gebruiken zonder aan te melden.",
       "yourCredentials": "Je inloggegevens",
       "usernamePlaceholder": "Gebruikersnaam",
       "passwordPlaceholder": "Wachtwoord",
@@ -414,12 +414,12 @@
     },
     "done": {
       "title": "Alles klaar!",
-      "body": "IPMILink is klaar. Je server is toegevoegd en begint binnenkort met het ophalen van sensorgegevens.",
+      "body": "IPMIDeck is klaar. Je server is toegevoegd en begint binnenkort met het ophalen van sensorgegevens.",
       "goToDashboard": "Naar het dashboard"
     }
   },
   "login": {
-    "title": "Aanmelden bij IPMILink",
+    "title": "Aanmelden bij IPMIDeck",
     "subtitle": "Voer je inloggegevens in om toegang te krijgen tot het dashboard.",
     "usernamePlaceholder": "Gebruikersnaam",
     "passwordPlaceholder": "Wachtwoord",
@@ -604,8 +604,8 @@
     "commandBody": "Druk op Cmd+K (of Ctrl+K) om snel pagina's, servers en acties te zoeken. Druk op ? om alle sneltoetsen te zien."
   },
   "alert": {
-    "criticalTitle": "IPMILink — Kritieke gebeurtenis",
-    "warningTitle": "IPMILink — Waarschuwing",
+    "criticalTitle": "IPMIDeck — Kritieke gebeurtenis",
+    "warningTitle": "IPMIDeck — Waarschuwing",
     "fanpilotRecovered": "FanPilot heeft BMC-auto hersteld op {{name}} (server offline)"
   }
 }

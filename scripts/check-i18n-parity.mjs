@@ -56,7 +56,7 @@ const PLACEHOLDER_RE = /\{\{\s*([\w-]+)\s*\}\}/g;
 // names, codes, technical loanwords). A phrase made ENTIRELY of these tokens
 // (plus punctuation/placeholders) is not flagged as untranslated.
 const ALLOW_IDENTICAL = new Set([
-  "IPMILink", "IPMI", "BMC", "FRU", "SEL", "FanPilot", "iDRAC", "iLO",
+  "IPMIDeck", "IPMI", "BMC", "FRU", "SEL", "FanPilot", "iDRAC", "iLO",
   "OK", "ID", "CSV", "RAM", "CPU", "DIMM", "PSU", "LAN", "Redfish",
   "Dell", "HP", "HPE", "Supermicro", "Host", "IP", "Backplane",
   // Phase 4: universally-identical networking/crypto/protocol acronyms.

@@ -284,7 +284,7 @@
     "creatorRole": "Ersteller & Entwickler",
     "sponsor": "Sponsor",
     "about": {
-      "title": "Über IPMILink",
+      "title": "Über IPMIDeck",
       "madeWith": "Erstellt mit <0></0> für die Homelab-Community"
     },
     "fanpilot": {
@@ -364,8 +364,8 @@
     "save": "Speichern"
   },
   "setup": {
-    "welcomeTitle": "Willkommen bei IPMILink",
-    "welcomeBody": "Mit IPMILink kannst du deine Server über IPMI von einem einzigen, schönen Dashboard aus überwachen und verwalten. Lass uns alles in wenigen schnellen Schritten einrichten.",
+    "welcomeTitle": "Willkommen bei IPMIDeck",
+    "welcomeBody": "Mit IPMIDeck kannst du deine Server über IPMI von einem einzigen, schönen Dashboard aus überwachen und verwalten. Lass uns alles in wenigen schnellen Schritten einrichten.",
     "getStarted": "Loslegen",
     "steps": {
       "welcome": "Willkommen",
@@ -381,11 +381,11 @@
     },
     "auth": {
       "title": "Anmeldung erforderlich?",
-      "subtitle": "Wähle, ob IPMILink durch Benutzername und Passwort geschützt oder für jeden in deinem Netzwerk offen sein soll. Du kannst dies später in den Einstellungen ändern.",
+      "subtitle": "Wähle, ob IPMIDeck durch Benutzername und Passwort geschützt oder für jeden in deinem Netzwerk offen sein soll. Du kannst dies später in den Einstellungen ändern.",
       "yesTitle": "Ja — Anmeldung erforderlich",
       "yesDescription": "Schütze das Dashboard mit Benutzername und Passwort.",
       "noTitle": "Nein — offener Zugriff",
-      "noDescription": "Jeder in deinem LAN kann IPMILink ohne Anmeldung nutzen.",
+      "noDescription": "Jeder in deinem LAN kann IPMIDeck ohne Anmeldung nutzen.",
       "yourCredentials": "Deine Anmeldedaten",
       "usernamePlaceholder": "Benutzername",
       "passwordPlaceholder": "Passwort",
@@ -414,12 +414,12 @@
     },
     "done": {
       "title": "Alles bereit!",
-      "body": "IPMILink ist bereit. Dein Server wurde hinzugefügt und beginnt in Kürze, Sensordaten abzufragen.",
+      "body": "IPMIDeck ist bereit. Dein Server wurde hinzugefügt und beginnt in Kürze, Sensordaten abzufragen.",
       "goToDashboard": "Zum Dashboard"
     }
   },
   "login": {
-    "title": "Bei IPMILink anmelden",
+    "title": "Bei IPMIDeck anmelden",
     "subtitle": "Gib deine Anmeldedaten ein, um auf das Dashboard zuzugreifen.",
     "usernamePlaceholder": "Benutzername",
     "passwordPlaceholder": "Passwort",
@@ -604,8 +604,8 @@
     "commandBody": "Drücke Cmd+K (oder Ctrl+K), um schnell Seiten, Server und Aktionen zu durchsuchen. Drücke ?, um alle Tastenkürzel zu sehen."
   },
   "alert": {
-    "criticalTitle": "IPMILink — Kritisches Ereignis",
-    "warningTitle": "IPMILink — Warnung",
+    "criticalTitle": "IPMIDeck — Kritisches Ereignis",
+    "warningTitle": "IPMIDeck — Warnung",
     "fanpilotRecovered": "FanPilot hat BMC-Auto auf {{name}} wiederhergestellt (Server offline)"
   }
 }

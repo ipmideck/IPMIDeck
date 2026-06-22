@@ -284,7 +284,7 @@
     "creatorRole": "Creator & Developer",
     "sponsor": "Sponsor",
     "about": {
-      "title": "About IPMILink",
+      "title": "About IPMIDeck",
       "madeWith": "Made with <0></0> for the homelab community"
     },
     "fanpilot": {
@@ -364,8 +364,8 @@
     "save": "Save"
   },
   "setup": {
-    "welcomeTitle": "Welcome to IPMILink",
-    "welcomeBody": "IPMILink lets you monitor and manage your servers via IPMI from a single, beautiful dashboard. Let's get you set up in a few quick steps.",
+    "welcomeTitle": "Welcome to IPMIDeck",
+    "welcomeBody": "IPMIDeck lets you monitor and manage your servers via IPMI from a single, beautiful dashboard. Let's get you set up in a few quick steps.",
     "getStarted": "Get Started",
     "steps": {
       "welcome": "Welcome",
@@ -381,11 +381,11 @@
     },
     "auth": {
       "title": "Require login?",
-      "subtitle": "Choose whether IPMILink is protected by a username and password, or left open to anyone on your network. You can change this later in Settings.",
+      "subtitle": "Choose whether IPMIDeck is protected by a username and password, or left open to anyone on your network. You can change this later in Settings.",
       "yesTitle": "Yes — require login",
       "yesDescription": "Protect the dashboard with a username and password.",
       "noTitle": "No — open access",
-      "noDescription": "Anyone on your LAN can use IPMILink without logging in.",
+      "noDescription": "Anyone on your LAN can use IPMIDeck without logging in.",
       "yourCredentials": "Your credentials",
       "usernamePlaceholder": "Username",
       "passwordPlaceholder": "Password",
@@ -414,12 +414,12 @@
     },
     "done": {
       "title": "You're all set!",
-      "body": "IPMILink is ready. Your server has been added and will start polling for sensor data shortly.",
+      "body": "IPMIDeck is ready. Your server has been added and will start polling for sensor data shortly.",
       "goToDashboard": "Go to Dashboard"
     }
   },
   "login": {
-    "title": "Sign in to IPMILink",
+    "title": "Sign in to IPMIDeck",
     "subtitle": "Enter your credentials to access the dashboard.",
     "usernamePlaceholder": "Username",
     "passwordPlaceholder": "Password",
@@ -604,8 +604,8 @@
     "commandBody": "Press Cmd+K (or Ctrl+K) to quickly search pages, servers, and actions. Press ? to see all shortcuts."
   },
   "alert": {
-    "criticalTitle": "IPMILink — Critical event",
-    "warningTitle": "IPMILink — Warning",
+    "criticalTitle": "IPMIDeck — Critical event",
+    "warningTitle": "IPMIDeck — Warning",
     "fanpilotRecovered": "FanPilot restored BMC-auto on {{name}} (server offline)"
   }
 }

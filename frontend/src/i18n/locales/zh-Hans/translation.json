@@ -284,7 +284,7 @@
     "creatorRole": "创建者与开发者",
     "sponsor": "赞助",
     "about": {
-      "title": "关于 IPMILink",
+      "title": "关于 IPMIDeck",
       "madeWith": "用 <0></0> 为 homelab 社区打造"
     },
     "fanpilot": {
@@ -364,8 +364,8 @@
     "save": "保存"
   },
   "setup": {
-    "welcomeTitle": "欢迎使用 IPMILink",
-    "welcomeBody": "IPMILink 让您可以通过 IPMI 从一个精美的仪表盘监控和管理服务器。让我们用几个快速步骤完成设置。",
+    "welcomeTitle": "欢迎使用 IPMIDeck",
+    "welcomeBody": "IPMIDeck 让您可以通过 IPMI 从一个精美的仪表盘监控和管理服务器。让我们用几个快速步骤完成设置。",
     "getStarted": "开始",
     "steps": {
       "welcome": "欢迎",
@@ -381,11 +381,11 @@
     },
     "auth": {
       "title": "需要登录吗？",
-      "subtitle": "选择 IPMILink 是否需要用户名和密码保护，还是对网络上的任何人开放。您可以稍后在设置中更改。",
+      "subtitle": "选择 IPMIDeck 是否需要用户名和密码保护，还是对网络上的任何人开放。您可以稍后在设置中更改。",
       "yesTitle": "是 — 需要登录",
       "yesDescription": "用用户名和密码保护仪表盘。",
       "noTitle": "否 — 开放访问",
-      "noDescription": "局域网上的任何人无需登录即可使用 IPMILink。",
+      "noDescription": "局域网上的任何人无需登录即可使用 IPMIDeck。",
       "yourCredentials": "您的凭据",
       "usernamePlaceholder": "用户名",
       "passwordPlaceholder": "密码",
@@ -414,12 +414,12 @@
     },
     "done": {
       "title": "全部完成！",
-      "body": "IPMILink 已就绪。您的服务器已添加，并将很快开始轮询传感器数据。",
+      "body": "IPMIDeck 已就绪。您的服务器已添加，并将很快开始轮询传感器数据。",
       "goToDashboard": "前往仪表盘"
     }
   },
   "login": {
-    "title": "登录 IPMILink",
+    "title": "登录 IPMIDeck",
     "subtitle": "输入您的凭据以访问仪表盘。",
     "usernamePlaceholder": "用户名",
     "passwordPlaceholder": "密码",
@@ -603,8 +603,8 @@
     "commandBody": "按 Cmd+K（或 Ctrl+K）可快速搜索页面、服务器和操作。按 ? 查看所有快捷键。"
   },
   "alert": {
-    "criticalTitle": "IPMILink — 严重事件",
-    "warningTitle": "IPMILink — 警告",
+    "criticalTitle": "IPMIDeck — 严重事件",
+    "warningTitle": "IPMIDeck — 警告",
     "fanpilotRecovered": "FanPilot 已在 {{name}} 上恢复 BMC-auto(服务器离线)"
   }
 }

@@ -284,7 +284,7 @@
     "creatorRole": "作成者 & 開発者",
     "sponsor": "スポンサー",
     "about": {
-      "title": "IPMILink について",
+      "title": "IPMIDeck について",
       "madeWith": "homelab コミュニティのために <0></0> を込めて作成"
     },
     "fanpilot": {
@@ -364,8 +364,8 @@
     "save": "保存"
   },
   "setup": {
-    "welcomeTitle": "IPMILink へようこそ",
-    "welcomeBody": "IPMILink を使えば、1 つの美しいダッシュボードから IPMI 経由でサーバーを監視・管理できます。いくつかの簡単なステップでセットアップしましょう。",
+    "welcomeTitle": "IPMIDeck へようこそ",
+    "welcomeBody": "IPMIDeck を使えば、1 つの美しいダッシュボードから IPMI 経由でサーバーを監視・管理できます。いくつかの簡単なステップでセットアップしましょう。",
     "getStarted": "始める",
     "steps": {
       "welcome": "ようこそ",
@@ -381,11 +381,11 @@
     },
     "auth": {
       "title": "ログインを要求しますか？",
-      "subtitle": "IPMILink をユーザー名とパスワードで保護するか、ネットワーク上の誰にでも開放するかを選択します。これは後で設定から変更できます。",
+      "subtitle": "IPMIDeck をユーザー名とパスワードで保護するか、ネットワーク上の誰にでも開放するかを選択します。これは後で設定から変更できます。",
       "yesTitle": "はい — ログインを要求",
       "yesDescription": "ユーザー名とパスワードでダッシュボードを保護します。",
       "noTitle": "いいえ — 開放アクセス",
-      "noDescription": "LAN 上の誰でもログインせずに IPMILink を使用できます。",
+      "noDescription": "LAN 上の誰でもログインせずに IPMIDeck を使用できます。",
       "yourCredentials": "あなたの認証情報",
       "usernamePlaceholder": "ユーザー名",
       "passwordPlaceholder": "パスワード",
@@ -414,12 +414,12 @@
     },
     "done": {
       "title": "準備完了！",
-      "body": "IPMILink の準備が整いました。サーバーが追加され、まもなくセンサーデータの取得を開始します。",
+      "body": "IPMIDeck の準備が整いました。サーバーが追加され、まもなくセンサーデータの取得を開始します。",
       "goToDashboard": "ダッシュボードへ"
     }
   },
   "login": {
-    "title": "IPMILink にサインイン",
+    "title": "IPMIDeck にサインイン",
     "subtitle": "ダッシュボードにアクセスするには認証情報を入力してください。",
     "usernamePlaceholder": "ユーザー名",
     "passwordPlaceholder": "パスワード",
@@ -603,8 +603,8 @@
     "commandBody": "Cmd+K（または Ctrl+K）でページ、サーバー、操作をすばやく検索できます。? を押すとすべてのショートカットを表示します。"
   },
   "alert": {
-    "criticalTitle": "IPMILink — 重大イベント",
-    "warningTitle": "IPMILink — 警告",
+    "criticalTitle": "IPMIDeck — 重大イベント",
+    "warningTitle": "IPMIDeck — 警告",
     "fanpilotRecovered": "FanPilot は {{name}} で BMC-auto を復旧しました(サーバーオフライン)"
   }
 }

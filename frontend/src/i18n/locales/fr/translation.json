@@ -284,7 +284,7 @@
     "creatorRole": "Créateur et développeur",
     "sponsor": "Sponsor",
     "about": {
-      "title": "À propos d'IPMILink",
+      "title": "À propos d'IPMIDeck",
       "madeWith": "Fait avec <0></0> pour la communauté homelab"
     },
     "fanpilot": {
@@ -364,8 +364,8 @@
     "save": "Enregistrer"
   },
   "setup": {
-    "welcomeTitle": "Bienvenue sur IPMILink",
-    "welcomeBody": "IPMILink vous permet de surveiller et de gérer vos serveurs via IPMI depuis un seul tableau de bord élégant. Configurons tout en quelques étapes rapides.",
+    "welcomeTitle": "Bienvenue sur IPMIDeck",
+    "welcomeBody": "IPMIDeck vous permet de surveiller et de gérer vos serveurs via IPMI depuis un seul tableau de bord élégant. Configurons tout en quelques étapes rapides.",
     "getStarted": "Commencer",
     "steps": {
       "welcome": "Bienvenue",
@@ -381,11 +381,11 @@
     },
     "auth": {
       "title": "Exiger une connexion ?",
-      "subtitle": "Choisissez si IPMILink est protégé par un nom d'utilisateur et un mot de passe, ou laissé ouvert à toute personne sur votre réseau. Vous pourrez modifier cela plus tard dans les Paramètres.",
+      "subtitle": "Choisissez si IPMIDeck est protégé par un nom d'utilisateur et un mot de passe, ou laissé ouvert à toute personne sur votre réseau. Vous pourrez modifier cela plus tard dans les Paramètres.",
       "yesTitle": "Oui — exiger une connexion",
       "yesDescription": "Protégez le tableau de bord avec un nom d'utilisateur et un mot de passe.",
       "noTitle": "Non — accès ouvert",
-      "noDescription": "Toute personne sur votre réseau local peut utiliser IPMILink sans se connecter.",
+      "noDescription": "Toute personne sur votre réseau local peut utiliser IPMIDeck sans se connecter.",
       "yourCredentials": "Vos identifiants",
       "usernamePlaceholder": "Nom d'utilisateur",
       "passwordPlaceholder": "Mot de passe",
@@ -414,12 +414,12 @@
     },
     "done": {
       "title": "Tout est prêt !",
-      "body": "IPMILink est prêt. Votre serveur a été ajouté et commencera bientôt à collecter les données des capteurs.",
+      "body": "IPMIDeck est prêt. Votre serveur a été ajouté et commencera bientôt à collecter les données des capteurs.",
       "goToDashboard": "Aller au tableau de bord"
     }
   },
   "login": {
-    "title": "Se connecter à IPMILink",
+    "title": "Se connecter à IPMIDeck",
     "subtitle": "Saisissez vos identifiants pour accéder au tableau de bord.",
     "usernamePlaceholder": "Nom d'utilisateur",
     "passwordPlaceholder": "Mot de passe",
@@ -604,8 +604,8 @@
     "commandBody": "Appuyez sur Cmd+K (ou Ctrl+K) pour rechercher rapidement pages, serveurs et actions. Appuyez sur ? pour voir tous les raccourcis."
   },
   "alert": {
-    "criticalTitle": "IPMILink — Événement critique",
-    "warningTitle": "IPMILink — Avertissement",
+    "criticalTitle": "IPMIDeck — Événement critique",
+    "warningTitle": "IPMIDeck — Avertissement",
     "fanpilotRecovered": "FanPilot a rétabli BMC-auto sur {{name}} (serveur hors ligne)"
   }
 }

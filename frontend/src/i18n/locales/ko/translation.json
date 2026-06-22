@@ -284,7 +284,7 @@
     "creatorRole": "제작자 및 개발자",
     "sponsor": "후원",
     "about": {
-      "title": "IPMILink 정보",
+      "title": "IPMIDeck 정보",
       "madeWith": "homelab 커뮤니티를 위해 <0></0>으로 제작"
     },
     "fanpilot": {
@@ -364,8 +364,8 @@
     "save": "저장"
   },
   "setup": {
-    "welcomeTitle": "IPMILink에 오신 것을 환영합니다",
-    "welcomeBody": "IPMILink를 사용하면 하나의 멋진 대시보드에서 IPMI를 통해 서버를 모니터링하고 관리할 수 있습니다. 몇 가지 빠른 단계로 설정해 보겠습니다.",
+    "welcomeTitle": "IPMIDeck에 오신 것을 환영합니다",
+    "welcomeBody": "IPMIDeck를 사용하면 하나의 멋진 대시보드에서 IPMI를 통해 서버를 모니터링하고 관리할 수 있습니다. 몇 가지 빠른 단계로 설정해 보겠습니다.",
     "getStarted": "시작하기",
     "steps": {
       "welcome": "환영합니다",
@@ -381,11 +381,11 @@
     },
     "auth": {
       "title": "로그인을 요구하시겠습니까?",
-      "subtitle": "IPMILink를 사용자 이름과 비밀번호로 보호할지, 아니면 네트워크의 누구에게나 열어 둘지 선택하세요. 나중에 설정에서 변경할 수 있습니다.",
+      "subtitle": "IPMIDeck를 사용자 이름과 비밀번호로 보호할지, 아니면 네트워크의 누구에게나 열어 둘지 선택하세요. 나중에 설정에서 변경할 수 있습니다.",
       "yesTitle": "예 — 로그인 요구",
       "yesDescription": "사용자 이름과 비밀번호로 대시보드를 보호합니다.",
       "noTitle": "아니요 — 개방 액세스",
-      "noDescription": "LAN의 누구나 로그인 없이 IPMILink를 사용할 수 있습니다.",
+      "noDescription": "LAN의 누구나 로그인 없이 IPMIDeck를 사용할 수 있습니다.",
       "yourCredentials": "사용자 자격 증명",
       "usernamePlaceholder": "사용자 이름",
       "passwordPlaceholder": "비밀번호",
@@ -414,12 +414,12 @@
     },
     "done": {
       "title": "모두 완료되었습니다!",
-      "body": "IPMILink가 준비되었습니다. 서버가 추가되었으며 곧 센서 데이터 폴링을 시작합니다.",
+      "body": "IPMIDeck가 준비되었습니다. 서버가 추가되었으며 곧 센서 데이터 폴링을 시작합니다.",
       "goToDashboard": "대시보드로 이동"
     }
   },
   "login": {
-    "title": "IPMILink에 로그인",
+    "title": "IPMIDeck에 로그인",
     "subtitle": "대시보드에 액세스하려면 자격 증명을 입력하세요.",
     "usernamePlaceholder": "사용자 이름",
     "passwordPlaceholder": "비밀번호",
@@ -603,8 +603,8 @@
     "commandBody": "Cmd+K(또는 Ctrl+K)를 눌러 페이지, 서버, 작업을 빠르게 검색하세요. ? 를 누르면 모든 단축키를 볼 수 있습니다."
   },
   "alert": {
-    "criticalTitle": "IPMILink — 중요 이벤트",
-    "warningTitle": "IPMILink — 경고",
+    "criticalTitle": "IPMIDeck — 중요 이벤트",
+    "warningTitle": "IPMIDeck — 경고",
     "fanpilotRecovered": "FanPilot이 {{name}}에서 BMC-auto를 복구했습니다 (서버 오프라인)"
   }
 }
