@@ -3,7 +3,7 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ipmilink"
+name = "ipmideck"
 version = "2.0.0-alpha.1"
 description = "Web-based IPMI management platform"
 readme = "README.md"
@@ -51,7 +51,7 @@ line-length = 100
 # Intentional deferred imports placed after route definitions to preserve
 # Starlette route ordering (SPA catch-all must register after module routes).
 "backend/main.py" = ["E402"]
-# conftest sets IPMILINK_* env vars BEFORE `import backend.main` so the app's
+# conftest sets IPMIDECK_* env vars BEFORE `import backend.main` so the app's
 # lifespan reads the test config / temp DB — imports must follow that setup.
 "tests/conftest.py" = ["E402"]
 
