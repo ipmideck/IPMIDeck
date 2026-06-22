@@ -10,7 +10,7 @@ import yaml
 
 
 def _data_dir() -> Path:
-    return Path(os.environ.get("IPMILINK_DATA_DIR", "/data" if os.name != "nt" else "./data"))
+    return Path(os.environ.get("IPMIDECK_DATA_DIR", "/data" if os.name != "nt" else "./data"))
 
 
 @dataclass
@@ -46,7 +46,7 @@ class DataConfig:
 
     def __post_init__(self):
         if not self.db_path:
-            self.db_path = str(_data_dir() / "ipmilink.db")
+            self.db_path = str(_data_dir() / "ipmideck.db")
 
 
 @dataclass
@@ -72,17 +72,17 @@ class AppConfig:
 
 
 def _apply_env_overrides(config: AppConfig) -> None:
-    """Apply IPMILINK_ prefixed env vars to config."""
+    """Apply IPMIDECK_ prefixed env vars to config."""
     env_map = {
-        "IPMILINK_SERVER_HOST": ("server", "host"),
-        "IPMILINK_SERVER_PORT": ("server", "port", int),
-        "IPMILINK_AUTH_ENABLED": ("auth", "enabled", lambda v: v.lower() in ("true", "1", "yes")),
-        "IPMILINK_AUTH_SESSION_EXPIRY": ("auth", "session_expiry"),
-        "IPMILINK_IPMI_POLL_INTERVAL": ("ipmi", "poll_interval", int),
-        "IPMILINK_DATA_DB_PATH": ("data", "db_path"),
-        "IPMILINK_DATA_RETENTION_DAYS": ("data", "retention_days", int),
-        "IPMILINK_LOGGING_LEVEL": ("logging", "level"),
-        "IPMILINK_DEMO": ("demo", None, lambda v: v.lower() in ("true", "1", "yes")),
+        "IPMIDECK_SERVER_HOST": ("server", "host"),
+        "IPMIDECK_SERVER_PORT": ("server", "port", int),
+        "IPMIDECK_AUTH_ENABLED": ("auth", "enabled", lambda v: v.lower() in ("true", "1", "yes")),
+        "IPMIDECK_AUTH_SESSION_EXPIRY": ("auth", "session_expiry"),
+        "IPMIDECK_IPMI_POLL_INTERVAL": ("ipmi", "poll_interval", int),
+        "IPMIDECK_DATA_DB_PATH": ("data", "db_path"),
+        "IPMIDECK_DATA_RETENTION_DAYS": ("data", "retention_days", int),
+        "IPMIDECK_LOGGING_LEVEL": ("logging", "level"),
+        "IPMIDECK_DEMO": ("demo", None, lambda v: v.lower() in ("true", "1", "yes")),
     }
     for env_key, mapping in env_map.items():
         value = os.environ.get(env_key)
@@ -103,7 +103,7 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
     config = AppConfig()
 
     if config_path is None:
-        env_path = os.environ.get("IPMILINK_CONFIG_PATH")
+        env_path = os.environ.get("IPMIDECK_CONFIG_PATH")
         config_path = Path(env_path) if env_path else (_data_dir() / "config.yaml")
 
     path = Path(config_path)
@@ -136,7 +136,7 @@ def _config_yaml_path(config_path: str | Path | None = None) -> Path:
     """Resolve the active config.yaml path the same way load_config() does."""
     if config_path is not None:
         return Path(config_path)
-    env_path = os.environ.get("IPMILINK_CONFIG_PATH")
+    env_path = os.environ.get("IPMIDECK_CONFIG_PATH")
     return Path(env_path) if env_path else (_data_dir() / "config.yaml")
 
 

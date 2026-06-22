@@ -4,7 +4,7 @@ The verbosity toggle CANNOT re-call logging.basicConfig — without force=True i
 no-op once the root logger has handlers (RESEARCH Pitfall 2). apply_log_level() sets the
 root logger AND every attached handler's level so the change takes effect immediately for
 the rest of the session. Persisting the choice (config writeback) is the caller's job;
-IPMILINK_LOGGING_LEVEL still wins on the NEXT boot (env precedence untouched here).
+IPMIDECK_LOGGING_LEVEL still wins on the NEXT boot (env precedence untouched here).
 
 VERBOSITY CONTRACT (D-04 — authoritative): the default/quiet level is INFO. "Quiet but no
 spam" is achieved by suppress_noisy_loggers() (e.g. uvicorn.access -> WARNING) at the INFO

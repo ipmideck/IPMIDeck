@@ -1,4 +1,4 @@
-"""IPMILink — main application entry point."""
+"""IPMIDeck — main application entry point."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ from backend.core.database import Database
 from backend.core.modules import ModuleLoader
 from backend.core.websocket import WebSocketManager
 
-logger = logging.getLogger("ipmilink")
+logger = logging.getLogger("ipmideck")
 
 # === D-02 (04.1-04 gap-closure r3): big banner is now PERMANENTLY pinned in the console header ===
 # The big ANSI Shadow banner used to be printed once on the TTY path immediately before rich
@@ -193,7 +193,7 @@ async def lifespan(app: FastAPI):
     save_default_config(data_dir / "config.yaml")
 
     # 04-W6-03: apply a pending restore (staged by POST /api/system/restore) BEFORE
-    # connecting the DB, so the swapped-in ipmilink.db + encryption.key + config.yaml
+    # connecting the DB, so the swapped-in ipmideck.db + encryption.key + config.yaml
     # are the ones that get opened this boot. No-op when data/staging/ is absent.
     from backend.api.system_routes import _apply_staging_if_present
     if await _apply_staging_if_present(config):
@@ -536,11 +536,11 @@ def cli():
 
     if args.demo:
         import os
-        os.environ["IPMILINK_DEMO"] = "true"
+        os.environ["IPMIDECK_DEMO"] = "true"
 
     if args.config:
         import os
-        os.environ["IPMILINK_CONFIG_PATH"] = args.config
+        os.environ["IPMIDECK_CONFIG_PATH"] = args.config
 
     if args.command == "reset-password":
         _reset_password()
@@ -564,7 +564,7 @@ def cli():
     # === FIX-02 gap closure: load config BEFORE uvicorn.run() ===
     # Without this, uvicorn binds using argparse defaults (or None) before
     # lifespan() ever calls load_config(), so server.host/port from config.yaml
-    # (or IPMILINK_CONFIG_PATH-pointed file) are silently ignored at bind time.
+    # (or IPMIDECK_CONFIG_PATH-pointed file) are silently ignored at bind time.
     # lifespan() still calls load_config() again — that is idempotent and
     # intentional (lifespan needs an AppConfig for module setup regardless of
     # how uvicorn was bound, e.g., when running via `uvicorn backend.main:app`).
@@ -593,7 +593,7 @@ def cli():
     # ============================================================================
     # BIND PRECEDENCE (documented contract — D-15d correction):
     #   effective_host/port (computed above) = explicit CLI flag > config (env >
-    #   yaml > hardcoded). config itself already applies IPMILINK_SERVER_HOST/PORT
+    #   yaml > hardcoded). config itself already applies IPMIDECK_SERVER_HOST/PORT
     #   over yaml (see config._apply_env_overrides). So a value persisted to
     #   config.yaml by the menu's change-bind action (D-15d) is OVERRIDDEN by an
     #   env var or a CLI --host/--port on the next boot — env/CLI always win. The
@@ -616,7 +616,7 @@ def cli():
             if not early_cfg.server.cert_file or not early_cfg.server.key_file:
                 print(
                     "WARNING: server.https=true but cert_file/key_file are not set in config.yaml; "
-                    "run `ipmilink --gen-cert` first. Starting over plain HTTP.",
+                    "run `ipmideck --gen-cert` first. Starting over plain HTTP.",
                     file=sys.stderr,
                 )
             else:
@@ -769,7 +769,7 @@ def cli():
 
         def _on_set_verbosity(level: str) -> None:
             # D-11/D-25: apply at runtime (basicConfig is a no-op once handlers exist) AND
-            # persist to config.yaml's logging.level. IPMILINK_LOGGING_LEVEL still wins next
+            # persist to config.yaml's logging.level. IPMIDECK_LOGGING_LEVEL still wins next
             # boot (env > yaml — see config._apply_env_overrides), documented above.
             from backend.core.logging_util import apply_log_level
 
@@ -944,7 +944,7 @@ def cli():
 
 def _persist_logging_level(level: str) -> None:
     """Write logging.level to config.yaml (D-11 persistence). Full read-mutate-dump of the
-    logging: block only, mirroring update_server_yaml. IPMILINK_LOGGING_LEVEL wins on next boot."""
+    logging: block only, mirroring update_server_yaml. IPMIDECK_LOGGING_LEVEL wins on next boot."""
     import yaml
 
     from backend.core.config import _config_yaml_path
