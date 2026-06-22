@@ -1,16 +1,16 @@
 services:
-  ipmilink:
+  ipmideck:
     build: .
-    container_name: ipmilink
+    container_name: ipmideck
     network_mode: host
     # D-26: PID-1 init so an orphaned ipmitool child (e.g. after the in-process Restart action,
     # D-15c) is reaped instead of becoming a zombie. Belt-and-suspenders to D-16's kill+reap.
     init: true
     volumes:
-      - ipmilink-data:/data
+      - ipmideck-data:/data
     environment:
-      - IPMILINK_DEMO=false
+      - IPMIDECK_DEMO=false
     restart: unless-stopped
 
 volumes:
-  ipmilink-data:
+  ipmideck-data:

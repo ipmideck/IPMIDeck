@@ -27,8 +27,8 @@ COPY --from=frontend /app/frontend/dist ./backend/static/
 RUN mkdir -p /data
 
 # Environment
-ENV IPMILINK_DATA_DIR=/data
-ENV IPMILINK_DEMO=false
+ENV IPMIDECK_DATA_DIR=/data
+ENV IPMIDECK_DEMO=false
 
 EXPOSE 3000
 
