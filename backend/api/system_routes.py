@@ -262,12 +262,16 @@ async def toggle_https(body: HttpsBody):
 # restored BMC credentials undecryptable (04-07-SUMMARY warning). The data dir is
 # derived the same way AuthManager derives it: Path(config.data.db_path).parent.
 
-ALLOWED_BACKUP_FILES = {"ipmilink.db", "config.yaml", "encryption.key"}
+# D-07 (backup/restore asymmetry): NEW backups WRITE the "ipmideck.db" arcname only.
+# RESTORE must accept BOTH arcnames so a pre-rebrand backup still restores — hence the
+# legacy "ipmilink.db" stays in this allow-list (accepted-for-restore only, never written).
+_DB_BACKUP_ARCNAMES = {"ipmideck.db", "ipmilink.db"}  # ipmilink.db = legacy, restore-only
+ALLOWED_BACKUP_FILES = {"ipmideck.db", "ipmilink.db", "config.yaml", "encryption.key"}
 
 
 @router.post("/system/backup", dependencies=[Depends(require_auth)])
 async def backup():
-    """Stream a .zip of ipmilink.db + config.yaml + encryption.key for download.
+    """Stream a .zip of ipmideck.db + config.yaml + encryption.key for download.
 
     encryption.key is REQUIRED (04-W4-04): without it the restored credentials
     cannot be decrypted. The data dir is the parent of config.data.db_path.
@@ -280,8 +284,8 @@ async def backup():
     key_path = data_dir / "encryption.key"
 
     # The DB runs in WAL mode (PRAGMA journal_mode=WAL) — recent committed writes
-    # may still live in ipmilink.db-wal, NOT the main ipmilink.db file. Checkpoint
-    # (TRUNCATE) first so the zipped ipmilink.db is a COMPLETE, consistent snapshot;
+    # may still live in ipmideck.db-wal, NOT the main ipmideck.db file. Checkpoint
+    # (TRUNCATE) first so the zipped ipmideck.db is a COMPLETE, consistent snapshot;
     # otherwise a restored backup silently loses any not-yet-checkpointed rows.
     try:
         await db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
@@ -292,7 +296,7 @@ async def backup():
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         if db_path.exists():
-            z.write(db_path, arcname="ipmilink.db")
+            z.write(db_path, arcname="ipmideck.db")
         if config_path.exists():
             z.write(config_path, arcname="config.yaml")
         if key_path.exists():
@@ -302,7 +306,7 @@ async def backup():
     return StreamingResponse(
         buf,
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="ipmilink-backup-{ts}.zip"'},
+        headers={"Content-Disposition": f'attachment; filename="ipmideck-backup-{ts}.zip"'},
     )
 
 
@@ -334,8 +338,10 @@ async def restore(request: Request):
                 if name not in ALLOWED_BACKUP_FILES or "/" in name or "\\" in name:
                     shutil.rmtree(staging, ignore_errors=True)
                     return {"success": False, "error": "unexpected_file_in_zip", "name": name}
-            # A valid backup must at least contain the DB.
-            if "ipmilink.db" not in names:
+            # A valid backup must at least contain the DB. D-07: accept EITHER the new
+            # "ipmideck.db" arcname OR the legacy "ipmilink.db" arcname (pre-rebrand
+            # backups) — missing_database only when NEITHER is present.
+            if not _DB_BACKUP_ARCNAMES.intersection(names):
                 shutil.rmtree(staging, ignore_errors=True)
                 return {"success": False, "error": "missing_database"}
             for name in names:
@@ -356,13 +362,17 @@ async def _apply_staging_if_present(config) -> bool:
 
     Moves each staged file into the data dir, replacing the live copy, then removes
     the staging dir. Returns True if a swap was applied. Runs BEFORE Database.connect()
-    so the new ipmilink.db is the one that gets opened.
+    so the new ipmideck.db is the one that gets opened.
+
+    D-07: the staged DB may carry EITHER the new "ipmideck.db" arcname or the legacy
+    "ipmilink.db" arcname (a pre-rebrand backup). Both land at the CONFIGURED db
+    filename (db_name) so old and new backups alike restore correctly.
 
     CRITICAL (WAL): the DB runs in WAL mode, so the data dir may hold an orphaned
-    ipmilink.db-wal / ipmilink.db-shm from the pre-restore process. If we drop in the
-    restored ipmilink.db but leave those stale sidecars, SQLite's WAL recovery on next
-    open mixes the OLD wal frames with the NEW db file → the restore silently shows the
-    wrong (or empty) data. We must delete the sidecars whenever we replace the DB.
+    <db>-wal / <db>-shm from the pre-restore process. If we drop in the restored DB
+    but leave those stale sidecars, SQLite's WAL recovery on next open mixes the OLD
+    wal frames with the NEW db file → the restore silently shows the wrong (or empty)
+    data. We must delete the sidecars whenever we replace the DB.
     """
     data_dir = Path(config.data.db_path).parent
     staging = data_dir / "staging"
@@ -372,13 +382,15 @@ async def _apply_staging_if_present(config) -> bool:
     for name in ALLOWED_BACKUP_FILES:
         src = staging / name
         if src.exists():
-            # The DB arcname is always "ipmilink.db"; land it at the CONFIGURED db
-            # filename so a non-default db_path still restores correctly.
-            dest = (data_dir / db_name) if name == "ipmilink.db" else (data_dir / name)
+            # D-07: the DB arcname is "ipmideck.db" (new) OR "ipmilink.db" (legacy);
+            # land EITHER at the CONFIGURED db filename so a non-default db_path — and a
+            # pre-rebrand backup — both restore correctly.
+            is_db = name in _DB_BACKUP_ARCNAMES
+            dest = (data_dir / db_name) if is_db else (data_dir / name)
             # When replacing the DB, also remove any orphaned WAL/SHM sidecars of the
             # DESTINATION file so the restored DB opens clean (the backup zip only
             # carries the checkpointed main file — its own sidecars don't exist).
-            if name == "ipmilink.db":
+            if is_db:
                 for sidecar in (f"{db_name}-wal", f"{db_name}-shm"):
                     sc = data_dir / sidecar
                     if sc.exists():
@@ -425,7 +437,7 @@ async def history_csv(server_id: str, sensor_name: str, range: str = "24h"):
     return StreamingResponse(
         iter([buf.getvalue()]),
         media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="ipmilink-{safe}-{range}.csv"'},
+        headers={"Content-Disposition": f'attachment; filename="ipmideck-{safe}-{range}.csv"'},
     )
 
 
