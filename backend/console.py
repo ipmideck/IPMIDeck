@@ -33,7 +33,7 @@ import threading
 from collections import deque
 from datetime import datetime, timezone  # noqa: F401  (imported for handler/UI timestamp use)
 
-logger = logging.getLogger("ipmilink.console")
+logger = logging.getLogger("ipmideck.console")
 
 
 def _banner_line_count() -> int:

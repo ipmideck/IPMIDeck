@@ -9,7 +9,7 @@ from datetime import datetime
 
 from backend.modules.fanpilot.engine import FanPilotController
 
-logger = logging.getLogger("ipmilink.modules.fanpilot")
+logger = logging.getLogger("ipmideck.modules.fanpilot")
 
 # Active controllers per server
 _controllers: dict[str, FanPilotController] = {}

@@ -8,7 +8,7 @@ import logging
 from backend.core.crypto import decrypt
 from backend.modules import get_ctx
 
-logger = logging.getLogger("ipmilink.modules.sel")
+logger = logging.getLogger("ipmideck.modules.sel")
 
 # Per-server cursor (str keys — Decision C). Initialized from app_config OR sel_cache
 # MAX(event_id) on first poll for that server (Decision K — Codex MEDIUM fix: avoid

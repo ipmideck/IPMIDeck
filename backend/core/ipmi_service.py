@@ -7,7 +7,7 @@ import logging
 import re
 from abc import ABC, abstractmethod
 
-logger = logging.getLogger("ipmilink.ipmi")
+logger = logging.getLogger("ipmideck.ipmi")
 
 # 04-W4-02: vendors whose fan PWM is reachable via raw ipmitool. Dell is the working
 # baseline (R720); Supermicro is documented. HPE iLO actively locks fan control against

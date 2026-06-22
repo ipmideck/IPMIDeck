@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-logger = logging.getLogger("ipmilink.modules.fanpilot")
+logger = logging.getLogger("ipmideck.modules.fanpilot")
 
 
 def interpolate_curve(curve_points: list[dict], temperature: float) -> int:

@@ -2,7 +2,7 @@
 
 The encryption key itself lives in a file at ``<data_dir>/encryption.key`` (32 raw
 bytes), managed by ``AuthManager.initialize()`` — NOT in the SQLite DB. That file MUST
-be backed up SEPARATELY from ``data/ipmilink.db``: a stolen DB on its own no longer
+be backed up SEPARATELY from ``data/ipmideck.db``: a stolen DB on its own no longer
 decrypts any BMC credentials, and losing the key file makes the stored credentials
 unrecoverable. See ``backend/core/auth.py`` for the file-key lifecycle and migration.
 """
@@ -40,7 +40,7 @@ def _set_secure_permissions(path: Path) -> None:
             check=True, capture_output=True, text=True,
         )
     except (FileNotFoundError, subprocess.CalledProcessError) as e:
-        logging.getLogger("ipmilink.crypto").warning(
+        logging.getLogger("ipmideck.crypto").warning(
             "Failed to set Windows ACL on %s: %s. File may be readable by other local users.",
             path, e,
         )

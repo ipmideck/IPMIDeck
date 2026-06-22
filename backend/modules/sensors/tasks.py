@@ -7,7 +7,7 @@ import logging
 import time
 from datetime import datetime, timezone
 
-logger = logging.getLogger("ipmilink.modules.sensors")
+logger = logging.getLogger("ipmideck.modules.sensors")
 
 _running = True
 

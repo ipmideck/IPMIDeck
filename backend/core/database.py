@@ -7,7 +7,7 @@ from pathlib import Path
 
 import aiosqlite
 
-logger = logging.getLogger("ipmilink.database")
+logger = logging.getLogger("ipmideck.database")
 
 # Core tables (not module-specific)
 CORE_SCHEMA = """

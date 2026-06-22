@@ -15,7 +15,7 @@ from backend.core.database import Database
 if TYPE_CHECKING:
     from backend.modules import ModuleContext
 
-logger = logging.getLogger("ipmilink.modules")
+logger = logging.getLogger("ipmideck.modules")
 
 BackgroundTask = Callable[[], Coroutine[Any, Any, None]]
 
@@ -26,7 +26,7 @@ class ModuleManifest:
     name: str
     version: str
     description: str
-    author: str = "IPMILink"
+    author: str = "IPMIDeck"
     category: str = "general"
     icon: str = "box"
     dependencies: list[str] = field(default_factory=list)
