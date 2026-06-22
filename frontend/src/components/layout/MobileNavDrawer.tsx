@@ -67,7 +67,7 @@ export function MobileNavDrawer({ open, onClose }: Props) {
           <div className="border-b border-border px-4 py-3">
             <div className="flex items-center gap-2.5">
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-foreground text-sm font-bold text-background">
-                IL
+                ID
               </div>
               <div>
                 <span className="text-sm font-semibold">IPMIDeck</span>
