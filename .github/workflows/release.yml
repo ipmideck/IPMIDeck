@@ -1,0 +1,72 @@
+name: release
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions: {}          # least-privilege default; jobs opt in below
+
+jobs:
+  guard:                 # D-16: tag must match branding._VERSION_FALLBACK
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - name: Tag matches branding._VERSION_FALLBACK
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"          # v2.0.0a1 -> 2.0.0a1
+          LIT="$(python -c 'import ast,pathlib; \
+            src=pathlib.Path("backend/core/branding.py").read_text(encoding="utf-8"); \
+            t=ast.parse(src); \
+            print(next(n.value.value for n in ast.walk(t) \
+              if isinstance(n,ast.Assign) \
+              and any(getattr(x,"id",None)=="_VERSION_FALLBACK" for x in n.targets)))')"
+          echo "tag=$TAG literal=$LIT"
+          test "$TAG" = "$LIT"                  # fail the release on drift
+
+  pypi:
+    needs: guard
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write     # OIDC / Trusted Publishing — no secret
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with: { python-version: "3.11" }
+      - run: python -m pip install --upgrade build
+      - run: python -m build           # version comes from attr: -> _VERSION_FALLBACK
+      - uses: pypa/gh-action-pypi-publish@release/v1   # zero-config with id-token: write, dist/ default
+
+  ghcr:
+    needs: guard
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+            type=raw,value=latest
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            REVISION=${{ github.sha }}
