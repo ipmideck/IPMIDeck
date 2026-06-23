@@ -9,6 +9,19 @@ RUN npm run build
 # Stage 2: Python backend + built frontend
 FROM python:3.11-slim
 
+# OCI image metadata (D-11). VERSION/REVISION are build-args with safe defaults for a bare
+# `docker build`; CI (docker/metadata-action + build-push-action, Plan 04) passes the real
+# values. Image TAGS are produced by metadata-action in CI, NOT written here (D-12). The
+# Python version INSIDE the image still resolves via attr: reading the copied branding.py
+# (the COPY backend/ + pip install . flow below is unchanged; no .git needed).
+ARG VERSION=0.0.0-dev
+ARG REVISION=unknown
+LABEL org.opencontainers.image.title="IPMIDeck" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${REVISION}" \
+      org.opencontainers.image.source="https://github.com/dev-luigi/IPMI-FanPilot" \
+      org.opencontainers.image.licenses="ISC"
+
 # Install ipmitool
 RUN apt-get update && apt-get install -y --no-install-recommends ipmitool && \
     rm -rf /var/lib/apt/lists/*
