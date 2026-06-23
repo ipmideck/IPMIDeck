@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ipmideck"
-version = "2.0.0-alpha.1"
+dynamic = ["version"]
 description = "Web-based IPMI management platform"
 readme = "README.md"
 license = {text = "ISC"}
@@ -39,6 +39,9 @@ dev = [
 # existing installs/docs keep working. Re-run `pip install -e .` to register `ipmideck`.
 ipmilink = "backend.main:cli"
 ipmideck = "backend.main:cli"
+
+[tool.setuptools.dynamic]
+version = { attr = "backend.core.branding._VERSION_FALLBACK" }
 
 [tool.setuptools.packages.find]
 include = ["backend*"]

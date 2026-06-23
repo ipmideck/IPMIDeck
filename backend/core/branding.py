@@ -6,8 +6,24 @@ the literal name anywhere — the banner is GENERATED from APP_NAME.
 
 from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError, version
+
 APP_NAME = "IPMIDeck"  # 04.2 flips this single line
-VERSION = "2.0.0-alpha.1"
+
+# The ONE human-edited version literal (D-01/D-03). PEP 440 canonical normalization of the
+# old "2.0.0-alpha.1" → "2.0.0a1": tag == dist == METADATA == this literal, zero per-surface
+# normalization surprises. pyproject derives the wheel version from THIS via attr: (D-05).
+# Bump this + tag the same commit to cut a release (firing the tag is a USER action, D-21).
+_VERSION_FALLBACK = "2.0.0a1"
+
+# Runtime resolution (D-02): an installed dist (pip/Docker) reports what was ACTUALLY shipped;
+# a raw source checkout (`python -m backend.main`) falls back to the literal. The dist name
+# "ipmideck" is pyproject [project].name (D-07) — if that ever changes, change it here too.
+try:
+    VERSION = version("ipmideck")
+except PackageNotFoundError:
+    VERSION = _VERSION_FALLBACK
+
 AUTHOR = "Luigi Tanzillo"
 LICENSE = "ISC"
 URL = "https://github.com/dev-luigi/IPMI-FanPilot"
