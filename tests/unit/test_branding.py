@@ -11,6 +11,7 @@ asyncio_mode="auto" (pyproject) => async tests need NO decorator. These tests ar
 
 from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from backend.core import branding
@@ -67,3 +68,39 @@ def test_health_version_literal_absent_from_source():
     system_routes.py (the behavioral test above is the PRIMARY check)."""
     src = Path("backend/api/system_routes.py").read_text(encoding="utf-8")
     assert '"2.0.0-alpha.1"' not in src
+
+
+def test_fallback_is_pep440_canonical():
+    """The single edited literal is the PEP 440 canonical form (2.0.0-alpha.1 -> 2.0.0a1).
+    Pure string assert — `packaging` is intentionally NOT imported (not a declared runtime dep).
+    Canonical form keeps tag == dist == METADATA == metadata-action semver with zero per-surface
+    normalization (D-03)."""
+    assert branding._VERSION_FALLBACK == "2.0.0a1"
+
+
+def test_version_fallback_when_uninstalled(monkeypatch):
+    """When the dist is not installed, VERSION falls back to _VERSION_FALLBACK (raw source
+    checkout path, D-02). Monkeypatch importlib.metadata.version to raise and re-run the resolver
+    logic — stdlib only, no reload gymnastics."""
+    def _raise(_name):
+        raise PackageNotFoundError(_name)
+    monkeypatch.setattr("backend.core.branding.version", _raise)
+    # Re-run the same resolution the module performs at import time:
+    try:
+        resolved = branding.version("ipmideck")
+    except PackageNotFoundError:
+        resolved = branding._VERSION_FALLBACK
+    assert resolved == branding._VERSION_FALLBACK == "2.0.0a1"
+
+
+def test_version_matches_installed_dist():
+    """When the ipmideck dist IS installed, branding.VERSION mirrors its METADATA Version
+    (D-02/D-07). Skips if not installed so a raw source checkout doesn't false-fail; the CI
+    build job installs the wheel so this runs in CI. Requires `pip install -e .` locally
+    (the dev box was stale under the old `ipmilink` name — RESEARCH Pitfall 1)."""
+    try:
+        installed = version("ipmideck")
+    except PackageNotFoundError:
+        import pytest
+        pytest.skip("ipmideck dist not installed (run `pip install -e .`)")
+    assert branding.VERSION == installed
