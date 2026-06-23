@@ -85,6 +85,16 @@ export default function SettingsPage() {
   const hydrateCurrency = useCurrencyStore((s) => s.hydrate);
   useEffect(() => { hydrateCurrency(); }, [hydrateCurrency]);
 
+  // 04.3 D-09: zero-drift version — fetch the RUNNING backend's version from /api/health
+  // (the SPA is served by the same FastAPI process, so this always matches what is deployed).
+  // No baked literal. Leave null on failure → the `—` placeholder renders.
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+  useEffect(() => {
+    get<{ version: string }>("/api/health")
+      .then((h) => setAppVersion(h.version))
+      .catch(() => { /* leave null → render the — placeholder */ });
+  }, []);
+
   // 04-W2-07: Energy Counters card. Per-server + reset-all, each behind the
   // inline-expand-confirm pattern. Server IDs are STRINGS (Decision C). resetAll
   // merges the backend's affected_ids (Decision P, in the store).
@@ -1361,7 +1371,7 @@ export default function SettingsPage() {
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-sm text-muted-foreground">{t("settings.version")}</span>
-                <span className="font-mono text-sm">2.0.0-alpha.1</span>
+                <span className="font-mono text-sm">{appVersion ?? "—"}</span>
               </div>
               <div className="border-t border-border" />
               <div className="flex items-start gap-3 pt-1">
