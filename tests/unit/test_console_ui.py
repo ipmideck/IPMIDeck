@@ -1471,3 +1471,127 @@ def test_sub_view_keys_still_open_their_views():
     assert ui.view == "servers"
     ui.dispatch("q")  # q back to log
     assert ui.view == "log"
+
+
+# --- console-logs-tail-overflow: the Logs body must TAIL to the visible region (newest on screen) ---
+#
+# ROOT CAUSE: render_body()'s log branch joined ALL deque entries into one Text and let the rich
+# Layout "body" region crop the overflow. rich crops region overflow AT THE BOTTOM, so on a SHORT
+# terminal the NEWEST lines — the dashboard URL pushed by 'u', and recent logs — were exactly what
+# got clipped and never shown (the operator "loses" the URL). The fix tails the log body to the
+# visible body-region height (console height − HEADER_SIZE − the Logs Panel's 2 border rows) using a
+# physical-row tail, so the last appended line is ALWAYS visible — even if a single line wraps to more
+# rows than fit (it then shows its tail, not its head).
+
+
+def _render_body_at_size(ui, width: int, height: int) -> str:
+    """Render ui.render_body() inside a header+body Layout at a FIXED console size and return plain text.
+
+    This mirrors exactly what run() does each Live frame: a fixed-size pinned header region above a
+    flexing body region whose content is render_body(). The console size is pinned so the
+    bottom-clipping (and the tail fix) are deterministic regardless of the runner's real terminal.
+    The same Console is wired to ui._console so render_body() can size its tail to this region.
+    """
+    from rich.console import Console
+    from rich.layout import Layout
+
+    console = Console(width=width, height=height, record=True)
+    ui._console = console
+    layout = Layout()
+    layout.split_column(
+        Layout(name="header", size=ConsoleUI.HEADER_SIZE),
+        Layout(name="body"),
+    )
+    layout["body"].update(ui.render_body())
+    console.print(layout, height=height)
+    return console.export_text()
+
+
+def test_log_body_tails_newest_line_into_view_on_short_terminal():
+    """On a SHORT terminal the NEWEST log line (the URL) is visible; an OLD beyond-window line is not.
+
+    Append far more entries than fit the body region (100 lines), with a unique sentinel as the LAST
+    entry (the 'u' URL) and a unique sentinel as an EARLY entry. Rendered through a small-height
+    Console wired to ui._console, the tail must surface the newest sentinel and drop the oldest one —
+    the direct regression lock for console-logs-tail-overflow (before the fix the LAST line was the
+    one clipped off the bottom, never the first).
+    """
+    ui, _ = _make_ui(get_url=lambda: "http://192.0.2.50:8099/NEWEST-URL-SENTINEL")
+    ui.view = "log"
+    for i in range(100):
+        ui.log_lines.append(f"OLD-BEYOND-WINDOW-{i:03d} log content")
+    ui.dispatch("u")  # the URL is now the newest entry
+
+    out = _render_body_at_size(ui, width=100, height=20)  # 20 rows total → small body region
+
+    assert "NEWEST-URL-SENTINEL" in out, "newest line (URL) was clipped off the bottom (not tailed)"
+    assert "OLD-BEYOND-WINDOW-000" not in out, "oldest line should have scrolled out of the tail"
+
+
+def test_log_body_tails_even_when_last_line_wraps_many_rows():
+    """A single very long final line cannot push the newest content off the bottom (physical tail).
+
+    The last entry wraps to far more rows than the body region; the tail must still show its END
+    (the newest appended text), proving the guarantee holds for wrapped long lines, not just short
+    ones (test_requirements item 3 — robust wrapping handling)."""
+    ui, _ = _make_ui()
+    ui.view = "log"
+    for i in range(40):
+        ui.log_lines.append(f"OLD-{i:03d}")
+    long_line = "WRAP-START " + ("pad " * 200) + "WRAP-END-SENTINEL"
+    ui.log_lines.append(long_line)
+
+    out = _render_body_at_size(ui, width=60, height=18)
+
+    assert "WRAP-END-SENTINEL" in out, "the tail of an over-long final line must remain visible"
+
+
+def test_log_body_preserves_newest_line_style_after_tail():
+    """The tailed body keeps the per-part style spans — the cyan 'u' URL still renders coloured."""
+    from rich.console import Console
+    from rich.layout import Layout
+
+    ui, _ = _make_ui(get_url=lambda: "http://192.0.2.50:8099/STYLED-URL-SENTINEL")
+    ui.view = "log"
+    for i in range(80):
+        ui.log_lines.append(f"OLD-{i:03d}")
+    ui.dispatch("u")  # cyan-styled URL (r8)
+
+    console = Console(width=80, height=18, record=True)
+    ui._console = console
+    layout = Layout()
+    layout.split_column(
+        Layout(name="header", size=ConsoleUI.HEADER_SIZE),
+        Layout(name="body"),
+    )
+    layout["body"].update(ui.render_body())
+    console.print(layout, height=18)
+    ansi = console.export_text(styles=True)
+
+    assert "STYLED-URL-SENTINEL" in ansi
+    # cyan survives the tail (ANSI SGR 36 = cyan); the style span travelled with the kept rows
+    assert "36m" in ansi or "cyan" in ansi.lower()
+
+
+def test_log_body_full_join_when_console_is_none():
+    """With ui._console is None (pre-Live / unit context) render_body falls back to the full join.
+
+    No crash, and the body still renders the deque entries (the height-unaware fallback). This locks
+    the requirement that render_body() is safe before/after Live and in tests that don't wire a
+    console — exactly the path the existing markup-safety tests exercise."""
+    ui, _ = _make_ui()
+    ui.view = "log"
+    assert ui._console is None  # default from __init__
+    for i in range(5):
+        ui.log_lines.append(f"LINE-{i}")
+    # render_body must not raise and returns a Panel renderable; rendered text contains every line
+    out = _render_body_text(ui, width=80)  # uses its own console, leaves ui._console None
+    assert ui._console is None
+    for i in range(5):
+        assert f"LINE-{i}" in out
+
+
+def test_console_defaults_to_none_in_init():
+    """ConsoleUI.__init__ initializes self._console to None (render_body safe before run())."""
+    ui, _ = _make_ui()
+    assert ui._console is None

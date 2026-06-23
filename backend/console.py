@@ -362,6 +362,11 @@ class ConsoleUI:
         self.last_key: str | None = None  # last ACTIONABLE key, shown in the header for feedback
         self._stop = threading.Event()
         self._log_handler: logging.Handler | None = None
+        # The rich Console driving the Live render, set by run() so render_body() can size the log
+        # tail to the visible body region (console height − HEADER_SIZE − the Logs Panel borders).
+        # None before/after Live (and in unit tests that don't set it) → render_body() falls back to
+        # the full-join behavior with NO height-aware tailing (and never crashes). See render_body().
+        self._console = None
 
         # Lazy-import rich so the module stays import-safe on Linux (D-23). The Layout is built
         # once: a fixed-size top header + a flexing body (D-01). HEADER_SIZE is computed from the
@@ -582,7 +587,76 @@ class ConsoleUI:
         # any line is still inert. Result remains a single renderable inside the Panel.
         entries = [e if isinstance(e, Text) else Text(str(e)) for e in self.log_lines]
         body = Text("\n").join(entries) if entries else Text("")
+        # NEWEST-VISIBLE TAIL (console-logs-tail-overflow fix): the joined body is rendered top-down
+        # inside the Layout "body" region, and rich crops region OVERFLOW AT THE BOTTOM — so on a
+        # short terminal the NEWEST lines (the dashboard URL pushed by 'u', recent logs) were exactly
+        # what got clipped, never shown. We instead tail the body to the visible region height so the
+        # last appended line is ALWAYS on screen. _tail_to_region() renders the joined Text to
+        # PHYSICAL rows at the body inner width and keeps only the last N rows that fit, so even a
+        # single very long (wrapping) line cannot push the newest content off the bottom. When
+        # self._console is None (pre/post-Live, or a unit test that did not wire a console) it returns
+        # the full body unchanged (the old behavior) — never crashing. Tailing happens BEFORE the
+        # Panel so the per-part style spans on the kept rows are preserved.
+        body = self._tail_to_region(body)
         return Panel(body, title="Logs")
+
+    def _tail_to_region(self, body):
+        """Tail the joined log ``body`` so its last PHYSICAL row is always visible (no bottom-clip).
+
+        The Logs Panel sits in the flexing Layout "body" region; rich crops that region's overflow
+        at the BOTTOM, so without tailing the newest line falls off on a short terminal (the
+        console-logs-tail-overflow bug). This computes the region's inner content box and, if the
+        rendered body is taller than it, keeps only the LAST rows that fit:
+
+          body_region_height = console.height − HEADER_SIZE − 2  (the Logs Panel top + bottom border)
+          inner_width        = console.width − 4                 (2 side borders + Panel padding 0,1)
+
+        It renders the body to PHYSICAL (already-wrapped) Segment rows via
+        ``self._console.render_lines(...)`` at ``inner_width`` and keeps the last ``body_region_height``
+        of them — a true physical-line tail, so even a single very long line that wraps to more rows
+        than fit still shows its TAIL (its end, incl. the newest appended line) rather than its head.
+        The kept rows are returned wrapped in a tiny renderable that emits them verbatim, preserving
+        every per-part style span.
+
+        Falls back to the unmodified ``body`` (the original full-join behavior, no tailing) when:
+          • self._console is None (pre/post-Live, or a unit test that didn't set it),
+          • the computed region is non-positive (degenerate / tiny terminal), or
+          • anything in the sizing/render path raises — defensive, so a frame can never crash the
+            render loop (consistent with run()'s resilient-render guard).
+        The body already fitting (rows <= region height) also returns it unchanged — no needless work.
+        """
+        console = self._console
+        if console is None:
+            return body
+        try:
+            from rich.segment import Segment
+
+            size = console.size
+            body_region_height = size.height - self.HEADER_SIZE - 2  # − Panel top/bottom borders
+            inner_width = size.width - 4  # − side borders (2) − Panel padding (0,1) → 2
+            if body_region_height <= 0 or inner_width <= 0:
+                return body
+            options = console.options.update(width=inner_width, height=None)
+            rows = console.render_lines(body, options, pad=False, new_lines=False)
+            if len(rows) <= body_region_height:
+                return body
+            kept = rows[-body_region_height:]
+
+            class _TailedRows:
+                """Emit the kept (already-wrapped, last-N) Segment rows verbatim, styles intact."""
+
+                def __init__(self, segment_rows):
+                    self._rows = segment_rows
+
+                def __rich_console__(self, _console, _options):
+                    for row in self._rows:
+                        yield from row
+                        yield Segment("\n")
+
+            return _TailedRows(kept)
+        except Exception:
+            # Never let a sizing/render hiccup crash the frame — degrade to the full body.
+            return body
 
     # --- interaction -----------------------------------------------------------------------
 
@@ -819,6 +893,11 @@ class ConsoleUI:
         from rich.live import Live
 
         console = Console()  # NEVER force_terminal/force_interactive (D-24)
+        # Expose the live Console to render_body() so the log view can tail to the visible body-region
+        # height (console height − HEADER_SIZE − Panel borders) and never bottom-clip the newest line
+        # (console-logs-tail-overflow fix). Cleared in finally so render_body() is height-unaware
+        # (full-join fallback) once Live releases the screen.
+        self._console = console
         handler = DequeLogHandler(self.log_lines)
         # No setFormatter needed (r8): DequeLogHandler now builds a styled rich Text per record in
         # _build_text() (readable HH:MM:SS time + colour-coded level token via LEVEL_STYLES), using
@@ -858,6 +937,9 @@ class ConsoleUI:
                     time.sleep(0.25)
         finally:
             self.stop()  # remove the DequeLogHandler — restore normal stdout logging
+            # Drop the live-Console reference so render_body() reverts to its height-unaware full-join
+            # fallback once Live has released the screen (the tail only makes sense inside Live).
+            self._console = None
             # r7: restore the StreamHandlers suspended above so normal stderr logging resumes once
             # Live has released the screen (idempotent — restore([]) is a no-op on the 0-handler case).
             self._restore_stream_handlers(saved_stream_handlers)
