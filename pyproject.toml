@@ -50,9 +50,16 @@ include = ["backend*"]
 # recursive `**` glob is supported on the pinned setuptools>=68.0. Runtime path resolution is
 # already safe via Path(__file__).parent — data-files (which install OUTSIDE the package) would
 # break that, so we deliberately do NOT use [tool.setuptools.data-files] or a MANIFEST.in.
+# NOTE: package-data keys must be valid module names or the predefined "*" (the strict pyproject
+# validator in current setuptools rejects a ".*" wildcard suffix like "backend.modules.*"), so the
+# 5 module packages are enumerated explicitly — each is the exact package that owns its migrations/.
 [tool.setuptools.package-data]
 "backend" = ["static/**/*"]
-"backend.modules.*" = ["migrations/*.sql"]
+"backend.modules.fanpilot" = ["migrations/*.sql"]
+"backend.modules.fru" = ["migrations/*.sql"]
+"backend.modules.power" = ["migrations/*.sql"]
+"backend.modules.sel" = ["migrations/*.sql"]
+"backend.modules.sensors" = ["migrations/*.sql"]
 
 [tool.ruff]
 target-version = "py311"
