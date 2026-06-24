@@ -1,5 +1,5 @@
 #!/bin/sh
-# IPMILink local test gate (D-15). No-push policy (CLAUDE.md): GitHub Actions is
+# IPMIDeck local test gate (D-15). No-push policy (CLAUDE.md): GitHub Actions is
 # intentionally NOT used; this committed hook is the enforced gate. POSIX sh so it
 # runs under the bundled Git-Bash on Windows. Activate per-clone with:
 #   git config core.hooksPath .githooks

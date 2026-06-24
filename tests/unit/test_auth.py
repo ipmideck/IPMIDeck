@@ -162,7 +162,7 @@ async def test_initialize_migrates_app_secret_to_file_key(tmp_path):
     from backend.core.database import Database
 
     secret = "f00dface" * 8
-    old_key = hashlib.pbkdf2_hmac("sha256", secret.encode(), b"ipmilink-cred-enc", 100000, dklen=32)
+    old_key = hashlib.pbkdf2_hmac("sha256", secret.encode(), b"ipmideck-cred-enc", 100000, dklen=32)
 
     db = Database(str(tmp_path / "ipmideck.db"))
     await db.connect()
@@ -197,7 +197,7 @@ async def test_initialize_dual_exist_wrong_key_keeps_app_secret(tmp_path):
     from backend.core.database import Database
 
     secret = "abad1dea" * 8
-    old_key = hashlib.pbkdf2_hmac("sha256", secret.encode(), b"ipmilink-cred-enc", 100000, dklen=32)
+    old_key = hashlib.pbkdf2_hmac("sha256", secret.encode(), b"ipmideck-cred-enc", 100000, dklen=32)
 
     db = Database(str(tmp_path / "ipmideck.db"))
     await db.connect()

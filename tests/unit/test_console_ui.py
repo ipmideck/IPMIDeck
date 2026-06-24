@@ -518,17 +518,16 @@ def test_arg_parser_start_with_flags_keeps_host_port():
     assert args.port == 8080
 
 
-def test_pyproject_has_both_ipmilink_and_ipmideck_entry_points():
-    """pyproject.toml [project.scripts] declares BOTH ipmilink and ipmideck → backend.main:cli (r7).
+def test_pyproject_declares_ipmideck_entry_point():
+    """pyproject.toml [project.scripts] declares ipmideck → backend.main:cli (r7).
 
-    The ipmideck command is added alongside the existing ipmilink one (both kept) so `ipmideck` and
-    `ipmideck start` serve once the operator re-runs `pip install -e .`. File-content assertion.
+    `ipmideck` and `ipmideck start` serve once the operator re-runs `pip install -e .`.
+    File-content assertion.
     """
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[2]
     text = (root / "pyproject.toml").read_text(encoding="utf-8")
-    assert 'ipmilink = "backend.main:cli"' in text
     assert 'ipmideck = "backend.main:cli"' in text
 
 

@@ -262,11 +262,10 @@ async def toggle_https(body: HttpsBody):
 # restored BMC credentials undecryptable (04-07-SUMMARY warning). The data dir is
 # derived the same way AuthManager derives it: Path(config.data.db_path).parent.
 
-# D-07 (backup/restore asymmetry): NEW backups WRITE the "ipmideck.db" arcname only.
-# RESTORE must accept BOTH arcnames so a pre-rebrand backup still restores — hence the
-# legacy "ipmilink.db" stays in this allow-list (accepted-for-restore only, never written).
-_DB_BACKUP_ARCNAMES = {"ipmideck.db", "ipmilink.db"}  # ipmilink.db = legacy, restore-only
-ALLOWED_BACKUP_FILES = {"ipmideck.db", "ipmilink.db", "config.yaml", "encryption.key"}
+# Backups WRITE and RESTORE the "ipmideck.db" arcname. The DB is the only required
+# member of a backup zip; config.yaml and encryption.key are optional.
+_DB_BACKUP_ARCNAMES = {"ipmideck.db"}
+ALLOWED_BACKUP_FILES = {"ipmideck.db", "config.yaml", "encryption.key"}
 
 
 @router.post("/system/backup", dependencies=[Depends(require_auth)])
@@ -338,9 +337,8 @@ async def restore(request: Request):
                 if name not in ALLOWED_BACKUP_FILES or "/" in name or "\\" in name:
                     shutil.rmtree(staging, ignore_errors=True)
                     return {"success": False, "error": "unexpected_file_in_zip", "name": name}
-            # A valid backup must at least contain the DB. D-07: accept EITHER the new
-            # "ipmideck.db" arcname OR the legacy "ipmilink.db" arcname (pre-rebrand
-            # backups) — missing_database only when NEITHER is present.
+            # A valid backup must at least contain the DB ("ipmideck.db" arcname);
+            # missing_database when it is absent.
             if not _DB_BACKUP_ARCNAMES.intersection(names):
                 shutil.rmtree(staging, ignore_errors=True)
                 return {"success": False, "error": "missing_database"}
@@ -364,9 +362,8 @@ async def _apply_staging_if_present(config) -> bool:
     the staging dir. Returns True if a swap was applied. Runs BEFORE Database.connect()
     so the new ipmideck.db is the one that gets opened.
 
-    D-07: the staged DB may carry EITHER the new "ipmideck.db" arcname or the legacy
-    "ipmilink.db" arcname (a pre-rebrand backup). Both land at the CONFIGURED db
-    filename (db_name) so old and new backups alike restore correctly.
+    The staged DB carries the "ipmideck.db" arcname and lands at the CONFIGURED db
+    filename (db_name) so a non-default db_path still restores correctly.
 
     CRITICAL (WAL): the DB runs in WAL mode, so the data dir may hold an orphaned
     <db>-wal / <db>-shm from the pre-restore process. If we drop in the restored DB
@@ -382,9 +379,8 @@ async def _apply_staging_if_present(config) -> bool:
     for name in ALLOWED_BACKUP_FILES:
         src = staging / name
         if src.exists():
-            # D-07: the DB arcname is "ipmideck.db" (new) OR "ipmilink.db" (legacy);
-            # land EITHER at the CONFIGURED db filename so a non-default db_path — and a
-            # pre-rebrand backup — both restore correctly.
+            # The DB arcname is "ipmideck.db"; land it at the CONFIGURED db filename so
+            # a non-default db_path restores correctly.
             is_db = name in _DB_BACKUP_ARCNAMES
             dest = (data_dir / db_name) if is_db else (data_dir / name)
             # When replacing the DB, also remove any orphaned WAL/SHM sidecars of the

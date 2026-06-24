@@ -96,8 +96,7 @@ def test_version_fallback_when_uninstalled(monkeypatch):
 def test_version_matches_installed_dist():
     """When the ipmideck dist IS installed, branding.VERSION mirrors its METADATA Version
     (D-02/D-07). Skips if not installed so a raw source checkout doesn't false-fail; the CI
-    build job installs the wheel so this runs in CI. Requires `pip install -e .` locally
-    (the dev box was stale under the old `ipmilink` name — RESEARCH Pitfall 1)."""
+    build job installs the wheel so this runs in CI. Requires `pip install -e .` locally."""
     try:
         installed = version("ipmideck")
     except PackageNotFoundError:

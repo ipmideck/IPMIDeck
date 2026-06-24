@@ -49,11 +49,10 @@ class AuthManager:
         Identical to the old get_encryption_key() derivation, so it can decrypt
         credentials that were encrypted before the file-key migration.
         """
-        # FROZEN legacy constant (04.2 D-06): this PBKDF2 salt is the decryption key derivation for
-        # pre-04.2 encrypted BMC credentials. Renaming it (despite the IPMILink->IPMIDeck rebrand)
-        # would make every existing encrypted credential undecryptable. Do NOT change the bytes.
+        # PBKDF2 salt for the at-rest credential key derived from the in-DB app_secret.
+        # Used only by the app_secret -> encryption.key migration path (pre-file-key installs).
         return hashlib.pbkdf2_hmac(
-            "sha256", db_secret.encode(), b"ipmilink-cred-enc", 100000, dklen=32
+            "sha256", db_secret.encode(), b"ipmideck-cred-enc", 100000, dklen=32
         )
 
     async def initialize(self) -> None:
