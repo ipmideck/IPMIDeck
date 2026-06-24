@@ -79,6 +79,7 @@ def _apply_env_overrides(config: AppConfig) -> None:
         "IPMIDECK_AUTH_ENABLED": ("auth", "enabled", lambda v: v.lower() in ("true", "1", "yes")),
         "IPMIDECK_AUTH_SESSION_EXPIRY": ("auth", "session_expiry"),
         "IPMIDECK_IPMI_POLL_INTERVAL": ("ipmi", "poll_interval", int),
+        "IPMIDECK_IPMI_POWER_POLL_INTERVAL": ("ipmi", "power_poll_interval", int),
         "IPMIDECK_DATA_DB_PATH": ("data", "db_path"),
         "IPMIDECK_DATA_RETENTION_DAYS": ("data", "retention_days", int),
         "IPMIDECK_LOGGING_LEVEL": ("logging", "level"),

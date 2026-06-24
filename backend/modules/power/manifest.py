@@ -4,6 +4,7 @@ from pathlib import Path
 
 from backend.core.modules import ModuleManifest
 from backend.modules.power.routes import router
+from backend.modules.power.tasks import power_status_loop
 
 module = ModuleManifest(
     id="power",
@@ -13,6 +14,7 @@ module = ModuleManifest(
     category="control",
     icon="power",
     router=router,
+    background_tasks=[power_status_loop],
     migrations_dir=Path(__file__).parent / "migrations",
     widgets=[
         {

@@ -1,7 +1,6 @@
-import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { get } from "@/api/client";
 import { useBackendOnline } from "@/stores/connection-store";
+import { usePowerStore } from "@/stores/power-store";
 
 interface PowerStatusWidgetProps {
   serverId: string;
@@ -9,22 +8,13 @@ interface PowerStatusWidgetProps {
 
 export function PowerStatusWidget({ serverId }: PowerStatusWidgetProps) {
   const { t } = useTranslation();
-  const [status, setStatus] = useState<string>("unknown");
   const online = useBackendOnline();
-
-  useEffect(() => {
-    if (!serverId) return;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    const poll = async () => {
-      try {
-        const data = await get<{ status: string }>(`/api/modules/power/${serverId}/status`);
-        setStatus(data.status);
-      } catch { /* ignore */ }
-    };
-    poll();
-    const interval = setInterval(poll, 10000);
-    return () => clearInterval(interval);
-  }, [serverId]);
+  // 04-W4-01 (debug: power-controls-widget-unknown-status): power state now comes from the
+  // backend `power_status` WS broadcast (+ snapshot replay on connect) via usePowerStore —
+  // the same single source of truth PowerControlsWidget reads (see PowerControlsWidget.tsx:42).
+  // This drops the old redundant 10s REST poll of GET /api/modules/power/{id}/status. Default
+  // to "unknown" until the snapshot/broadcast populates the store.
+  const status = usePowerStore((s) => s.statusByServer[serverId]?.status) ?? "unknown";
 
   if (!serverId) {
     return <div className="flex h-full items-center justify-center text-muted-foreground">—</div>;
