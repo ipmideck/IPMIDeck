@@ -3,7 +3,8 @@ on:
   push:
     tags: ["v*.*.*"]
 
-permissions: {}          # least-privilege default; jobs opt in below
+permissions:
+  contents: read         # required so the reusable `tests` gate inherits checkout perm; jobs still opt into more below
 
 jobs:
   guard:                 # D-16: tag must match branding._VERSION_FALLBACK
@@ -24,8 +25,11 @@ jobs:
           echo "tag=$TAG literal=$LIT"
           test "$TAG" = "$LIT"                  # fail the release on drift
 
+  tests:
+    uses: ./.github/workflows/gate.yml
+
   pypi:
-    needs: guard
+    needs: [guard, tests]
     runs-on: ubuntu-latest
     permissions:
       id-token: write     # OIDC / Trusted Publishing — no secret
@@ -39,7 +43,7 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1   # zero-config with id-token: write, dist/ default
 
   ghcr:
-    needs: guard
+    needs: [guard, tests]
     runs-on: ubuntu-latest
     permissions:
       packages: write
