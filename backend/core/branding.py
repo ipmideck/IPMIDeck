@@ -10,11 +10,11 @@ from importlib.metadata import PackageNotFoundError, version
 
 APP_NAME = "IPMIDeck"  # 04.2 flips this single line
 
-# The ONE human-edited version literal (D-01/D-03). PEP 440 canonical normalization of the
-# old "2.0.0-alpha.1" → "2.0.0a1": tag == dist == METADATA == this literal, zero per-surface
-# normalization surprises. pyproject derives the wheel version from THIS via attr: (D-05).
+# The ONE human-edited version literal (D-01/D-03). PEP 440 canonical form "2.0.0" (the first
+# stable public release): tag == dist == METADATA == this literal, zero per-surface normalization
+# surprises. pyproject derives the wheel version from THIS via attr: (D-05).
 # Bump this + tag the same commit to cut a release (firing the tag is a USER action, D-21).
-_VERSION_FALLBACK = "2.0.0a1"
+_VERSION_FALLBACK = "2.0.0"
 
 # Runtime resolution (D-02): an installed dist (pip/Docker) reports what was ACTUALLY shipped;
 # a raw source checkout (`python -m backend.main`) falls back to the literal. The dist name

@@ -43,6 +43,17 @@ version = { attr = "backend.core.branding._VERSION_FALLBACK" }
 [tool.setuptools.packages.find]
 include = ["backend*"]
 
+# Non-Python data files that MUST ship inside the wheel + sdist for a functional install
+# (D-05/D-06): the compiled SPA (backend/static/**) and the per-module SQLite migrations
+# (backend/modules/*/migrations/*.sql). Both trees live INSIDE the `backend` import package, so
+# package-data (with pyproject's default include-package-data = true) covers wheel AND sdist; the
+# recursive `**` glob is supported on the pinned setuptools>=68.0. Runtime path resolution is
+# already safe via Path(__file__).parent — data-files (which install OUTSIDE the package) would
+# break that, so we deliberately do NOT use [tool.setuptools.data-files] or a MANIFEST.in.
+[tool.setuptools.package-data]
+"backend" = ["static/**/*"]
+"backend.modules.*" = ["migrations/*.sql"]
+
 [tool.ruff]
 target-version = "py311"
 line-length = 100

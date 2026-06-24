@@ -71,11 +71,11 @@ def test_health_version_literal_absent_from_source():
 
 
 def test_fallback_is_pep440_canonical():
-    """The single edited literal is the PEP 440 canonical form (2.0.0-alpha.1 -> 2.0.0a1).
+    """The single edited literal is the PEP 440 canonical form (stable "2.0.0").
     Pure string assert — `packaging` is intentionally NOT imported (not a declared runtime dep).
     Canonical form keeps tag == dist == METADATA == metadata-action semver with zero per-surface
     normalization (D-03)."""
-    assert branding._VERSION_FALLBACK == "2.0.0a1"
+    assert branding._VERSION_FALLBACK == "2.0.0"
 
 
 def test_version_fallback_when_uninstalled(monkeypatch):
@@ -90,7 +90,7 @@ def test_version_fallback_when_uninstalled(monkeypatch):
         resolved = branding.version("ipmideck")
     except PackageNotFoundError:
         resolved = branding._VERSION_FALLBACK
-    assert resolved == branding._VERSION_FALLBACK == "2.0.0a1"
+    assert resolved == branding._VERSION_FALLBACK == "2.0.0"
 
 
 def test_version_matches_installed_dist():

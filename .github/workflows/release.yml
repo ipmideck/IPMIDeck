@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v6
       - name: Tag matches branding._VERSION_FALLBACK
         run: |
-          TAG="${GITHUB_REF_NAME#v}"          # v2.0.0a1 -> 2.0.0a1
+          TAG="${GITHUB_REF_NAME#v}"          # v2.0.0 -> 2.0.0
           LIT="$(python -c 'import ast,pathlib; \
             src=pathlib.Path("backend/core/branding.py").read_text(encoding="utf-8"); \
             t=ast.parse(src); \
