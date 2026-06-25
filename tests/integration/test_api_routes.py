@@ -154,3 +154,150 @@ def test_login_failure_localized(client_auth):
 
     # Resolver actually switched languages between the two requests.
     assert it_body["error"] != en_body["error"]
+
+
+# --- quick-260625-rw5: host-field validation on create + update -----------------------------
+
+
+def test_create_server_rejects_url_host(client):
+    """A URL host (the app's own web-UI URL) is rejected BEFORE the DB write — never inserted."""
+    resp = client.post(
+        "/api/servers",
+        json={
+            "name": "Bad URL host",
+            "host": "http://127.0.0.1:8080/",
+            "username": "root",
+            "password": "calvin",
+            "vendor": "dell",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["success"] is False
+    assert body["error"] == t("invalid_host", "en")
+
+    # The rejected create must not have inserted a row with that host.
+    list_resp = client.get("/api/servers")
+    assert list_resp.status_code == 200
+    hosts = [s["host"] for s in list_resp.json()["servers"]]
+    assert "http://127.0.0.1:8080/" not in hosts
+
+
+def test_create_server_accepts_valid_ip_and_hostname(client):
+    """A bare IPv4 and a plain hostname both pass validation and are created."""
+    ip_resp = client.post(
+        "/api/servers",
+        json={
+            "name": "Valid IP",
+            "host": "192.0.2.40",
+            "username": "root",
+            "password": "calvin",
+            "vendor": "dell",
+        },
+    )
+    assert ip_resp.status_code == 200, ip_resp.text
+    assert ip_resp.json()["success"] is True
+
+    name_resp = client.post(
+        "/api/servers",
+        json={
+            "name": "Valid hostname",
+            "host": "bmc.example.com",
+            "username": "root",
+            "password": "calvin",
+            "vendor": "dell",
+        },
+    )
+    assert name_resp.status_code == 200, name_resp.text
+    assert name_resp.json()["success"] is True
+
+
+def test_create_server_rejects_empty_host(client):
+    """An empty host is rejected with the localized invalid_host error."""
+    resp = client.post(
+        "/api/servers",
+        json={
+            "name": "Empty host",
+            "host": "",
+            "username": "root",
+            "password": "calvin",
+            "vendor": "dell",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["success"] is False
+    assert body["error"] == t("invalid_host", "en")
+
+
+def test_create_server_invalid_host_localized(client):
+    """The invalid_host rejection honors Accept-Language (it != en), proving it is i18n-keyed."""
+    resp = client.post(
+        "/api/servers",
+        json={
+            "name": "Localized reject",
+            "host": "http://127.0.0.1:8080/",
+            "username": "root",
+            "password": "calvin",
+            "vendor": "dell",
+        },
+        headers={"Accept-Language": "it"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["success"] is False
+    assert body["error"] == t("invalid_host", "it")
+    assert body["error"] == "Indirizzo host non valido"
+    assert body["error"] != t("invalid_host", "en")
+
+
+def test_update_server_rejects_invalid_host(client):
+    """PUT with an invalid host is rejected with the localized invalid_host error."""
+    create_resp = client.post(
+        "/api/servers",
+        json={
+            "name": "To update",
+            "host": "192.0.2.41",
+            "username": "root",
+            "password": "calvin",
+            "vendor": "dell",
+        },
+    )
+    assert create_resp.status_code == 200, create_resp.text
+    server_id = create_resp.json()["server_id"]
+
+    update_resp = client.put(
+        f"/api/servers/{server_id}",
+        json={"host": "http://127.0.0.1:8080/"},
+    )
+    assert update_resp.status_code == 200, update_resp.text
+    body = update_resp.json()
+    assert body["success"] is False
+    assert body["error"] == t("invalid_host", "en")
+
+
+def test_update_server_without_host_succeeds(client):
+    """PUT that OMITS host skips host validation — the update applies, host unchanged."""
+    create_resp = client.post(
+        "/api/servers",
+        json={
+            "name": "Original name",
+            "host": "192.0.2.42",
+            "username": "root",
+            "password": "calvin",
+            "vendor": "dell",
+        },
+    )
+    assert create_resp.status_code == 200, create_resp.text
+    server_id = create_resp.json()["server_id"]
+
+    update_resp = client.put(f"/api/servers/{server_id}", json={"name": "Renamed"})
+    assert update_resp.status_code == 200, update_resp.text
+    assert update_resp.json()["success"] is True
+
+    list_resp = client.get("/api/servers")
+    assert list_resp.status_code == 200
+    match = [s for s in list_resp.json()["servers"] if s["id"] == server_id]
+    assert len(match) == 1
+    assert match[0]["name"] == "Renamed"
+    assert match[0]["host"] == "192.0.2.42"
