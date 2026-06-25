@@ -15,6 +15,38 @@ router = APIRouter()
 SERVER_COLORS = ["#2563eb", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899", "#6366f1"]
 
 
+def _validate_host(host: str) -> bool:
+    """Return True if `host` is a bare hostname or IP literal usable as ipmitool's -H arg.
+
+    Catches the URL / garbage class of mistake (scheme, embedded :port, path/slash,
+    whitespace) — NOT a full RFC validator. ipmitool's -H wants a bare host, so anything
+    a user would paste as a URL is rejected here instead of failing later in the poll loop.
+
+    IPv6 DECISION: only the BRACKETED form `[..::..]` is accepted (the standard way to
+    write an IPv6 literal where a port could follow). A bare unbracketed IPv6 (with its
+    internal colons) is rejected by the colon rule below — bracket it to use IPv6.
+    """
+    h = host.strip()
+    if not h:
+        return False
+    # Whitespace anywhere -> invalid.
+    if any(ch.isspace() for ch in h):
+        return False
+    # URL scheme (http://, https://, anything with "://").
+    if "://" in h:
+        return False
+    # Path / slash.
+    if "/" in h or "\\" in h:
+        return False
+    # Bracketed IPv6 literal: accept `[...]` outright (do NOT trip the colon rule).
+    if h.startswith("[") and h.endswith("]") and ":" in h[1:-1]:
+        return True
+    # Embedded port or stray colon (host:623 belongs in the separate `port` field).
+    if ":" in h:
+        return False
+    return True
+
+
 class ServerCreate(BaseModel):
     name: str
     description: str = ""
@@ -54,9 +86,14 @@ async def list_servers():
 
 
 @router.post("")
-async def create_server(body: ServerCreate):
+async def create_server(body: ServerCreate, lang: str = Depends(get_lang)):
     from backend.main import db, auth
     from backend.core.crypto import encrypt
+
+    # Reject a URL / garbage host (scheme, embedded :port, path/slash, whitespace) BEFORE
+    # the INSERT so it never reaches ipmitool's -H flag in the background poll loops.
+    if not _validate_host(body.host):
+        return {"success": False, "error": t("invalid_host", lang)}
 
     # 04-W2-02: light validation on the tariff field. Negative values are nonsense;
     # 0.0 is allowed (hypothetical free electricity); null = not configured.
@@ -115,6 +152,11 @@ async def update_server(server_id: str, body: ServerUpdate, lang: str = Depends(
     # 04-W2-02: light validation on the tariff field.
     if "cost_per_kwh" in payload and payload["cost_per_kwh"] is not None and payload["cost_per_kwh"] < 0:
         return {"success": False, "error": "cost_per_kwh_negative"}
+
+    # Validate host ONLY when explicitly provided (exclude_unset semantics): a PUT that
+    # omits `host` leaves the column untouched and is never blocked by this guard.
+    if "host" in payload and not _validate_host(payload["host"]):
+        return {"success": False, "error": t("invalid_host", lang)}
 
     updates = []
     params = []
