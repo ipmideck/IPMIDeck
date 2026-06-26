@@ -190,13 +190,21 @@ async def set_fanpilot_mode(server_id: str, body: FanMode, lang: str = Depends(g
     write_ok = True
     write_detail = ""
 
+    # 05-03 (FANPILOT-RESUME-STATE / D-SR-01): persist the operator's DESIRED fan state
+    # (fan_desired_mode + fan_desired_speed) on every /mode change so startup state-resume
+    # can re-apply it after a restart. Intent is recorded only on a SUCCESSFUL write — we
+    # never persist a 'manual @ speed' intent the BMC refused (coordinates with the 05-02
+    # success-honesty fix). 'auto' clears the speed (NULL); 'fanpilot' leaves speed NULL
+    # (fanpilot_profile_id already captures that case).
     if body.mode == "auto":
         mode_res = await ctx.ipmi.set_fan_mode(host, user, pwd, manual=False, vendor=vendor)
         write_ok = mode_res is None or mode_res.ok
         write_detail = "" if write_ok else mode_res.detail
         if write_ok:
             await ctx.db.execute(
-                "UPDATE servers SET fanpilot_enabled = 0 WHERE id = ?", (server_id,)
+                "UPDATE servers SET fanpilot_enabled = 0, "
+                "fan_desired_mode = 'auto', fan_desired_speed = NULL WHERE id = ?",
+                (server_id,),
             )
             set_last_state(server_id, "auto")
     elif body.mode == "manual":
@@ -210,17 +218,21 @@ async def set_fanpilot_mode(server_id: str, body: FanMode, lang: str = Depends(g
             write_detail = failed.detail if failed is not None else ""
         if write_ok:
             await ctx.db.execute(
-                "UPDATE servers SET fanpilot_enabled = 0 WHERE id = ?", (server_id,)
+                "UPDATE servers SET fanpilot_enabled = 0, "
+                "fan_desired_mode = 'manual', fan_desired_speed = ? WHERE id = ?",
+                (speed, server_id),
             )
             set_last_state(server_id, "manual", speed)
         # On rejection: do NOT flip to a "manual @ speed" success state — leave the prior
-        # state so /status reflects reality, not a write that didn't take effect.
+        # state (and the prior desired intent) so /status and startup-resume reflect
+        # reality, not a write that didn't take effect.
     elif body.mode == "fanpilot":
         profile_id = body.profile_id
         if not profile_id:
             return {"success": False, "error": t("profile_id_required", lang)}
         await ctx.db.execute(
-            "UPDATE servers SET fanpilot_enabled = 1, fanpilot_profile_id = ? WHERE id = ?",
+            "UPDATE servers SET fanpilot_enabled = 1, fanpilot_profile_id = ?, "
+            "fan_desired_mode = 'fanpilot', fan_desired_speed = NULL WHERE id = ?",
             (profile_id, server_id),
         )
         # The loop will overwrite `speed_pct` on its first tick; until then the UI

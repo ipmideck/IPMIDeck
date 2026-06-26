@@ -95,6 +95,25 @@ class Database:
             msg = str(e).lower()
             if "duplicate column" not in msg and "already exists" not in msg:
                 raise
+        # 05-03 (FANPILOT-RESUME-STATE / Decision D-SR-01): persist the operator's DESIRED
+        # fan state durably on the CORE servers row so a manual pin (e.g. 100%) survives a
+        # restart. `servers` is a CORE table — these columns live in database.py via the same
+        # guarded idempotent ALTER as cost_per_kwh above, NOT a module migrations/*.sql (which
+        # is for module-owned tables). Each ALTER is independently guarded so a partially-
+        # migrated DB (one column already present) still adds the missing one.
+        #   fan_desired_mode  TEXT    'auto' | 'manual' | 'fanpilot'
+        #   fan_desired_speed INTEGER 0..100, NULL unless manual
+        for ddl in (
+            "ALTER TABLE servers ADD COLUMN fan_desired_mode TEXT",
+            "ALTER TABLE servers ADD COLUMN fan_desired_speed INTEGER",
+        ):
+            try:
+                await self._db.execute(ddl)
+                await self._db.commit()
+            except Exception as e:
+                msg = str(e).lower()
+                if "duplicate column" not in msg and "already exists" not in msg:
+                    raise
         logger.info("Database connected: %s", self.db_path)
 
     async def close(self) -> None:

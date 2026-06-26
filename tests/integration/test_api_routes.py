@@ -22,7 +22,10 @@ REVIEWS-driven choices (03-REVIEWS.md):
 
 from __future__ import annotations
 
+import asyncio
+
 import backend.main as bm
+from backend.core.database import Database
 from backend.core.i18n import t
 from backend.core.ipmi_service import FanWriteResult
 
@@ -372,3 +375,106 @@ def test_mode_manual_rejected_returns_false_and_logs_rejected(client, monkeypatc
     assert body["mode"] == "manual"
     assert "error" in body
     assert _latest_log_result(client, server_id) == "rejected"
+
+
+# --- 05-03 (SR / FANPILOT-RESUME-STATE): migration columns + /mode intent persistence ------
+
+
+def _server_intent(client, server_id: str) -> dict:
+    """Read fan_desired_mode / fan_desired_speed for a server off the live lifespan DB.
+
+    The new SR columns aren't surfaced by the list/get server routes (they SELECT a fixed
+    column set), so we read them directly from bm.db (live during the TestClient lifespan,
+    same pattern conftest uses with bm.auth). Proves both that the columns EXIST and that
+    /mode persisted the right intent.
+    """
+    loop = asyncio.get_event_loop()
+    return loop.run_until_complete(
+        bm.db.fetchone(
+            "SELECT fan_desired_mode, fan_desired_speed FROM servers WHERE id = ?",
+            (server_id,),
+        )
+    )
+
+
+def test_servers_schema_has_fan_desired_columns(client):
+    """The guarded ALTER added fan_desired_mode + fan_desired_speed to the servers table.
+
+    PRAGMA table_info(servers) lists both columns after the lifespan-driven connect().
+    """
+    loop = asyncio.get_event_loop()
+    cols = loop.run_until_complete(bm.db.fetchall("PRAGMA table_info(servers)"))
+    names = {c["name"] for c in cols}
+    assert "fan_desired_mode" in names, "migration must add fan_desired_mode to servers"
+    assert "fan_desired_speed" in names, "migration must add fan_desired_speed to servers"
+
+
+def test_servers_migration_is_idempotent(tmp_path):
+    """Calling Database.connect() twice on the SAME file must not raise (guarded ALTER).
+
+    Mirrors the lifespan re-entering connect() per TestClient over the same temp DB.
+    """
+
+    async def _twice() -> None:
+        db_path = str(tmp_path / "idempotent.db")
+        db1 = Database(db_path)
+        await db1.connect()  # creates schema + runs the ALTERs (columns now present)
+        await db1.close()
+        db2 = Database(db_path)
+        await db2.connect()  # ALTERs must be swallowed as duplicate-column, NOT raise
+        cols = await db2.fetchall("PRAGMA table_info(servers)")
+        names = {c["name"] for c in cols}
+        assert "fan_desired_mode" in names
+        assert "fan_desired_speed" in names
+        await db2.close()
+
+    asyncio.new_event_loop().run_until_complete(_twice())
+
+
+def test_mode_manual_persists_intent(client):
+    """POST /mode {manual, speed:100} persists fan_desired_mode='manual' + fan_desired_speed=100."""
+    server_id = _create_demo_server(client)
+    resp = client.post(
+        f"/api/modules/fanpilot/{server_id}/mode",
+        json={"mode": "manual", "speed": 100},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["success"] is True
+    intent = _server_intent(client, server_id)
+    assert intent["fan_desired_mode"] == "manual"
+    assert intent["fan_desired_speed"] == 100
+
+
+def test_mode_fanpilot_persists_intent(client):
+    """POST /mode {fanpilot, profile_id} persists fan_desired_mode='fanpilot'."""
+    server_id = _create_demo_server(client)
+    # A preset profile id=1 exists from the fanpilot module migration seed.
+    resp = client.post(
+        f"/api/modules/fanpilot/{server_id}/mode",
+        json={"mode": "fanpilot", "profile_id": 1},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["success"] is True
+    intent = _server_intent(client, server_id)
+    assert intent["fan_desired_mode"] == "fanpilot"
+    # fanpilot leaves speed NULL — fanpilot_profile_id already captures the profile.
+    assert intent["fan_desired_speed"] is None
+
+
+def test_mode_auto_persists_intent_and_clears_speed(client):
+    """POST /mode {auto} persists fan_desired_mode='auto' and clears fan_desired_speed (NULL)."""
+    server_id = _create_demo_server(client)
+    # First pin manual @ 80 so there's a speed to clear.
+    client.post(
+        f"/api/modules/fanpilot/{server_id}/mode",
+        json={"mode": "manual", "speed": 80},
+    )
+    resp = client.post(
+        f"/api/modules/fanpilot/{server_id}/mode",
+        json={"mode": "auto"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["success"] is True
+    intent = _server_intent(client, server_id)
+    assert intent["fan_desired_mode"] == "auto"
+    assert intent["fan_desired_speed"] is None
