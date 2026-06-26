@@ -6,7 +6,7 @@ import math
 import random
 import time
 
-from backend.core.ipmi_service import IPMIService
+from backend.core.ipmi_service import FanWriteResult, IPMIService
 
 
 class DemoIPMIService(IPMIService):
@@ -66,15 +66,18 @@ class DemoIPMIService(IPMIService):
 
     async def set_fan_mode(
         self, host: str, user: str, password: str, manual: bool, vendor: str = "dell"
-    ) -> None:
+    ) -> FanWriteResult:
         # Demo: vendor is ignored (mock) — signature matches the ABC (Decision G).
+        # P0-3: return a structured ok result so downstream code (loop/route) reads `.ok`.
         self._fan_manual[host] = manual
+        return FanWriteResult(True, "ok", None, "")
 
     async def set_fan_speed(
         self, host: str, user: str, password: str, speed_pct: int, vendor: str = "dell"
-    ) -> None:
+    ) -> FanWriteResult:
         # Demo: vendor is ignored (mock) — signature matches the ABC (Decision G).
         self._fan_speed[host] = max(0, min(100, speed_pct))
+        return FanWriteResult(True, "ok", None, "")
 
     async def get_sel(self, host: str, user: str, password: str) -> list[dict]:
         return [

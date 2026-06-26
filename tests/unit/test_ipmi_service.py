@@ -14,7 +14,11 @@ import asyncio
 
 import pytest
 
-from backend.core.ipmi_service import LocalIPMIService
+from backend.core.ipmi_service import (
+    FanWriteResult,
+    LocalIPMIService,
+    classify_ipmi_error,
+)
 
 
 async def test_power_command_invalid_action_raises():
@@ -292,3 +296,150 @@ async def test_exec_empty_password_refused_before_spawn(monkeypatch):
     with pytest.raises(RuntimeError):
         await svc._exec("h", "u", "", ["raw", "0x30", "0x30"])
     assert spawned["called"] is False  # guard fires before spawn — never injects IPMITOOL_PASSWORD=""
+
+
+# === P0-3 (FANPILOT-READBACK): classify_ipmi_error completion-code classifier ===
+#
+# ipmitool surfaces an IPMI completion code on stderr as `... rsp=0xNN): <text>`. The classifier
+# matches the MACHINE-STABLE `rsp=0x..` token (NOT the exit code — 05-RESEARCH Pitfall 2), mapping
+# the 2-hex code to ok/rejected/transient. Session-layer failures (no rsp=0x token) and TimeoutError
+# are transient. An unknown ccode is treated as a hard reject so it surfaces.
+
+
+def _rt(msg: str) -> RuntimeError:
+    return RuntimeError(msg)
+
+
+def test_classify_hard_reject_d4_insufficient_privilege():
+    """rsp=0xd4 (Dell raw-fan lockout / operator privilege) → hard reject, ccode d4."""
+    exc = _rt(
+        "ipmitool error (code 1): Unable to send RAW command "
+        "(channel=0x0 netfn=0x30 lun=0x0 cmd=0x30 rsp=0xd4): Insufficient privilege level"
+    )
+    res = classify_ipmi_error(exc)
+    assert res.ok is False
+    assert res.kind == "rejected"
+    assert res.ccode == "d4"
+
+
+def test_classify_hard_reject_c7_data_length():
+    """rsp=0xc7 (request data length invalid) → hard reject."""
+    res = classify_ipmi_error(_rt("... rsp=0xc7): Request data length invalid"))
+    assert res.kind == "rejected" and res.ccode == "c7" and res.ok is False
+
+
+def test_classify_hard_reject_d5_d6_family():
+    """0xd5/0xd6 are part of the same lockout family → hard reject."""
+    assert classify_ipmi_error(_rt("... rsp=0xd5): foo")).kind == "rejected"
+    assert classify_ipmi_error(_rt("... rsp=0xd5): foo")).ccode == "d5"
+    assert classify_ipmi_error(_rt("... rsp=0xd6): bar")).kind == "rejected"
+    assert classify_ipmi_error(_rt("... rsp=0xd6): bar")).ccode == "d6"
+
+
+def test_classify_transient_c0_node_busy():
+    """rsp=0xc0 (node busy) → transient, retryable."""
+    res = classify_ipmi_error(_rt("... rsp=0xc0): Node busy"))
+    assert res.ok is False and res.kind == "transient" and res.ccode == "c0"
+
+
+def test_classify_transient_ff_unspecified():
+    """rsp=0xff (unspecified error) → transient (bounded retry then fall back)."""
+    res = classify_ipmi_error(_rt("... rsp=0xff): Unspecified error"))
+    assert res.kind == "transient" and res.ccode == "ff"
+
+
+def test_classify_session_layer_failure_is_transient():
+    """A session-establish failure has NO rsp=0x token → transient, ccode None."""
+    res = classify_ipmi_error(_rt("Error: Unable to establish IPMI v2 / RMCP+ session"))
+    assert res.ok is False
+    assert res.kind == "transient"
+    assert res.ccode is None
+
+
+def test_classify_timeout_is_transient():
+    """A TimeoutError → transient, ccode None (no completion code at all)."""
+    res = classify_ipmi_error(TimeoutError("ipmitool timed out after 10s"))
+    assert res.kind == "transient" and res.ccode is None and res.ok is False
+
+
+def test_classify_unknown_ccode_treated_as_hard_reject():
+    """An unknown rsp=0x9a is treated as a hard reject (surface it), carrying the ccode."""
+    res = classify_ipmi_error(_rt("... rsp=0x9a): some new code"))
+    assert res.kind == "rejected"
+    assert res.ccode == "9a"
+
+
+# === P0-3: set_fan_speed / set_fan_mode return FanWriteResult ===
+
+
+async def test_set_fan_speed_returns_ok_result():
+    """A successful write returns FanWriteResult(ok=True, kind='ok')."""
+    svc = LocalIPMIService()
+    _stub(svc)
+    res = await svc.set_fan_speed("h", "u", "p", 50)
+    assert isinstance(res, FanWriteResult)
+    assert res.ok is True
+    assert res.kind == "ok"
+
+
+async def test_set_fan_mode_returns_ok_result():
+    """set_fan_mode also returns FanWriteResult(ok=True) on success."""
+    svc = LocalIPMIService()
+    _stub(svc)
+    res = await svc.set_fan_mode("h", "u", "p", manual=True)
+    assert res.ok is True and res.kind == "ok"
+
+
+async def test_set_fan_speed_rejected_is_classified_not_raised():
+    """A rejected write (rsp=0xd4) is RETURNED as rejected/d4, NOT re-raised."""
+    svc = LocalIPMIService()
+
+    async def boom(host, user, password, args):
+        raise RuntimeError("ipmitool error (code 1): ... rsp=0xd4): Insufficient privilege level")
+
+    svc._exec = boom  # type: ignore[method-assign]
+    res = await svc.set_fan_speed("h", "u", "p", 50)
+    assert res.ok is False
+    assert res.kind == "rejected"
+    assert res.ccode == "d4"
+
+
+async def test_set_fan_speed_transient_is_classified():
+    """A transient failure (timeout) is returned as transient, not raised."""
+    svc = LocalIPMIService()
+
+    async def boom(host, user, password, args):
+        raise TimeoutError("ipmitool timed out after 10s")
+
+    svc._exec = boom  # type: ignore[method-assign]
+    res = await svc.set_fan_speed("h", "u", "p", 50)
+    assert res.ok is False and res.kind == "transient" and res.ccode is None
+
+
+async def test_set_fan_speed_unsupported_vendor_returns_unsupported():
+    """An unsupported vendor → FanWriteResult(kind='unsupported'); does NOT raise NotImplementedError."""
+    svc = LocalIPMIService()
+    _stub(svc)
+    res = await svc.set_fan_speed("h", "u", "p", 50, vendor="hpe")
+    assert res.ok is False
+    assert res.kind == "unsupported"
+    assert res.ccode is None
+
+
+async def test_set_fan_mode_unsupported_vendor_returns_unsupported():
+    """set_fan_mode on an unsupported vendor is also a non-raising kind='unsupported'."""
+    svc = LocalIPMIService()
+    _stub(svc)
+    res = await svc.set_fan_mode("h", "u", "p", manual=True, vendor="hpe")
+    assert res.ok is False and res.kind == "unsupported"
+
+
+async def test_demo_set_fan_returns_ok_result():
+    """The demo path also returns FanWriteResult(ok=True) so downstream .ok works in demo mode."""
+    from backend.core.ipmi_demo import DemoIPMIService
+
+    demo = DemoIPMIService()
+    speed_res = await demo.set_fan_speed("h", "u", "p", 60)
+    mode_res = await demo.set_fan_mode("h", "u", "p", manual=True)
+    assert speed_res.ok is True and speed_res.kind == "ok"
+    assert mode_res.ok is True and mode_res.kind == "ok"

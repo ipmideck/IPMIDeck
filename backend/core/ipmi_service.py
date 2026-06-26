@@ -7,14 +7,72 @@ import logging
 import os
 import re
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 
 logger = logging.getLogger("ipmideck.ipmi")
 
 # 04-W4-02: vendors whose fan PWM is reachable via raw ipmitool. Dell is the working
 # baseline (R720); Supermicro is documented. HPE iLO actively locks fan control against
-# raw commands (no supported byte sequence exists) and "generic" is unknown — both raise
-# NotImplementedError so the UI can surface an honest "unsupported" message.
+# raw commands (no supported byte sequence exists) and "generic" is unknown — both surface
+# kind="unsupported" so the UI can show an honest "unsupported" message.
 _SUPPORTED_FAN_VENDORS = {"dell", "supermicro"}
+
+
+# === P0-3 (FANPILOT-READBACK): fan-write completion-code classification ===
+#
+# ipmitool surfaces an IPMI completion code on stderr as a line of the exact form:
+#   Unable to send RAW command (channel=0x0 netfn=0x30 lun=0x0 cmd=0x30 rsp=0xNN): <text>
+# (`lib/ipmi_raw.c`). The current `_exec` already raises RuntimeError carrying that whole
+# stderr line, so we classify off the MACHINE-STABLE `rsp=0x..` token — NOT the process exit
+# code, which ipmitool historically returned as 0 even on raw failures (05-RESEARCH Pitfall 2 /
+# ipmitool issue #97). The 2-hex code is vendor-stable; the human text may be localized.
+_RSP_RE = re.compile(r"rsp=0x([0-9a-fA-F]{2})")
+# Hard rejects — no point retrying (privilege/lockout, malformed payload, disabled command).
+_HARD_CCODES = {"d4", "d5", "d6", "c7", "c1", "cc", "c9"}
+# Transient — BMC busy / unspecified; safe to retry (bounded).
+_TRANSIENT_CCODES = {"c0", "ff"}
+
+
+@dataclass(frozen=True)
+class FanWriteResult:
+    """Structured outcome of a fan-write (set_fan_mode / set_fan_speed).
+
+    ok=True only on a confirmed-accepted write. On failure, `kind` is one of
+    "rejected" (hard completion-code reject — do NOT retry), "transient" (BMC busy /
+    session / timeout — retry bounded) or "unsupported" (vendor cannot be controlled
+    over IPMI — no retry, no IPMI fail-safe possible). `ccode` is the 2-hex completion
+    code when one was present (else None). `detail` is a human message for the command
+    log / alert.
+    """
+
+    ok: bool
+    kind: str  # "ok" | "rejected" | "transient" | "unsupported"
+    ccode: str | None  # e.g. "d4", or None for session-layer / timeout / unsupported
+    detail: str  # human message for command_log / alert
+
+
+def classify_ipmi_error(exc: Exception) -> FanWriteResult:
+    """Map an ipmitool failure exception to a structured FanWriteResult.
+
+    Decision tree (05-RESEARCH §"P0-3 Completion-Code Classification"):
+      1. TimeoutError                         -> transient (no completion code)
+      2. message carries `rsp=0x<code>`:
+           code in _TRANSIENT_CCODES (c0/ff)  -> transient
+           else (hard ccodes OR unknown code) -> rejected (carry the ccode, surface it)
+      3. no rsp token (session / network)     -> transient
+    """
+    if isinstance(exc, TimeoutError):
+        return FanWriteResult(False, "transient", None, str(exc))
+    msg = str(exc)
+    m = _RSP_RE.search(msg)
+    if m:
+        code = m.group(1).lower()
+        if code in _TRANSIENT_CCODES:
+            return FanWriteResult(False, "transient", code, msg)
+        # _HARD_CCODES OR an unknown code: treat as a hard reject so it surfaces.
+        return FanWriteResult(False, "rejected", code, msg)
+    # No rsp=0x token: session-establish failure / network layer -> transient.
+    return FanWriteResult(False, "transient", None, msg)
 
 
 class IPMIService(ABC):
@@ -35,13 +93,13 @@ class IPMIService(ABC):
     @abstractmethod
     async def set_fan_mode(
         self, host: str, user: str, password: str, manual: bool, vendor: str = "dell"
-    ) -> None:
+    ) -> FanWriteResult:
         ...
 
     @abstractmethod
     async def set_fan_speed(
         self, host: str, user: str, password: str, speed_pct: int, vendor: str = "dell"
-    ) -> None:
+    ) -> FanWriteResult:
         ...
 
     @abstractmethod
@@ -147,48 +205,64 @@ class LocalIPMIService(IPMIService):
 
     async def set_fan_mode(
         self, host: str, user: str, password: str, manual: bool, vendor: str = "dell"
-    ) -> None:
+    ) -> FanWriteResult:
         # 04-W4-02: vendor dispatch. Default vendor="dell" keeps Plan 01's existing
         # call sites (which pass NO vendor kwarg) valid (Decision G).
         vendor = (vendor or "dell").lower()
         if vendor not in _SUPPORTED_FAN_VENDORS:
-            raise NotImplementedError(
+            # P0-3 / D-P03-05: unsupported vendor can't be controlled over IPMI — no retry,
+            # no IPMI fail-safe possible. Return a structured result instead of raising so the
+            # loop/route handle it uniformly.
+            return FanWriteResult(
+                False,
+                "unsupported",
+                None,
                 f"Fan control not supported for vendor '{vendor}' "
-                f"(supported: {sorted(_SUPPORTED_FAN_VENDORS)})"
+                f"(supported: {sorted(_SUPPORTED_FAN_VENDORS)})",
             )
         if vendor == "dell":
             # 0x30 0x30 0x01 0x00 = manual; 0x01 = auto
             val = "0x00" if manual else "0x01"
-            await self._exec(host, user, password, ["raw", "0x30", "0x30", "0x01", val])
-        elif vendor == "supermicro":
+            args = ["raw", "0x30", "0x30", "0x01", val]
+        else:  # supermicro
             # 0x30 0x45 0x01 0x01 = Full (manual); 0x02 = Optimal (auto). Setting the
             # profile to Full is required or Supermicro reverts to thermal-managed
             # mode after ~5 min (RESEARCH Pitfall 5).
             val = "0x01" if manual else "0x02"
-            await self._exec(host, user, password, ["raw", "0x30", "0x45", "0x01", val])
+            args = ["raw", "0x30", "0x45", "0x01", val]
+        try:
+            await self._exec(host, user, password, args)
+            return FanWriteResult(True, "ok", None, "")
+        except Exception as e:  # classify rejected/transient — never a false success.
+            return classify_ipmi_error(e)
 
     async def set_fan_speed(
         self, host: str, user: str, password: str, speed_pct: int, vendor: str = "dell"
-    ) -> None:
+    ) -> FanWriteResult:
         # 04-W4-02: vendor dispatch. Default vendor="dell" (Decision G).
         vendor = (vendor or "dell").lower()
         if vendor not in _SUPPORTED_FAN_VENDORS:
-            raise NotImplementedError(
+            # P0-3 / D-P03-05: unsupported vendor — alert-only, no IPMI fail-safe possible.
+            return FanWriteResult(
+                False,
+                "unsupported",
+                None,
                 f"Fan speed not supported for vendor '{vendor}' "
-                f"(supported: {sorted(_SUPPORTED_FAN_VENDORS)})"
+                f"(supported: {sorted(_SUPPORTED_FAN_VENDORS)})",
             )
         speed = max(0, min(100, speed_pct))
         hex_val = f"0x{speed:02x}"
         if vendor == "dell":
             # Dell: 0x30 0x30 0x02 0xff <pct_hex>
-            await self._exec(
-                host, user, password, ["raw", "0x30", "0x30", "0x02", "0xff", hex_val]
-            )
-        elif vendor == "supermicro":
+            args = ["raw", "0x30", "0x30", "0x02", "0xff", hex_val]
+        else:  # supermicro
             # Supermicro: 0x30 0x70 0x66 0x01 <zone=0x00> <pct_hex>; zone 0 = system fans.
-            await self._exec(
-                host, user, password, ["raw", "0x30", "0x70", "0x66", "0x01", "0x00", hex_val]
-            )
+            args = ["raw", "0x30", "0x70", "0x66", "0x01", "0x00", hex_val]
+        try:
+            await self._exec(host, user, password, args)
+            return FanWriteResult(True, "ok", None, "")
+        except Exception as e:  # classify rejected/transient — never a false success.
+            return classify_ipmi_error(e)
 
     async def get_sel(self, host: str, user: str, password: str) -> list[dict]:
         output = await self._exec(host, user, password, ["sel", "elist"])
