@@ -81,6 +81,25 @@ def _parse_sqlite_timestamp(ts: str | None) -> datetime | None:
         return None
 
 
+def _resolve_failsafe(mode_raw: str | None, speed_raw: str | None) -> tuple[str, int]:
+    """Normalize the persisted fail-safe config into (mode, speed).
+
+    quick-260626-4px: defaults are safety-first — mode='fixed', speed=100 — so a
+    missing/garbage config "fails to full fan speed" (BMC auto under-cools
+    third-party GPUs the BMC's own fan curve does not model). speed is clamped to
+    0..100; any parse error falls back to 100.
+    """
+    mode = (mode_raw or "fixed").lower()
+    if mode not in ("fixed", "bmc_auto"):
+        mode = "fixed"
+    try:
+        speed = int(speed_raw if speed_raw not in (None, "") else 100)
+    except (TypeError, ValueError):
+        speed = 100
+    speed = max(0, min(100, speed))
+    return mode, speed
+
+
 async def _recover_to_bmc_auto(
     ctx,
     server_id: str,
@@ -90,12 +109,19 @@ async def _recover_to_bmc_auto(
     reason: str,
     vendor: str = "dell",
 ) -> None:
-    """Best-effort restore BMC-auto fan mode + persist fanpilot_enabled=0 + log to command_log.
+    """Best-effort apply the fail-safe action + persist fanpilot_enabled=0 + log to command_log.
 
     Implements both 04-W1-01 (offline transition) and 04-W1-02 (stale sensor)
-    recovery pathways. Manual fan mode is NEVER touched — recovery only ever
-    sets manual=False. The command_log INSERT uses the REAL schema columns
-    (command_type, command_detail, result — Decision F).
+    recovery pathways. The applied action is governed by the operator's fail-safe
+    setting (quick-260626-4px), read from app_config defaulting safety-first:
+
+      - fanpilot.failsafe_mode == "fixed" (DEFAULT): force manual mode at
+        fanpilot.failsafe_speed (default 100). "Fail to full speed" — BMC auto
+        under-cools third-party GPUs the BMC does not model in its fan curve.
+      - fanpilot.failsafe_mode == "bmc_auto": restore BMC-auto (legacy behavior).
+
+    The command_log INSERT uses the REAL schema columns (command_type,
+    command_detail, result — Decision F).
 
     Best-effort means: every step is wrapped in try/except. If BMC is
     unreachable (the offline case is the EXPECTED case), the IPMI call will
@@ -115,16 +141,36 @@ async def _recover_to_bmc_auto(
     from backend.core.crypto import decrypt
     from backend.main import auth
 
-    # Best-effort IPMI restore. Decryption can raise if the credential blob is
+    # quick-260626-4px: read the operator's fail-safe choice (defaults safety-first
+    # when the row is missing — fixed @ 100). Mode flips take effect at the next
+    # recovery without restart.
+    mode, speed = _resolve_failsafe(
+        await ctx.db.get_config("fanpilot.failsafe_mode", "fixed"),
+        await ctx.db.get_config("fanpilot.failsafe_speed", "100"),
+    )
+    vendor = vendor or "dell"
+
+    # Best-effort IPMI apply. Decryption can raise if the credential blob is
     # malformed; wrap it. 04-W4-02: forward the server vendor (Decision G default).
     try:
         key = auth.get_encryption_key()
         user = decrypt(username_enc, key)
         pwd = decrypt(password_enc, key)
-        await asyncio.wait_for(
-            ctx.ipmi.set_fan_mode(host, user, pwd, manual=False, vendor=vendor or "dell"),
-            timeout=5.0,
-        )
+        if mode == "fixed":
+            # Force manual mode and pin the configured speed (fail to full speed).
+            await asyncio.wait_for(
+                ctx.ipmi.set_fan_mode(host, user, pwd, manual=True, vendor=vendor),
+                timeout=5.0,
+            )
+            await asyncio.wait_for(
+                ctx.ipmi.set_fan_speed(host, user, pwd, speed, vendor=vendor),
+                timeout=5.0,
+            )
+        else:  # bmc_auto — restore BMC-auto fan mode (legacy behavior).
+            await asyncio.wait_for(
+                ctx.ipmi.set_fan_mode(host, user, pwd, manual=False, vendor=vendor),
+                timeout=5.0,
+            )
         ipmi_ok = True
     except Exception:
         # The offline case is the EXPECTED case here — log at warning so it's
@@ -138,37 +184,43 @@ async def _recover_to_bmc_auto(
     # Persist fanpilot_enabled=0 + write the idempotency marker even if the BMC
     # was unreachable — the offline-transition case is exactly when the BMC
     # CAN'T be talked to, but we still need to ensure the next online tick
-    # doesn't auto-resume manual mode (CONTEXT 04-W1-01: stay in BMC-auto, user
+    # doesn't auto-resume manual mode (CONTEXT 04-W1-01: stay recovered, user
     # must manually re-engage).
     try:
         await ctx.db.execute(
             "UPDATE servers SET fanpilot_enabled = 0 WHERE id = ?",
             (server_id,),
         )
-        # The (command_type='fan_mode', command_detail='auto', result='recovered')
-        # triple is the same idempotency marker FIX-03 layer 3 startup recovery
-        # checks for. Startup recovery only re-fires when latest fan_mode
-        # command_detail is 'manual' or 'fanpilot' — writing 'auto' here means
-        # next boot's latest is 'auto' and recovery is correctly skipped.
+        # FIX-03 idempotency (quick-260626-4px option (a)): command_detail STAYS
+        # 'auto' for BOTH branches so the FIX-03 layer-3 startup-recovery query
+        # (which only re-fires when the latest fan_mode command_detail is 'manual'
+        # or 'fanpilot') is left untouched and never loops. The APPLIED action is
+        # encoded in `result` instead: 'failsafe_fixed_<speed>' vs 'failsafe_auto'.
+        result = f"failsafe_fixed_{speed}" if mode == "fixed" else "failsafe_auto"
         await ctx.db.execute(
             "INSERT INTO command_log (server_id, command_type, command_detail, result) "
             "VALUES (?, ?, ?, ?)",
-            (server_id, "fan_mode", "auto", "recovered"),
+            (server_id, "fan_mode", "auto", result),
         )
         await ctx.db.commit()
     except Exception:
         logger.exception("FanPilot recovery: DB persist failed for server %s", server_id)
         return
 
-    # Reflect in the in-memory mode cache so /status reports auto immediately.
-    set_last_state(server_id, "auto")
+    # Reflect what was ACTUALLY applied in the in-memory mode cache so /status is
+    # accurate immediately. fixed -> manual @ speed; bmc_auto -> auto.
+    if mode == "fixed":
+        set_last_state(server_id, "manual", speed)
+    else:
+        set_last_state(server_id, "auto")
     # Drop the controller; user must re-engage to recreate it with the new
     # profile settings (CONTEXT 04-W1-01: no auto-resume after recovery).
     _controllers.pop(server_id, None)
 
     logger.warning(
-        "FanPilot auto-recovered server_id=%s reason=%s ipmi_restore=%s",
-        server_id, reason, "ok" if ipmi_ok else "skipped_bmc_unreachable",
+        "FanPilot fail-safe applied server_id=%s reason=%s mode=%s speed=%s ipmi=%s",
+        server_id, reason, mode, speed if mode == "fixed" else "-",
+        "ok" if ipmi_ok else "skipped_bmc_unreachable",
     )
 
 
