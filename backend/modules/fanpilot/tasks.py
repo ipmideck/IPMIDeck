@@ -29,6 +29,39 @@ _last_state: dict[str, dict] = {}
 # so it survives across loop iterations; cleared on fanpilot_shutdown().
 _last_online_state: dict[str, bool] = {}
 
+# === P0-2 (FANPILOT-FAILSAFE-VALUE): garbage-value plausibility guard ===
+# A *fresh* sensor row holding an implausible value falls through the Phase-4
+# freshness gate (timestamp-only, value-blind), so the curve would happily cool
+# to idle on a 0 C reading (interpolate_curve floors to the lowest curve point at
+# temp <= points[0]). This value-domain guard rejects implausible temps; a SINGLE
+# transient bad read must NOT trip — only N consecutive bad ticks route through the
+# existing fail-safe primitive (CONTEXT D-P02-01..04). Bounds/N are named constants
+# so they are easy to tune (Claude's discretion per CONTEXT).
+GARBAGE_TEMP_FLOOR_C = 0.0      # <= floor is garbage (disabled-sensor-reports-0 case)
+GARBAGE_TEMP_CEILING_C = 150.0  # >= ceiling is garbage (runaway/garbage-high)
+GARBAGE_DEBOUNCE_TICKS = 3      # consecutive bad ticks before fail-safe (CONTEXT D-P02-02)
+# Per-server consecutive-bad-tick counter (str server_id keys — mirrors
+# _last_online_state / _controllers). Cleared on fanpilot_shutdown().
+_garbage_counts: dict[str, int] = {}
+
+
+def _check_garbage_value(server_id: str, value: float) -> bool:
+    """Update the per-server debounce counter for one tick; return True to trip fail-safe.
+
+    A value at/below GARBAGE_TEMP_FLOOR_C or at/above GARBAGE_TEMP_CEILING_C is a "bad
+    tick": the counter increments and we return True only once it reaches
+    GARBAGE_DEBOUNCE_TICKS (so a single transient bad read never trips). A plausible
+    value resets the counter to 0 and returns False. The fan loop calls this helper
+    inline so behavior is identical to a direct guard; factored out only so the debounce
+    logic is unit-testable without driving the whole loop.
+    """
+    if value <= GARBAGE_TEMP_FLOOR_C or value >= GARBAGE_TEMP_CEILING_C:
+        _garbage_counts[server_id] = _garbage_counts.get(server_id, 0) + 1
+        return _garbage_counts[server_id] >= GARBAGE_DEBOUNCE_TICKS
+    # Good read — reset the per-server counter so transient blips don't accumulate.
+    _garbage_counts[server_id] = 0
+    return False
+
 
 def set_last_state(server_id: str, mode: str, speed_pct: int | None = None) -> None:
     """Update the cached mode/speed for a server.
@@ -445,6 +478,45 @@ async def fanpilot_loop():
                         continue
 
                 current_temp = reading["value"]
+
+                # === P0-2 garbage-value guard (D-P02-01..04) ===
+                # Distinct from the freshness gate above (value-blind): a FRESH row
+                # holding an implausible value (<= 0 C or >= 150 C) must NEVER reach
+                # the curve (it would floor fans to idle). Debounce N=3 consecutive bad
+                # ticks per server so a single transient bad read doesn't trip; on
+                # crossing N route through the SAME fail-safe primitive + a critical
+                # alert, then skip this tick.
+                if _check_garbage_value(server_id, current_temp):
+                    logger.warning(
+                        "FanPilot garbage-value guard TRIPPED server_id=%s value=%s "
+                        "threshold=%d sensor=%s",
+                        server_id, current_temp, GARBAGE_DEBOUNCE_TICKS, source_sensor,
+                    )
+                    await _recover_to_bmc_auto(
+                        ctx, server_id, server["host"],
+                        server["username_enc"], server["password_enc"],
+                        reason="sensor_garbage", vendor=server["vendor"] or "dell",
+                    )
+                    await ctx.ws.broadcast_alert(
+                        server_id, "critical", source_sensor,
+                        f"Implausible sensor value {current_temp}C; failed safe",
+                        current_temp,
+                    )
+                    # Reset after acting; recovery set fanpilot_enabled=0 so the server
+                    # won't re-enter this loop until the operator re-engages.
+                    _garbage_counts[server_id] = 0
+                    continue
+                if current_temp <= GARBAGE_TEMP_FLOOR_C or current_temp >= GARBAGE_TEMP_CEILING_C:
+                    # Bad value but below the debounce threshold — log and skip this tick
+                    # WITHOUT feeding the garbage to the curve (don't idle the fans on a blip).
+                    logger.warning(
+                        "FanPilot garbage-value guard server_id=%s value=%s count=%d/%d "
+                        "sensor=%s (below trip threshold; skipping tick)",
+                        server_id, current_temp, _garbage_counts.get(server_id, 0),
+                        GARBAGE_DEBOUNCE_TICKS, source_sensor,
+                    )
+                    continue
+
                 target_speed = ctrl.compute_fan_speed(curve_points, current_temp)
 
                 # Apply fan speed via IPMI
@@ -534,5 +606,6 @@ async def fanpilot_shutdown():
     _controllers.clear()
     _last_state.clear()
     _last_online_state.clear()
+    _garbage_counts.clear()
     global _wake_event
     _wake_event = None
