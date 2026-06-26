@@ -451,10 +451,134 @@ async def _apply_fan_write(ctx, server, target_speed: int) -> bool:
     return True
 
 
+async def _startup_state_resume(ctx) -> None:
+    """SR: explicit-state startup resume (replaces the FIX-03 layer-3 command_log inference).
+
+    Runs ONCE before the main loop. Computes the downtime gap from the global heartbeat
+    (fanpilot.last_alive_at, naive UTC) and, for every server carrying a non-auto DESIRED
+    intent, either RESUMES that intent (short gap) or applies the operator FAIL-SAFE (long
+    gap) — NEVER a silent BMC auto, NEVER an auto-revert of a deliberate manual pin.
+
+    Decision matrix (D-SR-02..05):
+      * no heartbeat (first boot / fresh DB) -> gap is None -> NO-OP for every server
+        (nothing to resume; do NOT reset or fail-safe — there was no prior run to recover from).
+      * gap < fanpilot.resume_threshold_seconds (default 3600) -> RESUME persisted intent:
+          - manual @ fan_desired_speed -> re-issue set_fan_mode(manual=True)+set_fan_speed via
+            the 05-01 structured-write path; honor .ok (a rejected resume is logged, never a
+            claimed success); reflect manual @ speed in the in-memory cache.
+          - fanpilot -> leave fanpilot_enabled=1; the main loop drives it. Reflect 'fanpilot'.
+      * gap >= threshold (stale) -> _recover_to_bmc_auto(reason="startup_stale") — the operator
+        fail-safe (default fixed @ 100), NEVER a silent BMC auto.
+
+    Idempotency: because the decision reads EXPLICIT columns + the heartbeat (not command_log),
+    a manual server with gap < threshold STAYS manual across repeated restarts — intended, not a
+    loop. No 'recovered' command_log marker is needed for startup logic anymore (that marker only
+    existed to stop the old command_log query from re-firing).
+    """
+    from backend.core.crypto import decrypt
+    from backend.main import auth
+
+    try:
+        last_alive_raw = await ctx.db.get_config("fanpilot.last_alive_at", None)
+        threshold = int(
+            await ctx.db.get_config("fanpilot.resume_threshold_seconds", "3600") or "3600"
+        )
+        last_alive = _parse_sqlite_timestamp(last_alive_raw)
+        # NAIVE UTC on both sides (FanPilot module convention) — mixing naive/aware raises.
+        gap = (datetime.utcnow() - last_alive).total_seconds() if last_alive else None
+
+        # Servers with a non-auto desired intent (or a still-enabled fanpilot) need a
+        # resume/fail-safe decision. fan_desired_mode is the 05-03 durable intent column.
+        intent_rows = await ctx.db.fetchall(
+            "SELECT id, host, username_enc, password_enc, vendor, "
+            "fan_desired_mode, fan_desired_speed, fanpilot_enabled "
+            "FROM servers "
+            "WHERE fan_desired_mode IN ('manual', 'fanpilot') OR fanpilot_enabled = 1"
+        )
+        if not intent_rows:
+            logger.info("FanPilot startup resume: no servers with non-auto intent")
+            return
+        if gap is None:
+            # First boot / no heartbeat — nothing to resume; do NOT reset or fail-safe.
+            logger.info(
+                "FanPilot startup resume: no heartbeat (first boot); leaving "
+                "%d server(s) as-is", len(intent_rows),
+            )
+            return
+
+        key = auth.get_encryption_key()
+        for row in intent_rows:
+            server_id = row["id"]
+            desired_mode = row["fan_desired_mode"] or ""
+            try:
+                if gap < threshold:
+                    # RESUME persisted intent — a manual 100% pin survives a quick restart.
+                    if desired_mode == "manual" and row["fan_desired_speed"] is not None:
+                        speed = int(row["fan_desired_speed"])
+                        host = row["host"]
+                        user = decrypt(row["username_enc"], key)
+                        pwd = decrypt(row["password_enc"], key)
+                        vendor = row["vendor"] or "dell"
+                        # 05-01 structured-write path; honor .ok (a rejected resume must not
+                        # be claimed as success).
+                        mode_r = await ctx.ipmi.set_fan_mode(
+                            host, user, pwd, manual=True, vendor=vendor
+                        )
+                        speed_r = await ctx.ipmi.set_fan_speed(
+                            host, user, pwd, speed, vendor=vendor
+                        )
+                        resume_ok = (mode_r is None or mode_r.ok) and (
+                            speed_r is None or speed_r.ok
+                        )
+                        if resume_ok:
+                            set_last_state(server_id, "manual", speed)
+                            logger.info(
+                                "FanPilot startup resume: re-applied manual @ %d%% "
+                                "server_id=%s gap=%.0fs", speed, server_id, gap,
+                            )
+                        else:
+                            # A rejected resume write is NOT a success — log it, don't pretend.
+                            failed = (
+                                speed_r if (speed_r is not None and not speed_r.ok) else mode_r
+                            )
+                            logger.warning(
+                                "FanPilot startup resume: manual re-apply REJECTED "
+                                "server_id=%s detail=%s",
+                                server_id,
+                                failed.detail if failed is not None else "",
+                            )
+                    elif desired_mode == "fanpilot" or row["fanpilot_enabled"]:
+                        # Keep fanpilot_enabled=1; the main loop drives the write. Reflect
+                        # the resumed mode in the cache so /status is honest immediately.
+                        set_last_state(server_id, "fanpilot")
+                        logger.info(
+                            "FanPilot startup resume: keeping fanpilot enabled "
+                            "server_id=%s gap=%.0fs", server_id, gap,
+                        )
+                else:
+                    # STALE: gap >= threshold -> operator fail-safe (NEVER silent BMC auto).
+                    # Don't blindly re-apply a possibly-stale low value across a long outage.
+                    logger.warning(
+                        "FanPilot startup resume: STALE gap=%.0fs >= threshold=%ds -> "
+                        "fail-safe server_id=%s", gap, threshold, server_id,
+                    )
+                    await _recover_to_bmc_auto(
+                        ctx, server_id, row["host"], row["username_enc"],
+                        row["password_enc"], reason="startup_stale",
+                        vendor=row["vendor"] or "dell",
+                    )
+            except Exception:
+                # Per-server isolation: one bad BMC must not block resume for the others.
+                logger.exception(
+                    "FanPilot startup resume failed for server %s", server_id
+                )
+    except Exception:
+        # Best-effort: a query/config failure must not stop the loop from starting.
+        logger.exception("FanPilot startup state-resume failed; continuing")
+
+
 async def fanpilot_loop():
     """Background task that applies fan curves to all servers with FanPilot enabled."""
-    from backend.core.crypto import decrypt
-    from backend.main import auth  # AuthManager not in ModuleContext — kept (Decision J)
     from backend.modules import get_ctx
 
     ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
@@ -463,81 +587,11 @@ async def fanpilot_loop():
     _running = True
     logger.info("FanPilot loop started")
 
-    # === FIX-03 layer 3: Startup recovery ===
-    # If the previous run was killed uncleanly (kill -9, power loss, OOM kill),
-    # the lifespan shutdown hook may not have fired and fans could still be in
-    # manual mode on some BMCs. Detect this by reading command_log: any server
-    # whose latest fan_mode entry is 'manual' or 'fanpilot' (and not followed
-    # by 'auto') needs restoration BEFORE we start the main loop.
-    # Reads ONLY core schema (command_log, servers) — never module-specific tables.
-    try:
-        recovery_rows = await ctx.db.fetchall(
-            """
-            SELECT cl.server_id, cl.command_detail
-            FROM command_log cl
-            INNER JOIN (
-                SELECT server_id, MAX(timestamp) as max_ts
-                FROM command_log
-                WHERE command_type = 'fan_mode'
-                GROUP BY server_id
-            ) latest ON cl.server_id = latest.server_id AND cl.timestamp = latest.max_ts
-            WHERE cl.command_type = 'fan_mode'
-              AND cl.command_detail IN ('manual', 'fanpilot')
-            """
-        )
-        if recovery_rows:
-            logger.warning(
-                "FanPilot startup recovery: %d server(s) had unclean shutdown",
-                len(recovery_rows),
-            )
-            key = auth.get_encryption_key()
-            for row in recovery_rows:
-                server_id = row["server_id"]
-                prev_mode = row["command_detail"]
-                try:
-                    server = await ctx.db.fetchone(
-                        "SELECT host, username_enc, password_enc, vendor "
-                        "FROM servers WHERE id = ?",
-                        (server_id,),
-                    )
-                    if not server:
-                        logger.warning(
-                            "Recovery: server %s not found, skipping", server_id,
-                        )
-                        continue
-                    host = server["host"]
-                    user = decrypt(server["username_enc"], key)
-                    pwd = decrypt(server["password_enc"], key)
-                    # 04-W4-02: forward vendor (default 'dell' if NULL/empty).
-                    await ctx.ipmi.set_fan_mode(
-                        host, user, pwd, manual=False, vendor=server["vendor"] or "dell"
-                    )
-                    # Log the recovery so the next startup does not re-trigger.
-                    await ctx.db.execute(
-                        "INSERT INTO command_log (server_id, command_type, command_detail, result) "
-                        "VALUES (?, ?, ?, ?)",
-                        (server_id, "fan_mode", "auto", "recovered"),
-                    )
-                    await ctx.db.commit()
-                    # Reflect the recovered state in the in-memory cache so /status
-                    # reports "auto" immediately after startup.
-                    set_last_state(server_id, "auto")
-                    logger.warning(
-                        "Recovered fan mode for server %s (was '%s')",
-                        server_id, prev_mode,
-                    )
-                except Exception:
-                    # Per-server isolation: one bad BMC must not block recovery for others.
-                    logger.exception("Failed recovery for server %s", server_id)
-        else:
-            logger.info("FanPilot startup recovery: no servers need restoration")
-    except Exception:
-        # Recovery is best-effort; if the query itself fails (e.g., DB issue),
-        # log and continue into the main loop. The main loop's per-iteration
-        # error handling will then take over.
-        logger.exception("FanPilot startup recovery query failed; continuing")
-
-    # === End FIX-03 layer 3 ===
+    # === SR: explicit-state startup resume (replaces FIX-03 layer-3 command_log inference) ===
+    # Resume the operator's DESIRED fan state when the downtime gap is short (a manual 100%
+    # pin survives a 3s restart — the GPU-cook fix), apply the operator fail-safe when the gap
+    # is long, and NEVER silently revert a manual pin to BMC auto. See _startup_state_resume.
+    await _startup_state_resume(ctx)
 
     # Init the wake signal inside the loop's event loop (lazy, so wake_loop() before
     # the loop starts is a no-op).
@@ -547,6 +601,17 @@ async def fanpilot_loop():
     while _running:
         try:
             ctx = get_ctx()  # Look up fresh inside the loop body (Decision J)
+            # SR heartbeat (D-SR-02): write the global last_alive_at at the TOP of each tick
+            # (naive UTC, FanPilot module convention) so a tick that then crashes still recorded
+            # "alive a moment ago". One global write per tick — never per-server. Best-effort:
+            # a heartbeat failure must never crash the loop. fanpilot.last_alive_at is INTERNAL
+            # (NOT in _ALLOWED_APP_CONFIG_KEYS — never web-settable).
+            try:
+                await ctx.db.set_config(
+                    "fanpilot.last_alive_at", datetime.utcnow().isoformat()
+                )
+            except Exception:
+                logger.debug("FanPilot heartbeat write failed (non-fatal)", exc_info=True)
             # 04-W1-01 (Codex HIGH fix): SELECT all fanpilot_enabled=1 servers
             # regardless of is_online so the offline-transition handler CAN see
             # newly-offline rows. The previous "AND s.is_online = 1" filter made
@@ -573,7 +638,9 @@ async def fanpilot_loop():
             # Derived from existing config — no new config knob per CONTEXT.
             stale_threshold = 2.0 * float(ctx.config.ipmi.poll_interval)
 
-            key = auth.get_encryption_key() if servers else None
+            # Note: per-server credential decryption happens inside the helper functions
+            # (_apply_fan_write / _readback_confirm / _recover_to_bmc_auto), each with its
+            # own call-time auth/decrypt import — the loop body itself needs neither.
 
             for server in servers:
                 if not _running:
