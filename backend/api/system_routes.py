@@ -33,8 +33,21 @@ class AppConfigValueBody(BaseModel):
 # abused to write arbitrary config rows. Extend in later plans as new
 # Settings cards land (Plan 04 alerting toggle, Plan 05 retention days,
 # Plan 02 currency).
+# quick-260626-4px FanPilot safety settings:
+#   - fanpilot.resume_threshold_seconds: integer seconds, default 3600 (1h).
+#     Consumed by Phase 5 startup-resume logic; INERT until then — this quick
+#     only stores/exposes it (no heartbeat/startup-resume behavior built here).
+#   - fanpilot.failsafe_mode: "bmc_auto" | "fixed", default "fixed" (safety-first:
+#     fail to full fan speed because BMC auto under-cools third-party GPUs the
+#     BMC's own fan curve does not model). Wired LIVE into offline/stale recovery.
+#   - fanpilot.failsafe_speed: integer 0-100, default 100. Used only when
+#     failsafe_mode == "fixed". Frontend slider/inputs constrain the range; the
+#     recovery function (fanpilot/tasks.py) clamps/defaults defensively.
 _ALLOWED_APP_CONFIG_KEYS = {
     "fanpilot.auto_recover_on_offline",
+    "fanpilot.resume_threshold_seconds",
+    "fanpilot.failsafe_mode",
+    "fanpilot.failsafe_speed",
     "currency",
     "alerting.notifications_enabled",
     "data.retention_days",
