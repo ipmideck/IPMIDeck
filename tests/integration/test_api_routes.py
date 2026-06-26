@@ -22,7 +22,9 @@ REVIEWS-driven choices (03-REVIEWS.md):
 
 from __future__ import annotations
 
+import backend.main as bm
 from backend.core.i18n import t
+from backend.core.ipmi_service import FanWriteResult
 
 
 # --- Task 1: auth-guard contract (SEC-01) + open-route sanity -------------------------------
@@ -301,3 +303,72 @@ def test_update_server_without_host_succeeds(client):
     assert len(match) == 1
     assert match[0]["name"] == "Renamed"
     assert match[0]["host"] == "192.0.2.42"
+
+
+# --- 05-02 (P0-3): /mode route success-honesty -------------------------------------------
+
+
+def _create_demo_server(client) -> str:
+    """Create a server through the auth-OFF client and return its id."""
+    resp = client.post(
+        "/api/servers",
+        json={
+            "name": "Mode R720",
+            "host": "192.0.2.50",
+            "username": "root",
+            "password": "calvin",
+            "vendor": "dell",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()["server_id"]
+
+
+def _latest_log_result(client, server_id: str) -> str | None:
+    """Return the `result` of the most recent command_log row for a server via /api/logs."""
+    logs_resp = client.get(f"/api/logs?server_id={server_id}")
+    assert logs_resp.status_code == 200, logs_resp.text
+    rows = logs_resp.json()["logs"]
+    return rows[0]["result"] if rows else None
+
+
+def test_mode_manual_success_writes_success(client):
+    """A manual /mode write that the demo BMC accepts -> success:true + command_log 'success'."""
+    server_id = _create_demo_server(client)
+    resp = client.post(
+        f"/api/modules/fanpilot/{server_id}/mode",
+        json={"mode": "manual", "speed": 60},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["success"] is True
+    assert body["mode"] == "manual"
+    assert _latest_log_result(client, server_id) == "success"
+
+
+def test_mode_manual_rejected_returns_false_and_logs_rejected(client, monkeypatch):
+    """A manual /mode write the BMC REJECTS -> success:false + command_log 'rejected' (not 'success').
+
+    Monkeypatch the live demo IPMI service so set_fan_speed returns a rejected FanWriteResult
+    (0xd4). The route must inspect .ok, return success:false, and log result='rejected'.
+    """
+    server_id = _create_demo_server(client)
+
+    async def _rejected_speed(host, user, password, speed_pct, vendor="dell"):
+        return FanWriteResult(
+            False, "rejected", "d4", "rsp=0xd4: Insufficient privilege level"
+        )
+
+    # bm.ipmi_service is the live DemoIPMIService injected into the ModuleContext.
+    monkeypatch.setattr(bm.ipmi_service, "set_fan_speed", _rejected_speed)
+
+    resp = client.post(
+        f"/api/modules/fanpilot/{server_id}/mode",
+        json={"mode": "manual", "speed": 60},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["success"] is False, "route must NOT report success on a rejected write"
+    assert body["mode"] == "manual"
+    assert "error" in body
+    assert _latest_log_result(client, server_id) == "rejected"

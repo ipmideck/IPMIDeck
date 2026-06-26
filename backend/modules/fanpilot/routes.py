@@ -183,20 +183,38 @@ async def set_fanpilot_mode(server_id: str, body: FanMode, lang: str = Depends(g
     # 04-W4-02: vendor-aware dispatch (default 'dell' if NULL/empty — Decision G).
     vendor = server["vendor"] or "dell"
 
+    # P0-3 (D-P03-03): the route must NEVER report success on a rejected write.
+    # The immediate writes (auto/manual) are driven HERE, so we inspect the returned
+    # FanWriteResult. The `fanpilot` branch only flips DB state — the loop drives the
+    # actual write and owns honesty there (P0-3 loop reaction), so it stays success.
+    write_ok = True
+    write_detail = ""
+
     if body.mode == "auto":
-        await ctx.ipmi.set_fan_mode(host, user, pwd, manual=False, vendor=vendor)
-        await ctx.db.execute(
-            "UPDATE servers SET fanpilot_enabled = 0 WHERE id = ?", (server_id,)
-        )
-        set_last_state(server_id, "auto")
+        mode_res = await ctx.ipmi.set_fan_mode(host, user, pwd, manual=False, vendor=vendor)
+        write_ok = mode_res is None or mode_res.ok
+        write_detail = "" if write_ok else mode_res.detail
+        if write_ok:
+            await ctx.db.execute(
+                "UPDATE servers SET fanpilot_enabled = 0 WHERE id = ?", (server_id,)
+            )
+            set_last_state(server_id, "auto")
     elif body.mode == "manual":
         speed = body.manual_speed if body.manual_speed is not None else 50
-        await ctx.ipmi.set_fan_mode(host, user, pwd, manual=True, vendor=vendor)
-        await ctx.ipmi.set_fan_speed(host, user, pwd, speed, vendor=vendor)
-        await ctx.db.execute(
-            "UPDATE servers SET fanpilot_enabled = 0 WHERE id = ?", (server_id,)
-        )
-        set_last_state(server_id, "manual", speed)
+        mode_res = await ctx.ipmi.set_fan_mode(host, user, pwd, manual=True, vendor=vendor)
+        speed_res = await ctx.ipmi.set_fan_speed(host, user, pwd, speed, vendor=vendor)
+        write_ok = (mode_res is None or mode_res.ok) and (speed_res is None or speed_res.ok)
+        if not write_ok:
+            # Surface the rejected write's detail; prefer the speed result's message.
+            failed = speed_res if (speed_res is not None and not speed_res.ok) else mode_res
+            write_detail = failed.detail if failed is not None else ""
+        if write_ok:
+            await ctx.db.execute(
+                "UPDATE servers SET fanpilot_enabled = 0 WHERE id = ?", (server_id,)
+            )
+            set_last_state(server_id, "manual", speed)
+        # On rejection: do NOT flip to a "manual @ speed" success state — leave the prior
+        # state so /status reflects reality, not a write that didn't take effect.
     elif body.mode == "fanpilot":
         profile_id = body.profile_id
         if not profile_id:
@@ -219,11 +237,20 @@ async def set_fanpilot_mode(server_id: str, body: FanMode, lang: str = Depends(g
     # waiting up to one poll interval.
     wake_sensor_loop()
 
-    # Log
+    # Log the REAL outcome — 'rejected' (with the BMC detail in error_message) when the
+    # immediate write was refused, 'success' otherwise. Never an unconditional 'success'.
+    result = "success" if write_ok else "rejected"
     await ctx.db.execute(
-        "INSERT INTO command_log (server_id, command_type, command_detail, result) VALUES (?, ?, ?, ?)",
-        (server_id, "fan_mode", body.mode, "success"),
+        "INSERT INTO command_log (server_id, command_type, command_detail, result, error_message) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (server_id, "fan_mode", body.mode, result, None if write_ok else write_detail),
     )
     await ctx.db.commit()
 
+    if not write_ok:
+        return {
+            "success": False,
+            "mode": body.mode,
+            "error": t("fan_write_rejected", lang),
+        }
     return {"success": True, "mode": body.mode}

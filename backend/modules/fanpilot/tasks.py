@@ -185,26 +185,54 @@ async def _recover_to_bmc_auto(
 
     # Best-effort IPMI apply. Decryption can raise if the credential blob is
     # malformed; wrap it. 04-W4-02: forward the server vendor (Decision G default).
+    #
+    # PITFALL 5 (D-P03-05): after 05-01, set_fan_* RETURN a FanWriteResult instead of
+    # raising on a BMC rejection. A HARD-rejected fail-safe write (the doubly-rejected
+    # 0xd4 case — the BMC won't even accept the fail-safe command) returns ok=False
+    # WITHOUT raising, so the bare try/except no longer catches it. We must inspect the
+    # returned .ok here: if the fail-safe write itself was rejected, the fail-safe did
+    # NOT apply — record alert-only, never claim 'applied'. `ipmi_ok` distinguishes a
+    # genuinely-applied fail-safe from one the BMC refused. `failsafe_rejected` is set
+    # only when a write returned not-ok (vs an exception, which is the offline case).
+    ipmi_ok = True
+    failsafe_rejected = False
     try:
         key = auth.get_encryption_key()
         user = decrypt(username_enc, key)
         pwd = decrypt(password_enc, key)
         if mode == "fixed":
             # Force manual mode and pin the configured speed (fail to full speed).
-            await asyncio.wait_for(
+            mode_r = await asyncio.wait_for(
                 ctx.ipmi.set_fan_mode(host, user, pwd, manual=True, vendor=vendor),
                 timeout=5.0,
             )
-            await asyncio.wait_for(
+            speed_r = await asyncio.wait_for(
                 ctx.ipmi.set_fan_speed(host, user, pwd, speed, vendor=vendor),
                 timeout=5.0,
             )
+            # The fail-safe applied only if BOTH the mode and speed writes were accepted.
+            if (mode_r is not None and not mode_r.ok) or (
+                speed_r is not None and not speed_r.ok
+            ):
+                ipmi_ok = False
+                failsafe_rejected = True
         else:  # bmc_auto — restore BMC-auto fan mode (legacy behavior).
-            await asyncio.wait_for(
+            mode_r = await asyncio.wait_for(
                 ctx.ipmi.set_fan_mode(host, user, pwd, manual=False, vendor=vendor),
                 timeout=5.0,
             )
-        ipmi_ok = True
+            if mode_r is not None and not mode_r.ok:
+                ipmi_ok = False
+                failsafe_rejected = True
+        if failsafe_rejected:
+            # The BMC accepted the connection but REJECTED the fail-safe command itself
+            # (e.g. 0xd4 lockout). The loop's write_rejected path already broadcasts a
+            # critical alert AFTER this call, so the operator is signalled; our job here
+            # is to NOT record a false "applied".
+            logger.warning(
+                "FanPilot fail-safe write also rejected; alert-only server_id=%s reason=%s",
+                server_id, reason,
+            )
     except Exception:
         # The offline case is the EXPECTED case here — log at warning so it's
         # visible without spamming on every retry.
@@ -229,7 +257,18 @@ async def _recover_to_bmc_auto(
         # (which only re-fires when the latest fan_mode command_detail is 'manual'
         # or 'fanpilot') is left untouched and never loops. The APPLIED action is
         # encoded in `result` instead: 'failsafe_fixed_<speed>' vs 'failsafe_auto'.
-        result = f"failsafe_fixed_{speed}" if mode == "fixed" else "failsafe_auto"
+        #
+        # PITFALL 5: when the fail-safe write ITSELF was rejected by the BMC
+        # (failsafe_rejected), do NOT record an "applied" marker — the fail-safe did
+        # not take effect. Record 'failsafe_rejected' so the audit trail is honest;
+        # the loop already raised a critical alert for the operator. (A plain offline
+        # BMC — exception path, ipmi_ok False but NOT failsafe_rejected — keeps the
+        # existing applied marker: that case is the EXPECTED unreachable-BMC flow where
+        # persisting fanpilot_enabled=0 prevents an auto-resume loop next tick.)
+        if failsafe_rejected:
+            result = "failsafe_rejected"
+        else:
+            result = f"failsafe_fixed_{speed}" if mode == "fixed" else "failsafe_auto"
         await ctx.db.execute(
             "INSERT INTO command_log (server_id, command_type, command_detail, result) "
             "VALUES (?, ?, ?, ?)",
@@ -255,6 +294,161 @@ async def _recover_to_bmc_auto(
         server_id, reason, mode, speed if mode == "fixed" else "-",
         "ok" if ipmi_ok else "skipped_bmc_unreachable",
     )
+
+
+# === P0-3 read-back state ===
+# Per-server pending read-back record set by an ACCEPTED write and consumed on the NEXT
+# tick (D-P03-02: prefer next-tick directional compare — no latency in the write path).
+# Shape: {"target": int, "baseline_rpm": float | None}. baseline_rpm is the mean fan RPM
+# captured at command time so the next tick can check DIRECTIONAL movement. Cleared in
+# fanpilot_shutdown(). Read-back is best-effort and NEVER trips recovery.
+_pending_readback: dict[str, dict] = {}
+# Read-back dead-band: ignore RPM changes smaller than this fraction of baseline OR this
+# many absolute RPM (sensor jitter is not movement). 05-RESEARCH §"P0-3 RPM Read-Back".
+_READBACK_DEADBAND_FRAC = 0.05
+_READBACK_DEADBAND_RPM = 200.0
+# Bounded in-tick retries for a TRANSIENT fan write (~1-2s backoff each — D-P03-04).
+_WRITE_RETRY_ATTEMPTS = 3
+
+
+def _mean_fan_rpm(readings: list[dict]) -> float | None:
+    """Mean RPM of fan-type sensors with a numeric value, or None if none readable.
+
+    Selects fans by type=="fan" (unit-derived) — NEVER by name regex (Supermicro fan
+    names have no "RPM"; 05-RESEARCH §"Fan RPM sensor naming").
+    """
+    rpms = [
+        float(r["value"])
+        for r in readings
+        if r.get("type") == "fan" and isinstance(r.get("value"), (int, float))
+    ]
+    if not rpms:
+        return None
+    return sum(rpms) / len(rpms)
+
+
+async def _record_command_log(ctx, server_id: str, detail: str, result: str) -> None:
+    """Best-effort command_log INSERT (the loop's own outcome marker)."""
+    try:
+        await ctx.db.execute(
+            "INSERT INTO command_log (server_id, command_type, command_detail, result) "
+            "VALUES (?, ?, ?, ?)",
+            (server_id, "fan_mode", detail, result),
+        )
+        await ctx.db.commit()
+    except Exception:
+        logger.exception("FanPilot: command_log write failed for server %s", server_id)
+
+
+async def _readback_confirm(ctx, server) -> None:
+    """Best-effort RPM read-back of a PRIOR accepted write — observational, never a trip.
+
+    Runs at the TOP of a tick for any server with a pending read-back from the previous
+    tick. Reads fan RPM (type=="fan"), compares DIRECTIONALLY vs the captured baseline with
+    a dead-band, and records command_log result='confirmed' (moved the right way) or
+    'applied_unverified' (no readable RPM / inconclusive / read error). NEVER calls
+    _recover_to_bmc_auto — read-back is the confirming layer, not a fail-safe trigger
+    (D-P03-02 / Success Criterion #3).
+    """
+    server_id = server["id"]
+    pending = _pending_readback.pop(server_id, None)
+    if pending is None:
+        return
+    from backend.core.crypto import decrypt
+    from backend.main import auth
+
+    result = "applied_unverified"
+    try:
+        key = auth.get_encryption_key()
+        user = decrypt(server["username_enc"], key)
+        pwd = decrypt(server["password_enc"], key)
+        readings = await ctx.ipmi.get_sensor_readings(server["host"], user, pwd)
+        now_rpm = _mean_fan_rpm(readings)
+        baseline = pending.get("baseline_rpm")
+        if now_rpm is not None and baseline is not None:
+            delta = now_rpm - baseline
+            dead_band = max(_READBACK_DEADBAND_RPM, baseline * _READBACK_DEADBAND_FRAC)
+            commanded_up = pending["target"] >= pending.get("prev_target", pending["target"])
+            if abs(delta) >= dead_band and (
+                (commanded_up and delta > 0) or (not commanded_up and delta < 0)
+            ):
+                result = "confirmed"
+    except Exception:
+        # Read-back is best-effort; a read error is inconclusive, NOT a trip.
+        logger.debug("FanPilot read-back inconclusive for server %s", server_id, exc_info=True)
+    await _record_command_log(ctx, server_id, "fanpilot", result)
+
+
+async def _apply_fan_write(ctx, server, target_speed: int) -> bool:
+    """Apply a FanPilot fan write and react to the FanWriteResult (P0-3 / D-P03-04).
+
+    Returns True when the write was ACCEPTED and the caller may broadcast active control;
+    False when it fell back to fail-safe (the caller must NOT broadcast a false 'active').
+
+    Reaction policy:
+      - transient failure -> up to _WRITE_RETRY_ATTEMPTS in-tick retries (~1-2s backoff)
+      - hard reject / unsupported -> NO retries (deterministic; retrying can't succeed)
+      - either exhaustion -> _recover_to_bmc_auto(reason='write_rejected') + critical alert
+      - accepted -> arm a best-effort next-tick read-back (records applied_unverified)
+    """
+    from backend.core.crypto import decrypt
+    from backend.main import auth
+
+    server_id = server["id"]
+    host = server["host"]
+    vendor = server["vendor"] or "dell"
+    key = auth.get_encryption_key()
+    user = decrypt(server["username_enc"], key)
+    pwd = decrypt(server["password_enc"], key)
+
+    # Capture a baseline mean fan RPM BEFORE the write so the next-tick read-back can
+    # check directional movement. Best-effort — a read error just means no baseline.
+    baseline_rpm: float | None = None
+    try:
+        baseline_rpm = _mean_fan_rpm(
+            await ctx.ipmi.get_sensor_readings(host, user, pwd)
+        )
+    except Exception:
+        baseline_rpm = None
+
+    mode_res = await ctx.ipmi.set_fan_mode(host, user, pwd, manual=True, vendor=vendor)
+    res = await ctx.ipmi.set_fan_speed(host, user, pwd, target_speed, vendor=vendor)
+    # A rejected mode set is as fatal as a rejected speed set.
+    if mode_res is not None and not mode_res.ok:
+        res = mode_res
+
+    if not res.ok:
+        if res.kind == "transient":
+            # Bounded in-tick retries only for transient failures (D-P03-04). A hard
+            # reject / unsupported skips this loop entirely — retrying can't succeed.
+            for attempt in range(_WRITE_RETRY_ATTEMPTS):
+                await asyncio.sleep(1.0 * (attempt + 1))
+                res = await ctx.ipmi.set_fan_speed(host, user, pwd, target_speed, vendor=vendor)
+                if res.ok:
+                    break
+        if not res.ok:
+            # Hard reject OR retries exhausted OR unsupported -> fail-safe + alert + STOP
+            # broadcasting active control (today the loop swallowed the exception and still
+            # broadcast a false 'fanpilot active').
+            await _recover_to_bmc_auto(
+                ctx, server_id, server["host"], server["username_enc"],
+                server["password_enc"], reason="write_rejected",
+                vendor=server["vendor"] or "dell",
+            )
+            await ctx.ws.broadcast_alert(
+                server_id, "critical", "FanPilot",
+                f"Fan write rejected ({res.detail})", target_speed,
+            )
+            return False  # caller must NOT broadcast a false 'fanpilot active'
+
+    # Accepted: arm a best-effort next-tick read-back. Never blocks the write path.
+    prev = _pending_readback.get(server_id, {})
+    _pending_readback[server_id] = {
+        "target": target_speed,
+        "prev_target": prev.get("target", target_speed),
+        "baseline_rpm": baseline_rpm,
+    }
+    return True
 
 
 async def fanpilot_loop():
@@ -423,6 +617,11 @@ async def fanpilot_loop():
                 if not current_online:
                     continue
 
+                # P0-3 best-effort read-back: confirm the PRIOR tick's accepted write
+                # actually moved the fans (records 'confirmed' / 'applied_unverified').
+                # Observational only — never trips recovery (D-P03-02).
+                await _readback_confirm(ctx, server)
+
                 curve_json = server["curve_points"]
                 if not curve_json:
                     continue
@@ -519,19 +718,19 @@ async def fanpilot_loop():
 
                 target_speed = ctrl.compute_fan_speed(curve_points, current_temp)
 
-                # Apply fan speed via IPMI
+                # Apply fan speed via IPMI. P0-3: _apply_fan_write consumes the
+                # FanWriteResult (transient retries / hard-reject immediate fall-back /
+                # recovery+alert) and returns whether the write was ACCEPTED. A rejected
+                # write returns False after firing the fail-safe — we must NOT then
+                # broadcast a false 'fanpilot active'. The classified rejection is handled
+                # INSIDE _apply_fan_write, not swallowed by this try/except (which now only
+                # guards genuine unexpected errors — e.g. a malformed credential blob).
                 try:
-                    host = server["host"]
-                    user = decrypt(server["username_enc"], key)
-                    pwd = decrypt(server["password_enc"], key)
-                    # 04-W4-02: vendor-aware dispatch. Default 'dell' if the column is
-                    # NULL/empty so an unconfigured row keeps the Dell baseline.
-                    vendor = server["vendor"] or "dell"
+                    accepted = await _apply_fan_write(ctx, server, target_speed)
+                    if not accepted:
+                        continue  # fail-safe fired; do NOT broadcast active
 
-                    await ctx.ipmi.set_fan_mode(host, user, pwd, manual=True, vendor=vendor)
-                    await ctx.ipmi.set_fan_speed(host, user, pwd, target_speed, vendor=vendor)
-
-                    # Broadcast status
+                    # Broadcast status (accepted write only).
                     await ctx.ws.broadcast_fanpilot_status(
                         server_id=server_id,
                         mode="fanpilot",
@@ -607,5 +806,6 @@ async def fanpilot_shutdown():
     _last_state.clear()
     _last_online_state.clear()
     _garbage_counts.clear()
+    _pending_readback.clear()
     global _wake_event
     _wake_event = None
