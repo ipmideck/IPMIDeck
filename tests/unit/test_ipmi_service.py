@@ -235,3 +235,60 @@ async def test_exec_error_message_fallback(monkeypatch):
     msg = str(exc.value)
     assert "out-detail" in msg
     assert "code 255" in msg
+
+
+# === Rider S (SEC-IPMI-PWD-ENV): password off argv, supplied via IPMITOOL_PASSWORD env ===
+#
+# These prove the BMC password NEVER reaches ipmitool's argv (so it can't appear in `ps`):
+# the command uses `-E` (ipmitool reads IPMITOOL_PASSWORD from the environment) and the
+# password is injected per-subprocess via an os.environ.copy()-based `env=` dict that still
+# carries PATH. An empty/falsy password is refused BEFORE the subprocess is ever spawned.
+
+
+def _patch_capturing_create(monkeypatch, proc: _FakeProc) -> dict:
+    """Monkeypatch create_subprocess_exec with a recorder; return the captured dict.
+
+    Captures positional `args` (the argv) and `kwargs` (incl. env=) of the spawn so a test
+    can assert the password is in env but not argv. kwargs were previously ignored by the
+    harness; this records them.
+    """
+    captured: dict = {}
+
+    async def fake_create(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return proc
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create)
+    return captured
+
+
+async def test_exec_env_password_not_in_argv(monkeypatch):
+    """`-E` is in argv; `-P` and the password literal are NOT; password is in env + PATH preserved."""
+    proc = _FakeProc(hang=False, out=b"ok", err=b"", rc=0)
+    captured = _patch_capturing_create(monkeypatch, proc)
+    svc = LocalIPMIService()
+    await svc._exec("h", "u", "secretpw", ["raw", "0x30", "0x30"])
+    args = captured["args"]
+    kwargs = captured["kwargs"]
+    assert "-E" in args  # ipmitool reads the password from the environment
+    assert "-P" not in args  # password flag must be gone from argv
+    assert "secretpw" not in args  # the secret must never appear in argv
+    # Password is supplied via the per-subprocess env, and PATH is preserved (env=os.environ.copy()).
+    assert kwargs["env"]["IPMITOOL_PASSWORD"] == "secretpw"
+    assert "PATH" in kwargs["env"]
+
+
+async def test_exec_empty_password_refused_before_spawn(monkeypatch):
+    """An empty/falsy password raises RuntimeError BEFORE any subprocess is spawned."""
+    spawned = {"called": False}
+
+    async def fake_create(*args, **kwargs):
+        spawned["called"] = True
+        return _FakeProc(hang=False, rc=0)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create)
+    svc = LocalIPMIService()
+    with pytest.raises(RuntimeError):
+        await svc._exec("h", "u", "", ["raw", "0x30", "0x30"])
+    assert spawned["called"] is False  # guard fires before spawn — never injects IPMITOOL_PASSWORD=""

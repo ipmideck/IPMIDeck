@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 from abc import ABC, abstractmethod
 
@@ -83,11 +84,26 @@ class LocalIPMIService(IPMIService):
         # below ARE exercised by tests/unit/test_ipmi_service.py, which monkeypatches
         # create_subprocess_exec to return a fake proc (timeout / cancel / happy / error paths), so
         # the D-16 lifecycle + D-18 message fallback stay covered and ipmi_service.py stays >= 80.
-        cmd = ["ipmitool", "-I", "lanplus", "-H", host, "-U", user, "-P", password, *args]
+        # Rider S (SEC-IPMI-PWD-ENV): the password NEVER appears on argv (so it can't show up
+        # in `ps`). ipmitool `-E` reads it from the IPMITOOL_PASSWORD environment variable, which
+        # we inject ONLY into this child's environment (os.environ.copy() preserves PATH /
+        # SystemRoot) — never `os.environ[...] = ...`, which would leak the secret process-wide
+        # to every other coroutine.
+        cmd = ["ipmitool", "-I", "lanplus", "-H", host, "-U", user, "-E", *args]
+        # Empty-password gotcha (05-RESEARCH Pitfall 3): ipmitool accepts IPMITOOL_PASSWORD=""
+        # and silently authenticates with an empty password. If decryption ever yields a falsy
+        # value, refuse here — BEFORE spawning — rather than auth with "".
+        if not password:
+            raise RuntimeError("empty BMC password after decrypt; refusing to auth with -E")
+        child_env = os.environ.copy()  # preserve PATH (+ SystemRoot on Windows)
+        child_env["IPMITOOL_PASSWORD"] = password  # inject ONLY for this child
         logger.debug("Executing: ipmitool -I lanplus -H %s -U %s ... %s", host, user, " ".join(args))
         async with self._get_host_lock(host):
             proc = await asyncio.create_subprocess_exec(  # pragma: no cover
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=child_env,
             )
             try:
                 stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=self.timeout)
