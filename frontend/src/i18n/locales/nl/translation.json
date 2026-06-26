@@ -291,7 +291,16 @@
       "title": "FanPilot",
       "autoRecoverLabel": "Automatisch herstel bij BMC offline",
       "autoRecoverHint": "Als een server offline gaat terwijl FanPilot actief is, herstel BMC-auto ventilatormodus.",
-      "saveFailed": "FanPilot-instelling kon niet worden opgeslagen"
+      "saveFailed": "FanPilot-instelling kon niet worden opgeslagen",
+      "resumeThresholdLabel": "Hervattingsdrempel (uren)",
+      "resumeThresholdHint": "Hoe lang na een herstart FanPilot een opgeslagen profiel mag hervatten. Nu opgeslagen; gebruikt in een toekomstige versie.",
+      "resumeThresholdSaved": "Hervattingsdrempel opgeslagen",
+      "failsafeLabel": "Faalveilig gedrag",
+      "failsafeHint": "Wat FanPilot doet wanneer een server offline gaat of zijn sensoren verouderd raken.",
+      "failsafeModeBmcAuto": "BMC automatisch",
+      "failsafeModeFixed": "Vaste snelheid",
+      "failsafeSpeedLabel": "Faalveilige ventilatorsnelheid",
+      "failsafeSpeedSaved": "Faalveilige snelheid opgeslagen"
     },
     "alerting": {
       "title": "Waarschuwingen",

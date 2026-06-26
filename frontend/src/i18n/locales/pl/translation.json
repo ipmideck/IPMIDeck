@@ -291,7 +291,16 @@
       "title": "FanPilot",
       "autoRecoverLabel": "Automatyczne przywrócenie, gdy BMC jest offline",
       "autoRecoverHint": "Jeśli serwer przejdzie w tryb offline, gdy FanPilot jest aktywny, przywróć tryb wentylatorów BMC-auto.",
-      "saveFailed": "Nie udało się zapisać ustawienia FanPilot"
+      "saveFailed": "Nie udało się zapisać ustawienia FanPilot",
+      "resumeThresholdLabel": "Próg wznowienia (godziny)",
+      "resumeThresholdHint": "Jak długo po ponownym uruchomieniu FanPilot może wznowić zapisany profil. Zapisywane teraz; używane w przyszłej wersji.",
+      "resumeThresholdSaved": "Próg wznowienia zapisany",
+      "failsafeLabel": "Zachowanie awaryjne",
+      "failsafeHint": "Co robi FanPilot, gdy serwer przejdzie w tryb offline lub jego czujniki staną się nieaktualne.",
+      "failsafeModeBmcAuto": "BMC automatycznie",
+      "failsafeModeFixed": "Stała prędkość",
+      "failsafeSpeedLabel": "Awaryjna prędkość wentylatorów",
+      "failsafeSpeedSaved": "Prędkość awaryjna zapisana"
     },
     "alerting": {
       "title": "Alerty",

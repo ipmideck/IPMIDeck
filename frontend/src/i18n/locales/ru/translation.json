@@ -291,7 +291,16 @@
       "title": "FanPilot",
       "autoRecoverLabel": "Авто-восстановление при оффлайне BMC",
       "autoRecoverHint": "Если сервер уходит в оффлайн, пока FanPilot активен, восстановить режим вентиляторов BMC-auto.",
-      "saveFailed": "Не удалось сохранить настройку FanPilot"
+      "saveFailed": "Не удалось сохранить настройку FanPilot",
+      "resumeThresholdLabel": "Порог возобновления (часы)",
+      "resumeThresholdHint": "Сколько времени после перезапуска FanPilot может возобновить сохранённый профиль. Сохраняется сейчас; используется в будущей версии.",
+      "resumeThresholdSaved": "Порог возобновления сохранён",
+      "failsafeLabel": "Отказоустойчивое поведение",
+      "failsafeHint": "Что делает FanPilot, когда сервер уходит в оффлайн или его датчики устаревают.",
+      "failsafeModeBmcAuto": "BMC автоматически",
+      "failsafeModeFixed": "Фиксированная скорость",
+      "failsafeSpeedLabel": "Отказоустойчивая скорость вентиляторов",
+      "failsafeSpeedSaved": "Отказоустойчивая скорость сохранена"
     },
     "alerting": {
       "title": "Оповещения",

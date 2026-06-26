@@ -291,7 +291,16 @@
       "title": "FanPilot",
       "autoRecoverLabel": "Auto-recover on BMC offline",
       "autoRecoverHint": "If a server goes offline while FanPilot is active, restore BMC-auto fan mode.",
-      "saveFailed": "Could not save FanPilot setting"
+      "saveFailed": "Could not save FanPilot setting",
+      "resumeThresholdLabel": "Resume threshold (hours)",
+      "resumeThresholdHint": "How long after a restart FanPilot may resume a saved profile. Stored now; used by a future release.",
+      "resumeThresholdSaved": "Resume threshold saved",
+      "failsafeLabel": "Fail-safe behavior",
+      "failsafeHint": "What FanPilot does when a server goes offline or its sensors go stale.",
+      "failsafeModeBmcAuto": "BMC auto",
+      "failsafeModeFixed": "Fixed speed",
+      "failsafeSpeedLabel": "Fail-safe fan speed",
+      "failsafeSpeedSaved": "Fail-safe speed saved"
     },
     "alerting": {
       "title": "Alerts",

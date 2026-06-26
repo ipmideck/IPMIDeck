@@ -291,7 +291,16 @@
       "title": "FanPilot",
       "autoRecoverLabel": "BMC オフライン時に自動復旧",
       "autoRecoverHint": "FanPilot が有効中にサーバーがオフラインになった場合、BMC オートのファンモードに復旧します。",
-      "saveFailed": "FanPilot 設定を保存できませんでした"
+      "saveFailed": "FanPilot 設定を保存できませんでした",
+      "resumeThresholdLabel": "再開しきい値(時間)",
+      "resumeThresholdHint": "再起動後、FanPilot が保存済みプロファイルを再開できるまでの時間。現在は保存のみで、将来のリリースで使用されます。",
+      "resumeThresholdSaved": "再開しきい値を保存しました",
+      "failsafeLabel": "フェイルセーフ動作",
+      "failsafeHint": "サーバーがオフラインになるか、センサーが古くなったときに FanPilot が行う動作。",
+      "failsafeModeBmcAuto": "BMC 自動",
+      "failsafeModeFixed": "固定速度",
+      "failsafeSpeedLabel": "フェイルセーフ時のファン速度",
+      "failsafeSpeedSaved": "フェイルセーフ速度を保存しました"
     },
     "alerting": {
       "title": "アラート",

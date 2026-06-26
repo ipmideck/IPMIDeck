@@ -291,7 +291,16 @@
       "title": "FanPilot",
       "autoRecoverLabel": "Récupération automatique si le BMC est hors ligne",
       "autoRecoverHint": "Si un serveur passe hors ligne pendant que FanPilot est actif, rétablir le mode ventilateur BMC-auto.",
-      "saveFailed": "Impossible d'enregistrer le réglage FanPilot"
+      "saveFailed": "Impossible d'enregistrer le réglage FanPilot",
+      "resumeThresholdLabel": "Seuil de reprise (heures)",
+      "resumeThresholdHint": "Délai après un redémarrage pendant lequel FanPilot peut reprendre un profil enregistré. Enregistré maintenant ; utilisé dans une version future.",
+      "resumeThresholdSaved": "Seuil de reprise enregistré",
+      "failsafeLabel": "Comportement de sécurité",
+      "failsafeHint": "Ce que fait FanPilot lorsqu'un serveur passe hors ligne ou que ses capteurs deviennent obsolètes.",
+      "failsafeModeBmcAuto": "BMC automatique",
+      "failsafeModeFixed": "Vitesse fixe",
+      "failsafeSpeedLabel": "Vitesse de ventilateur de sécurité",
+      "failsafeSpeedSaved": "Vitesse de sécurité enregistrée"
     },
     "alerting": {
       "title": "Alertes",

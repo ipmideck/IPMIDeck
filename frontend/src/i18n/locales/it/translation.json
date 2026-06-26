@@ -291,7 +291,16 @@
       "title": "FanPilot",
       "autoRecoverLabel": "Ripristino automatico se il BMC va offline",
       "autoRecoverHint": "Se un server va offline mentre FanPilot è attivo, ripristina la modalità ventole BMC-auto.",
-      "saveFailed": "Impossibile salvare l'impostazione FanPilot"
+      "saveFailed": "Impossibile salvare l'impostazione FanPilot",
+      "resumeThresholdLabel": "Soglia di ripresa (ore)",
+      "resumeThresholdHint": "Per quanto tempo dopo un riavvio FanPilot può riprendere un profilo salvato. Salvato ora; usato in una versione futura.",
+      "resumeThresholdSaved": "Soglia di ripresa salvata",
+      "failsafeLabel": "Comportamento di sicurezza",
+      "failsafeHint": "Cosa fa FanPilot quando un server va offline o i suoi sensori diventano obsoleti.",
+      "failsafeModeBmcAuto": "BMC automatico",
+      "failsafeModeFixed": "Velocità fissa",
+      "failsafeSpeedLabel": "Velocità ventole di sicurezza",
+      "failsafeSpeedSaved": "Velocità di sicurezza salvata"
     },
     "alerting": {
       "title": "Avvisi",

@@ -164,6 +164,101 @@ export default function SettingsPage() {
     }
   };
 
+  // quick-260626-4px: FanPilot resume threshold. Persisted in SECONDS in app_config
+  // (fanpilot.resume_threshold_seconds, default 3600 = 1h) but DISPLAYED in hours.
+  // Store + expose only — consumed later by Phase 5 startup-resume logic (inert now).
+  const [resumeHours, setResumeHours] = useState(1);
+  const [resumeSavedHours, setResumeSavedHours] = useState(1);
+
+  useEffect(() => {
+    get<{ success: boolean; key: string; value: number | string | null }>(
+      "/api/system/app-config/fanpilot.resume_threshold_seconds"
+    )
+      .then((r) => {
+        if (r.value !== null && r.value !== undefined && r.value !== "") {
+          const secs = Number(r.value);
+          if (!Number.isNaN(secs)) {
+            const hrs = secs / 3600;
+            setResumeHours(hrs);
+            setResumeSavedHours(hrs);
+          }
+        }
+        // null/empty means the row hasn't been written — keep default 1h.
+      })
+      .catch(() => { /* default 1h; offline indicator handles connectivity */ });
+  }, []);
+
+  const onSaveResumeThreshold = async () => {
+    try {
+      await put("/api/system/app-config/fanpilot.resume_threshold_seconds", {
+        value: Math.round(resumeHours * 3600),
+      });
+      setResumeSavedHours(resumeHours);
+      toast.success(t("settings.fanpilot.resumeThresholdSaved"));
+    } catch {
+      toast.error(t("settings.fanpilot.saveFailed"));
+    }
+  };
+
+  // quick-260626-4px: FanPilot fail-safe behavior. failsafe_mode = "bmc_auto" | "fixed"
+  // (default "fixed" — safety-first "fail to full speed"); failsafe_speed 0-100 (default
+  // 100). Wired LIVE into offline/stale recovery on the backend. Mode persists optimistically
+  // on change; the fixed-speed slider persists via its own Save button.
+  const [failsafeMode, setFailsafeMode] = useState<"bmc_auto" | "fixed">("fixed");
+  const [failsafeSpeed, setFailsafeSpeed] = useState(100);
+  const [failsafeSpeedSaved, setFailsafeSpeedSaved] = useState(100);
+
+  useEffect(() => {
+    get<{ success: boolean; key: string; value: number | string | null }>(
+      "/api/system/app-config/fanpilot.failsafe_mode"
+    )
+      .then((r) => {
+        if (r.value === "bmc_auto" || r.value === "fixed") setFailsafeMode(r.value);
+        // null/anything-else -> keep default "fixed".
+      })
+      .catch(() => { /* default fixed */ });
+    get<{ success: boolean; key: string; value: number | string | null }>(
+      "/api/system/app-config/fanpilot.failsafe_speed"
+    )
+      .then((r) => {
+        if (r.value !== null && r.value !== undefined && r.value !== "") {
+          const n = Number(r.value);
+          if (!Number.isNaN(n)) {
+            const clamped = Math.min(100, Math.max(0, Math.round(n)));
+            setFailsafeSpeed(clamped);
+            setFailsafeSpeedSaved(clamped);
+          }
+        }
+        // null/empty -> keep default 100.
+      })
+      .catch(() => { /* default 100 */ });
+  }, []);
+
+  const onSelectFailsafeMode = async (mode: "bmc_auto" | "fixed") => {
+    if (mode === failsafeMode) return;
+    const prev = failsafeMode;
+    setFailsafeMode(mode); // optimistic
+    setFanpilotSaving(true);
+    try {
+      await put("/api/system/app-config/fanpilot.failsafe_mode", { value: mode });
+    } catch {
+      setFailsafeMode(prev);
+      toast.error(t("settings.fanpilot.saveFailed"));
+    } finally {
+      setFanpilotSaving(false);
+    }
+  };
+
+  const onSaveFailsafeSpeed = async () => {
+    try {
+      await put("/api/system/app-config/fanpilot.failsafe_speed", { value: failsafeSpeed });
+      setFailsafeSpeedSaved(failsafeSpeed);
+      toast.success(t("settings.fanpilot.failsafeSpeedSaved"));
+    } catch {
+      toast.error(t("settings.fanpilot.saveFailed"));
+    }
+  };
+
   // 04-W5-01: Data card — retention slider + DB stats + immediate cleanup. Persists
   // the retention window to app_config via PUT /api/system/retention-days (Decision B,
   // /system/* prefix; Decision A1 current globals on the backend); the cleanup loop reads
@@ -735,6 +830,121 @@ export default function SettingsPage() {
                   )}
                 />
               </button>
+            </div>
+
+            {/* quick-260626-4px: Resume threshold (hours; persisted as seconds).
+                Store + expose only — consumed by Phase 5 startup-resume (inert now). */}
+            <div className="mt-4 border-t border-border pt-4">
+              <div className="mb-2 flex items-center justify-between">
+                <label htmlFor="fanpilot-resume-threshold" className="text-sm font-medium text-foreground">
+                  {t("settings.fanpilot.resumeThresholdLabel")}
+                </label>
+                <span className="font-mono text-sm tabular-nums">{resumeHours}</span>
+              </div>
+              <input
+                id="fanpilot-resume-threshold"
+                type="number"
+                min={0}
+                step={0.5}
+                value={resumeHours}
+                onChange={(e) => setResumeHours(Math.max(0, Number(e.target.value)))}
+                disabled={!online}
+                title={offlineTip}
+                className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm disabled:opacity-50"
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t("settings.fanpilot.resumeThresholdHint")}
+              </p>
+              <button
+                type="button"
+                onClick={onSaveResumeThreshold}
+                disabled={resumeHours === resumeSavedHours || !online}
+                title={offlineTip}
+                className="mt-2 min-h-9 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
+              >
+                {t("settings.save")}
+              </button>
+            </div>
+
+            {/* quick-260626-4px: Fail-safe behavior — BMC auto vs Fixed speed. Wired
+                LIVE into offline/stale recovery. Default Fixed @ 100% (fail to full speed). */}
+            <div className="mt-4 border-t border-border pt-4">
+              <label id="fanpilot-failsafe-label" className="text-sm font-medium text-foreground">
+                {t("settings.fanpilot.failsafeLabel")}
+              </label>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t("settings.fanpilot.failsafeHint")}
+              </p>
+              <div
+                role="radiogroup"
+                aria-labelledby="fanpilot-failsafe-label"
+                className="mt-3 flex gap-2"
+              >
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={failsafeMode === "fixed"}
+                  onClick={() => onSelectFailsafeMode("fixed")}
+                  disabled={fanpilotSaving || !online}
+                  title={offlineTip}
+                  className={cn(
+                    "min-h-9 flex-1 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+                    failsafeMode === "fixed"
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border bg-background text-muted-foreground",
+                  )}
+                >
+                  {t("settings.fanpilot.failsafeModeFixed")}
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={failsafeMode === "bmc_auto"}
+                  onClick={() => onSelectFailsafeMode("bmc_auto")}
+                  disabled={fanpilotSaving || !online}
+                  title={offlineTip}
+                  className={cn(
+                    "min-h-9 flex-1 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+                    failsafeMode === "bmc_auto"
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border bg-background text-muted-foreground",
+                  )}
+                >
+                  {t("settings.fanpilot.failsafeModeBmcAuto")}
+                </button>
+              </div>
+
+              {failsafeMode === "fixed" && (
+                <div className="mt-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <label htmlFor="fanpilot-failsafe-speed" className="text-sm font-medium text-foreground">
+                      {t("settings.fanpilot.failsafeSpeedLabel")}
+                    </label>
+                    <span className="font-mono text-sm tabular-nums">{failsafeSpeed}%</span>
+                  </div>
+                  <input
+                    id="fanpilot-failsafe-speed"
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={failsafeSpeed}
+                    onChange={(e) => setFailsafeSpeed(Number(e.target.value))}
+                    disabled={!online}
+                    title={offlineTip}
+                    className="h-2 w-full appearance-none rounded-lg bg-muted accent-foreground disabled:opacity-50"
+                  />
+                  <button
+                    type="button"
+                    onClick={onSaveFailsafeSpeed}
+                    disabled={failsafeSpeed === failsafeSpeedSaved || !online}
+                    title={offlineTip}
+                    className="mt-2 min-h-9 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
+                  >
+                    {t("settings.save")}
+                  </button>
+                </div>
+              )}
             </div>
           </section>
 

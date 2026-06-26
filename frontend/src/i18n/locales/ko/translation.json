@@ -291,7 +291,16 @@
       "title": "FanPilot",
       "autoRecoverLabel": "BMC 오프라인 시 자동 복구",
       "autoRecoverHint": "FanPilot 활성 중 서버가 오프라인이 되면 BMC 자동 팬 모드로 복구합니다.",
-      "saveFailed": "FanPilot 설정을 저장할 수 없습니다"
+      "saveFailed": "FanPilot 설정을 저장할 수 없습니다",
+      "resumeThresholdLabel": "재개 임계값(시간)",
+      "resumeThresholdHint": "재시작 후 FanPilot이 저장된 프로필을 재개할 수 있는 시간입니다. 지금은 저장만 되며 향후 릴리스에서 사용됩니다.",
+      "resumeThresholdSaved": "재개 임계값이 저장됨",
+      "failsafeLabel": "페일세이프 동작",
+      "failsafeHint": "서버가 오프라인이 되거나 센서가 오래되었을 때 FanPilot이 수행하는 동작입니다.",
+      "failsafeModeBmcAuto": "BMC 자동",
+      "failsafeModeFixed": "고정 속도",
+      "failsafeSpeedLabel": "페일세이프 팬 속도",
+      "failsafeSpeedSaved": "페일세이프 속도가 저장됨"
     },
     "alerting": {
       "title": "알림",

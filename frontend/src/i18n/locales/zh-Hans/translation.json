@@ -291,7 +291,16 @@
       "title": "FanPilot",
       "autoRecoverLabel": "BMC 离线时自动恢复",
       "autoRecoverHint": "如果服务器在 FanPilot 启用时离线,恢复到 BMC 自动风扇模式。",
-      "saveFailed": "无法保存 FanPilot 设置"
+      "saveFailed": "无法保存 FanPilot 设置",
+      "resumeThresholdLabel": "恢复阈值(小时)",
+      "resumeThresholdHint": "重启后 FanPilot 可恢复已保存配置文件的时长。现在仅保存,将在未来版本中使用。",
+      "resumeThresholdSaved": "恢复阈值已保存",
+      "failsafeLabel": "故障保护行为",
+      "failsafeHint": "当服务器离线或其传感器数据过期时 FanPilot 的行为。",
+      "failsafeModeBmcAuto": "BMC 自动",
+      "failsafeModeFixed": "固定转速",
+      "failsafeSpeedLabel": "故障保护风扇转速",
+      "failsafeSpeedSaved": "故障保护转速已保存"
     },
     "alerting": {
       "title": "警报",

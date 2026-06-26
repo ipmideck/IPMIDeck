@@ -291,7 +291,16 @@
       "title": "FanPilot",
       "autoRecoverLabel": "Automatische Wiederherstellung bei BMC-Offline",
       "autoRecoverHint": "Wenn ein Server offline geht, während FanPilot aktiv ist, BMC-Auto-Lüftermodus wiederherstellen.",
-      "saveFailed": "FanPilot-Einstellung konnte nicht gespeichert werden"
+      "saveFailed": "FanPilot-Einstellung konnte nicht gespeichert werden",
+      "resumeThresholdLabel": "Fortsetzungsschwelle (Stunden)",
+      "resumeThresholdHint": "Wie lange nach einem Neustart FanPilot ein gespeichertes Profil fortsetzen darf. Jetzt gespeichert; wird in einer künftigen Version verwendet.",
+      "resumeThresholdSaved": "Fortsetzungsschwelle gespeichert",
+      "failsafeLabel": "Ausfallsicheres Verhalten",
+      "failsafeHint": "Was FanPilot tut, wenn ein Server offline geht oder seine Sensoren veraltet sind.",
+      "failsafeModeBmcAuto": "BMC automatisch",
+      "failsafeModeFixed": "Feste Drehzahl",
+      "failsafeSpeedLabel": "Ausfallsichere Lüfterdrehzahl",
+      "failsafeSpeedSaved": "Ausfallsichere Drehzahl gespeichert"
     },
     "alerting": {
       "title": "Warnungen",
