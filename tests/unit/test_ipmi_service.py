@@ -45,46 +45,34 @@ async def test_power_command_valid_action_reaches_exec():
     assert result == "Chassis Power Control: Up/On"
 
 
-async def test_set_fan_speed_clamps_high():
-    """speed_pct=150 is clamped to 100 -> hex 0x64; passed as the last _exec arg."""
+async def test_set_fan_speed_clamps_high(monkeypatch):
+    """speed_pct=150 is clamped to 100 -> hex 0x64; the LAST argv element of the spawn.
+
+    Migrated off the `svc._exec` stub onto the subprocess-layer harness: set_fan_speed now
+    calls `_exec_capture` (not `_exec`), so a clean rc=0 _FakeProc drives the real success
+    path and `_patch_capturing_create` records the full argv (ipmitool flags + raw command)."""
+    captured = _patch_capturing_create(monkeypatch, _FakeProc(rc=0, out=b"", err=b""))
     svc = LocalIPMIService()
-    captured: dict = {}
-
-    async def fake_exec(host, user, password, args):
-        captured["args"] = args
-        return ""
-
-    svc._exec = fake_exec  # type: ignore[method-assign]
     await svc.set_fan_speed("h", "u", "p", 150)
     assert captured["args"][-1] == "0x64"  # 100 -> 0x64
 
 
-async def test_set_fan_speed_clamps_low():
-    """speed_pct=-5 is clamped to 0 -> hex 0x00."""
+async def test_set_fan_speed_clamps_low(monkeypatch):
+    """speed_pct=-5 is clamped to 0 -> hex 0x00 (last argv element of the spawn)."""
+    captured = _patch_capturing_create(monkeypatch, _FakeProc(rc=0, out=b"", err=b""))
     svc = LocalIPMIService()
-    captured: dict = {}
-
-    async def fake_exec(host, user, password, args):
-        captured["args"] = args
-        return ""
-
-    svc._exec = fake_exec  # type: ignore[method-assign]
     await svc.set_fan_speed("h", "u", "p", -5)
     assert captured["args"][-1] == "0x00"  # 0 -> 0x00
 
 
-async def test_set_fan_speed_in_range_hex():
-    """A mid-range speed (50) maps to 0x32 and uses the manual-fan raw command prefix."""
+async def test_set_fan_speed_in_range_hex(monkeypatch):
+    """A mid-range speed (50) maps to 0x32 and uses the Dell manual-fan raw command tail.
+
+    The full argv is now prefixed by the ipmitool flags, so assert the TAIL of the spawn argv."""
+    captured = _patch_capturing_create(monkeypatch, _FakeProc(rc=0, out=b"", err=b""))
     svc = LocalIPMIService()
-    captured: dict = {}
-
-    async def fake_exec(host, user, password, args):
-        captured["args"] = args
-        return ""
-
-    svc._exec = fake_exec  # type: ignore[method-assign]
     await svc.set_fan_speed("h", "u", "p", 50)
-    assert captured["args"] == ["raw", "0x30", "0x30", "0x02", "0xff", "0x32"]
+    assert list(captured["args"][-6:]) == ["raw", "0x30", "0x30", "0x02", "0xff", "0x32"]
 
 
 # === remaining thin command methods (all route through the stubbed _exec) ===
@@ -120,13 +108,18 @@ async def test_get_power_status_maps_on_off_unknown():
     assert await svc.get_power_status("h", "u", "p") == "unknown"
 
 
-async def test_set_fan_mode_manual_vs_auto():
+async def test_set_fan_mode_manual_vs_auto(monkeypatch):
+    """Migrated to the subprocess-layer harness: set_fan_mode now calls `_exec_capture`.
+
+    Two writes, re-patching `_patch_capturing_create` per call so each captures its own argv;
+    the full spawn argv is prefixed by the ipmitool flags, so assert the raw-command TAIL."""
     svc = LocalIPMIService()
-    calls = _stub(svc)
+    captured_manual = _patch_capturing_create(monkeypatch, _FakeProc(rc=0, out=b"", err=b""))
     await svc.set_fan_mode("h", "u", "p", manual=True)
+    captured_auto = _patch_capturing_create(monkeypatch, _FakeProc(rc=0, out=b"", err=b""))
     await svc.set_fan_mode("h", "u", "p", manual=False)
-    assert calls[0] == ["raw", "0x30", "0x30", "0x01", "0x00"]  # manual
-    assert calls[1] == ["raw", "0x30", "0x30", "0x01", "0x01"]  # auto
+    assert list(captured_manual["args"][-5:]) == ["raw", "0x30", "0x30", "0x01", "0x00"]  # manual
+    assert list(captured_auto["args"][-5:]) == ["raw", "0x30", "0x30", "0x01", "0x01"]  # auto
 
 
 async def test_sel_fru_raw_clear_route_through_exec():
@@ -372,48 +365,126 @@ def test_classify_unknown_ccode_treated_as_hard_reject():
 # === P0-3: set_fan_speed / set_fan_mode return FanWriteResult ===
 
 
-async def test_set_fan_speed_returns_ok_result():
-    """A successful write returns FanWriteResult(ok=True, kind='ok')."""
+async def test_set_fan_speed_returns_ok_result(monkeypatch):
+    """A successful write (rc=0, no rsp token) returns FanWriteResult(ok=True, kind='ok').
+
+    Migrated to the subprocess-layer harness: the real success path runs through
+    `_exec_capture`, `_scan_write_response` finds no completion code -> ok."""
+    _patch_proc(monkeypatch, _FakeProc(rc=0, out=b"", err=b""))
     svc = LocalIPMIService()
-    _stub(svc)
     res = await svc.set_fan_speed("h", "u", "p", 50)
     assert isinstance(res, FanWriteResult)
     assert res.ok is True
     assert res.kind == "ok"
 
 
-async def test_set_fan_mode_returns_ok_result():
-    """set_fan_mode also returns FanWriteResult(ok=True) on success."""
+async def test_set_fan_mode_returns_ok_result(monkeypatch):
+    """set_fan_mode also returns FanWriteResult(ok=True) on a clean rc=0 success."""
+    _patch_proc(monkeypatch, _FakeProc(rc=0, out=b"", err=b""))
     svc = LocalIPMIService()
-    _stub(svc)
     res = await svc.set_fan_mode("h", "u", "p", manual=True)
     assert res.ok is True and res.kind == "ok"
 
 
-async def test_set_fan_speed_rejected_is_classified_not_raised():
-    """A rejected write (rsp=0xd4) is RETURNED as rejected/d4, NOT re-raised."""
+async def test_set_fan_speed_rejected_is_classified_not_raised(monkeypatch):
+    """A rejected write (rc!=0, rsp=0xd4) is RETURNED as rejected/d4, NOT re-raised.
+
+    Migrated to the harness: `_exec_capture` raises RuntimeError(stderr) on rc!=0, so the
+    method's `except` runs classify_ipmi_error (the raise-then-classify path; the NEW C1
+    tests additionally cover the rc=0 exit-0 variant)."""
+    proc = _FakeProc(
+        rc=1,
+        out=b"",
+        err=b"ipmitool error (code 1): ... rsp=0xd4): Insufficient privilege level",
+    )
+    _patch_proc(monkeypatch, proc)
     svc = LocalIPMIService()
-
-    async def boom(host, user, password, args):
-        raise RuntimeError("ipmitool error (code 1): ... rsp=0xd4): Insufficient privilege level")
-
-    svc._exec = boom  # type: ignore[method-assign]
     res = await svc.set_fan_speed("h", "u", "p", 50)
     assert res.ok is False
     assert res.kind == "rejected"
     assert res.ccode == "d4"
 
 
-async def test_set_fan_speed_transient_is_classified():
-    """A transient failure (timeout) is returned as transient, not raised."""
-    svc = LocalIPMIService()
+async def test_set_fan_speed_transient_is_classified(monkeypatch):
+    """A transient failure (timeout) is returned as transient, not raised.
 
-    async def boom(host, user, password, args):
-        raise TimeoutError("ipmitool timed out after 10s")
-
-    svc._exec = boom  # type: ignore[method-assign]
+    Migrated to the harness: a hanging child + timeout=0 makes `_exec_capture` raise
+    TimeoutError -> classify -> transient."""
+    _patch_proc(monkeypatch, _FakeProc(hang=True))
+    svc = LocalIPMIService(timeout=0)
     res = await svc.set_fan_speed("h", "u", "p", 50)
     assert res.ok is False and res.kind == "transient" and res.ccode is None
+
+
+# === C1: exit-0 false-success regression (the gap this plan closes) ===
+#
+# Older ipmitool historically exits 0 even on a raw-command rejection, printing the IPMI
+# completion code (`... rsp=0xNN): <text>`) on stderr OR stdout (05-RESEARCH Pitfall 2). Before
+# the fix, set_fan_* only classified the EXCEPTION branch, so an exit-0 rejection returned a
+# false FanWriteResult(ok=True). These drive the REAL success path via _FakeProc(rc=0) so the
+# fan-write methods' completion-code scan (_scan_write_response over both streams) is exercised.
+
+
+async def test_set_fan_speed_exit0_rsp_on_stderr_is_rejected(monkeypatch):
+    """rc=0 but a completion code on STDERR -> set_fan_speed returns rejected/d4 (closes C1)."""
+    proc = _FakeProc(
+        rc=0,
+        out=b"",
+        err=b"Unable to send RAW command (channel=0x0 netfn=0x30 lun=0x0 cmd=0x30 "
+        b"rsp=0xd4): Insufficient privilege level",
+    )
+    _patch_proc(monkeypatch, proc)
+    svc = LocalIPMIService()
+    res = await svc.set_fan_speed("h", "u", "p", 50)
+    assert res.ok is False
+    assert res.kind == "rejected"
+    assert res.ccode == "d4"
+
+
+async def test_set_fan_speed_exit0_rsp_on_stdout_is_rejected(monkeypatch):
+    """Some ipmitool builds print the rsp line on STDOUT at rc=0 -> still rejected/d4."""
+    proc = _FakeProc(
+        rc=0,
+        out=b"Unable to send RAW command (... rsp=0xd4): Insufficient privilege level",
+        err=b"",
+    )
+    _patch_proc(monkeypatch, proc)
+    svc = LocalIPMIService()
+    res = await svc.set_fan_speed("h", "u", "p", 50)
+    assert res.ok is False
+    assert res.kind == "rejected"
+    assert res.ccode == "d4"
+
+
+async def test_set_fan_mode_exit0_rsp_is_rejected(monkeypatch):
+    """set_fan_mode parity: rc=0 + rsp=0xc7 on stderr -> rejected/c7."""
+    proc = _FakeProc(rc=0, out=b"", err=b"... rsp=0xc7): Request data length invalid")
+    _patch_proc(monkeypatch, proc)
+    svc = LocalIPMIService()
+    res = await svc.set_fan_mode("h", "u", "p", manual=True)
+    assert res.ok is False
+    assert res.kind == "rejected"
+    assert res.ccode == "c7"
+
+
+async def test_set_fan_speed_exit0_clean_is_ok(monkeypatch):
+    """Non-regression: rc=0 with NO rsp token in either stream -> ok=True (no false positive)."""
+    _patch_proc(monkeypatch, _FakeProc(rc=0, out=b"", err=b""))
+    svc = LocalIPMIService()
+    res = await svc.set_fan_speed("h", "u", "p", 50)
+    assert res.ok is True
+    assert res.kind == "ok"
+
+
+async def test_set_fan_speed_exit0_rsp_transient_ccode_is_transient(monkeypatch):
+    """The scan feeds classify_ipmi_error: rc=0 + rsp=0xc0 (node busy) -> transient/c0."""
+    proc = _FakeProc(rc=0, out=b"", err=b"... rsp=0xc0): Node busy")
+    _patch_proc(monkeypatch, proc)
+    svc = LocalIPMIService()
+    res = await svc.set_fan_speed("h", "u", "p", 50)
+    assert res.ok is False
+    assert res.kind == "transient"
+    assert res.ccode == "c0"
 
 
 async def test_set_fan_speed_unsupported_vendor_returns_unsupported():

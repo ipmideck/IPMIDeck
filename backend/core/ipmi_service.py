@@ -75,6 +75,19 @@ def classify_ipmi_error(exc: Exception) -> FanWriteResult:
     return FanWriteResult(False, "transient", None, msg)
 
 
+def _scan_write_response(text: str) -> FanWriteResult | None:
+    """Return a classified FanWriteResult if `text` carries an IPMI completion code
+    (rsp=0xNN), else None. ipmitool can exit 0 yet print a raw-command rejection on
+    stdout/stderr (05-RESEARCH Pitfall 2 / C1). Scanning the fan-write OUTPUT — not just
+    exceptions — closes the exit-0 false-success hole. Fan-write methods only; generic
+    commands are untouched."""
+    m = _RSP_RE.search(text or "")
+    if m is None:
+        return None
+    # Reuse the single classifier so c0/ff -> transient, hard/unknown -> rejected.
+    return classify_ipmi_error(RuntimeError(text))
+
+
 class IPMIService(ABC):
     """Abstract IPMI interface. Implementations: Local (ipmitool) or Demo (mock)."""
 
@@ -136,7 +149,13 @@ class LocalIPMIService(IPMIService):
             self._host_locks[host] = asyncio.Semaphore(1)
         return self._host_locks[host]
 
-    async def _exec(self, host: str, user: str, password: str, args: list[str]) -> str:
+    async def _exec_capture(
+        self, host: str, user: str, password: str, args: list[str]
+    ) -> tuple[str, str]:
+        # Full spawn/kill-reap/-E body. Returns (stdout, stderr) on rc==0 so callers that need
+        # BOTH streams (the fan-write methods, for the C1 exit-0 completion-code scan) get them;
+        # RAISES RuntimeError on rc!=0 exactly as `_exec` always has. `_exec` is now a thin
+        # delegator (returns stdout only) so the ~20 existing callers keep their contract.
         # Only the genuine subprocess SPAWN (asyncio.create_subprocess_exec) is `# pragma: no cover`
         # — it needs a real ipmitool binary + reachable BMC. The kill+reap / error-message branches
         # below ARE exercised by tests/unit/test_ipmi_service.py, which monkeypatches
@@ -146,7 +165,8 @@ class LocalIPMIService(IPMIService):
         # in `ps`). ipmitool `-E` reads it from the IPMITOOL_PASSWORD environment variable, which
         # we inject ONLY into this child's environment (os.environ.copy() preserves PATH /
         # SystemRoot) — never `os.environ[...] = ...`, which would leak the secret process-wide
-        # to every other coroutine.
+        # to every other coroutine. NOTE: the password is still in the child's /proc/<pid>/environ
+        # (same-UID/root visibility) — an accepted residual vs the `ps` argv leak (C14).
         cmd = ["ipmitool", "-I", "lanplus", "-H", host, "-U", user, "-E", *args]
         # Empty-password gotcha (05-RESEARCH Pitfall 3): ipmitool accepts IPMITOOL_PASSWORD=""
         # and silently authenticates with an empty password. If decryption ever yields a falsy
@@ -182,7 +202,14 @@ class LocalIPMIService(IPMIService):
                 # D-18: stderr OR stdout so code 255 (BMC session exhaustion) is legible.
                 msg = stderr.decode().strip() or stdout.decode().strip() or "(no output)"
                 raise RuntimeError(f"ipmitool error (code {proc.returncode}): {msg}")
-            return stdout.decode()
+            return stdout.decode(), stderr.decode()
+
+    async def _exec(self, host: str, user: str, password: str, args: list[str]) -> str:
+        # Thin delegator: preserves the historical contract (returns stdout str, raises on rc!=0)
+        # so every NON-fan-write caller and the sel/fru/power/sensor `_exec` stubs keep working
+        # unchanged. The fan-write methods call `_exec_capture` directly (they need stderr too).
+        stdout, _stderr = await self._exec_capture(host, user, password, args)
+        return stdout
 
     async def get_sensor_readings(self, host: str, user: str, password: str) -> list[dict]:
         output = await self._exec(host, user, password, ["sdr", "elist"])
@@ -231,10 +258,15 @@ class LocalIPMIService(IPMIService):
             val = "0x01" if manual else "0x02"
             args = ["raw", "0x30", "0x45", "0x01", val]
         try:
-            await self._exec(host, user, password, args)
-            return FanWriteResult(True, "ok", None, "")
+            out, err = await self._exec_capture(host, user, password, args)
         except Exception as e:  # classify rejected/transient — never a false success.
             return classify_ipmi_error(e)
+        # C1 / 05-RESEARCH Pitfall 2: ipmitool can exit 0 yet print a completion code -> scan
+        # both streams so an exit-0 rejection is never a false ok.
+        rejected = _scan_write_response(err) or _scan_write_response(out)
+        if rejected is not None:
+            return rejected
+        return FanWriteResult(True, "ok", None, "")
 
     async def set_fan_speed(
         self, host: str, user: str, password: str, speed_pct: int, vendor: str = "dell"
@@ -259,10 +291,15 @@ class LocalIPMIService(IPMIService):
             # Supermicro: 0x30 0x70 0x66 0x01 <zone=0x00> <pct_hex>; zone 0 = system fans.
             args = ["raw", "0x30", "0x70", "0x66", "0x01", "0x00", hex_val]
         try:
-            await self._exec(host, user, password, args)
-            return FanWriteResult(True, "ok", None, "")
+            out, err = await self._exec_capture(host, user, password, args)
         except Exception as e:  # classify rejected/transient — never a false success.
             return classify_ipmi_error(e)
+        # C1 / 05-RESEARCH Pitfall 2: ipmitool can exit 0 yet print a completion code -> scan
+        # both streams so an exit-0 rejection is never a false ok.
+        rejected = _scan_write_response(err) or _scan_write_response(out)
+        if rejected is not None:
+            return rejected
+        return FanWriteResult(True, "ok", None, "")
 
     async def get_sel(self, host: str, user: str, password: str) -> list[dict]:
         output = await self._exec(host, user, password, ["sel", "elist"])
