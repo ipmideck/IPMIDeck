@@ -224,6 +224,59 @@ async def test_rejected_mode_set_treated_as_failed(monkeypatch):
     assert any(a["severity"] == "critical" for a in ws.alerts)
 
 
+# === C2: a transient set_fan_mode failure must be RE-ISSUED in the retry loop ===
+# Before the fix the retry loop re-issued only set_fan_speed, so a transient mode
+# failure followed by an ok speed retry was masked as success while the BMC may have
+# stayed in auto. Each test builds its OWN fresh _SeqIPMI so queue state never leaks.
+
+
+async def test_transient_mode_then_ok_reissues_both_writes(monkeypatch):
+    """A transient set_fan_mode (then ok) is RE-ISSUED inside the retry loop.
+
+    mode_results=[transient, ok], speed_results=[ok, ok]: the initial attempt folds the
+    transient mode result into res, the retry loop must re-issue BOTH set_fan_mode AND
+    set_fan_speed and break only when both are ok. Asserts >=2 set_fan_mode calls (the
+    RED — pre-fix set_fan_mode is called exactly once) and a true/no-false-safe outcome.
+    """
+    _patch_imports(monkeypatch)
+    ipmi = _SeqIPMI(mode_results=[_transient(), _ok()], speed_results=[_ok(), _ok()])
+    ws = _FakeWS()
+    db, prev = _install(ipmi, ws)
+    try:
+        active = await fp_tasks._apply_fan_write(get_ctx(), _server_row(), 60)
+    finally:
+        if prev is not None:
+            set_ctx(prev)
+    # set_fan_mode was RE-ISSUED in the retry (>=2): the initial attempt + at least one retry.
+    assert len(ipmi.mode_calls) >= 2, "set_fan_mode must be re-issued inside the retry loop"
+    # Both eventually ok -> success, no false-safe alert.
+    assert active is True
+    assert ws.alerts == []
+
+
+async def test_transient_mode_never_recovers_fails_safe(monkeypatch):
+    """A set_fan_mode that NEVER recovers must fail safe — never a false 'active'.
+
+    Queues sized off the real _WRITE_RETRY_ATTEMPTS constant (+2 to cover the initial
+    attempt + the recovery primitive's own fail-safe writes without draining into the
+    _ok() fallback). Mode is always transient -> after the bounded retries the write is
+    treated as failed -> recovery + critical alert, active False, no fanpilot status.
+    """
+    _patch_imports(monkeypatch)
+    n = fp_tasks._WRITE_RETRY_ATTEMPTS + 2
+    ipmi = _SeqIPMI(mode_results=[_transient()] * n, speed_results=[_ok()] * n)
+    ws = _FakeWS()
+    db, prev = _install(ipmi, ws)
+    try:
+        active = await fp_tasks._apply_fan_write(get_ctx(), _server_row(), 60)
+    finally:
+        if prev is not None:
+            set_ctx(prev)
+    assert active is False, "a never-recovering mode write must NOT broadcast active"
+    assert any(a["severity"] == "critical" for a in ws.alerts)
+    assert ws.status == [], "no false 'fanpilot active' on a failed write"
+
+
 async def test_accepted_write_unverified_readback_no_recovery(monkeypatch):
     """An accepted write whose RPM is not confirmed -> command_log result='applied_unverified'
     and NO recovery (read-back is best-effort, never a trip — D-P03-02)."""

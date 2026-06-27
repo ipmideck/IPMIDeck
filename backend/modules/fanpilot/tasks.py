@@ -248,10 +248,27 @@ async def _recover_to_bmc_auto(
     # doesn't auto-resume manual mode (CONTEXT 04-W1-01: stay recovered, user
     # must manually re-engage).
     try:
+        # (unchanged) always persist the enabled=0 idempotency anchor — every reason, every
+        # ipmi state (incl. the unreachable-BMC exception path) — so the next online tick
+        # doesn't auto-resume manual mode.
         await ctx.db.execute(
             "UPDATE servers SET fanpilot_enabled = 0 WHERE id = ?",
             (server_id,),
         )
+        # C13: a recovered FANPILOT-intent server must not be re-marked 'fanpilot' by
+        # _startup_state_resume (status/reality drift — the loop never drives a recovered
+        # server). Realign ONLY the 'fanpilot' row, and ONLY when the fail-safe genuinely
+        # applied (ipmi_ok and not failsafe_rejected). A deliberate 'manual' pin is
+        # intentionally LEFT UNTOUCHED so it survives recovery + restart (C8 / D-SR / the
+        # GPU-cook invariant) — that is why the UPDATE is scoped to fan_desired_mode='fanpilot'
+        # and never an unconditional intent clear. command_log.result encodes the applied
+        # fail-safe; fan_desired_* is the durable resume intent only.
+        if ipmi_ok and not failsafe_rejected:
+            await ctx.db.execute(
+                "UPDATE servers SET fan_desired_mode = 'auto', fan_desired_speed = NULL "
+                "WHERE id = ? AND fan_desired_mode = 'fanpilot'",
+                (server_id,),
+            )
         # FIX-03 idempotency (quick-260626-4px option (a)): command_detail STAYS
         # 'auto' for BOTH branches so the FIX-03 layer-3 startup-recovery query
         # (which only re-fires when the latest fan_mode command_detail is 'manual'
@@ -421,9 +438,16 @@ async def _apply_fan_write(ctx, server, target_speed: int) -> bool:
         if res.kind == "transient":
             # Bounded in-tick retries only for transient failures (D-P03-04). A hard
             # reject / unsupported skips this loop entirely — retrying can't succeed.
+            # C2: retry BOTH writes; a transient mode failure must not be masked by a
+            # successful speed retry (the BMC could otherwise stay in auto while the speed
+            # write reports ok). Mirror the initial-attempt fold and break only when BOTH ok.
             for attempt in range(_WRITE_RETRY_ATTEMPTS):
                 await asyncio.sleep(1.0 * (attempt + 1))
+                mode_res = await ctx.ipmi.set_fan_mode(host, user, pwd, manual=True, vendor=vendor)
                 res = await ctx.ipmi.set_fan_speed(host, user, pwd, target_speed, vendor=vendor)
+                # A rejected mode set is as fatal as a rejected speed set (same fold as above).
+                if mode_res is not None and not mode_res.ok:
+                    res = mode_res
                 if res.ok:
                     break
         if not res.ok:

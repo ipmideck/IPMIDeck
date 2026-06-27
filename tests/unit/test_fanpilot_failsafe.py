@@ -21,22 +21,36 @@ from __future__ import annotations
 
 import backend.core.crypto as crypto_mod
 import backend.main as main_mod
+from backend.core.ipmi_service import FanWriteResult
 from backend.modules import ModuleContext, get_ctx, set_ctx
 from backend.modules.fanpilot import tasks as fp_tasks
 
 
 class _FakeIPMI:
-    """Records set_fan_mode / set_fan_speed call kwargs for assertions."""
+    """Records set_fan_mode / set_fan_speed call kwargs for assertions.
 
-    def __init__(self) -> None:
+    Optional mode_result/speed_result let a test seed a rejected FanWriteResult so the
+    recovery primitive's own-write rejection guard (failsafe_rejected) can be exercised;
+    by default both return None (the legacy shape — recovery treats None as ok).
+    """
+
+    def __init__(
+        self,
+        mode_result: FanWriteResult | None = None,
+        speed_result: FanWriteResult | None = None,
+    ) -> None:
         self.mode_calls: list[dict] = []
         self.speed_calls: list[dict] = []
+        self._mode_result = mode_result
+        self._speed_result = speed_result
 
     async def set_fan_mode(self, host, user, password, manual, vendor="dell"):
         self.mode_calls.append({"manual": manual, "vendor": vendor})
+        return self._mode_result
 
     async def set_fan_speed(self, host, user, password, speed_pct, vendor="dell"):
         self.speed_calls.append({"speed": speed_pct, "vendor": vendor})
+        return self._speed_result
 
 
 class _FakeDB:
@@ -62,14 +76,14 @@ class _FakeAuth:
         return b"x" * 32
 
 
-def _install(config: dict | None) -> tuple[_FakeDB, _FakeIPMI, object]:
+def _install(config: dict | None, ipmi: _FakeIPMI | None = None) -> tuple[_FakeDB, _FakeIPMI, object]:
     """Install a fake ctx + monkeypatch call-time imports. Returns (db, ipmi, prev_ctx)."""
     try:
         prev_ctx = get_ctx()
     except Exception:
         prev_ctx = None
     db = _FakeDB(config)
-    ipmi = _FakeIPMI()
+    ipmi = ipmi or _FakeIPMI()
     set_ctx(ModuleContext(db=db, ipmi=ipmi, ws=None, config=None))
     return db, ipmi, prev_ctx
 
@@ -84,8 +98,8 @@ def _enabled_updates(db: _FakeDB) -> list[tuple]:
     return [params for sql, params in db.executed if "fanpilot_enabled = 0" in sql]
 
 
-async def _run_recovery(monkeypatch, config: dict | None):
-    db, ipmi, prev_ctx = _install(config)
+async def _run_recovery(monkeypatch, config: dict | None, ipmi: _FakeIPMI | None = None):
+    db, ipmi, prev_ctx = _install(config, ipmi)
     monkeypatch.setattr(main_mod, "auth", _FakeAuth())
     monkeypatch.setattr(crypto_mod, "decrypt", lambda token, key: "u" if "user" in token else "p")
     ctx = get_ctx()
@@ -98,6 +112,76 @@ async def _run_recovery(monkeypatch, config: dict | None):
         if prev_ctx is not None:
             set_ctx(prev_ctx)
     return db, ipmi
+
+
+# === C13: recovery realigns a 'fanpilot' durable intent, never clears a 'manual' pin ===
+# These assert on the EXECUTED SQL shape (the fake _FakeDB has no real WHERE evaluation):
+# the realignment UPDATE must set fan_desired_mode='auto' SCOPED to the 'fanpilot' row, and
+# there must be NO unconditional intent-clear that could wipe a deliberate 'manual' pin.
+
+
+def _intent_realign_updates(db: _FakeDB) -> list[str]:
+    """Every executed UPDATE that sets fan_desired_mode = 'auto' (the realignment statement)."""
+    return [sql for sql, _ in db.executed if "fan_desired_mode = 'auto'" in sql]
+
+
+async def test_recovery_realigns_fanpilot_intent(monkeypatch):
+    """A genuinely-applied fixed-branch recovery realigns the 'fanpilot' durable intent.
+
+    db.executed must contain an UPDATE that sets fan_desired_mode='auto' AND is scoped
+    WHERE id=? AND fan_desired_mode='fanpilot'. Before the fix there is NO fan_desired_mode
+    UPDATE at all -> RED.
+    """
+    db, ipmi = await _run_recovery(
+        monkeypatch,
+        {"fanpilot.failsafe_mode": "fixed", "fanpilot.failsafe_speed": "80"},
+    )
+    realign = _intent_realign_updates(db)
+    assert realign, "recovery must realign fan_desired_mode for a recovered fanpilot server"
+    assert any(
+        "fan_desired_mode = 'auto'" in sql and "fan_desired_mode = 'fanpilot'" in sql
+        for sql in realign
+    ), "the realignment UPDATE must be SCOPED WHERE fan_desired_mode = 'fanpilot'"
+    # The unconditional fanpilot_enabled=0 anchor still runs as a SEPARATE statement.
+    assert _enabled_updates(db), "the fanpilot_enabled=0 idempotency anchor must still run"
+
+
+async def test_recovery_never_unconditionally_clears_manual_pin(monkeypatch):
+    """BLOCKER-2 regression guard (the GPU-cook invariant, C8/D-SR).
+
+    A deliberate fan_desired_mode='manual' pin MUST survive recovery. Assert there is NO
+    executed UPDATE that sets fan_desired_mode='auto' WITHOUT the AND fan_desired_mode='fanpilot'
+    scope — i.e. no unconditional intent-clear that a real DB would apply to a 'manual' row.
+    """
+    db, ipmi = await _run_recovery(
+        monkeypatch,
+        {"fanpilot.failsafe_mode": "fixed", "fanpilot.failsafe_speed": "100"},
+    )
+    for sql in _intent_realign_updates(db):
+        assert "fan_desired_mode = 'fanpilot'" in sql, (
+            "an unscoped fan_desired_mode='auto' UPDATE would wipe a deliberate 'manual' pin "
+            f"(GPU-cook regression); offending SQL: {sql!r}"
+        )
+
+
+async def test_recovery_skips_realign_when_failsafe_write_rejected(monkeypatch):
+    """The realignment is gated on (ipmi_ok and not failsafe_rejected).
+
+    When the fail-safe write itself is hard-rejected (doubly-rejected 0xd4), failsafe_rejected
+    is True -> NO fan_desired_mode UPDATE is executed; the fanpilot_enabled=0 anchor still runs.
+    """
+    rejected = FanWriteResult(False, "rejected", "d4", "rsp=0xd4: Insufficient privilege level")
+    ipmi = _FakeIPMI(mode_result=rejected, speed_result=rejected)
+    db, ipmi = await _run_recovery(
+        monkeypatch,
+        {"fanpilot.failsafe_mode": "fixed", "fanpilot.failsafe_speed": "100"},
+        ipmi=ipmi,
+    )
+    assert _intent_realign_updates(db) == [], (
+        "a rejected fail-safe write must NOT realign durable intent (gated on not failsafe_rejected)"
+    )
+    # The unconditional anchor still persists fanpilot_enabled=0.
+    assert _enabled_updates(db), "the fanpilot_enabled=0 anchor must run even on a rejected fail-safe"
 
 
 async def test_fixed_branch_sets_manual_and_speed(monkeypatch):
