@@ -356,6 +356,11 @@ async def _recover_to_bmc_auto(
 # captured at command time so the next tick can check DIRECTIONAL movement. Cleared in
 # fanpilot_shutdown(). Read-back is best-effort and NEVER trips recovery.
 _pending_readback: dict[str, dict] = {}
+# C12: per-server last-COMMANDED speed (survives across ticks, unlike _pending_readback which
+# is popped each tick by _readback_confirm). Gives the read-back a REAL directional baseline so
+# a down-command whose RPM drifts up is not mislabeled 'confirmed'. Observability only — NO
+# thermal-safety change (read-back still never trips recovery). Cleared in fanpilot_shutdown().
+_last_commanded_speed: dict[str, int] = {}
 # Read-back dead-band: ignore RPM changes smaller than this fraction of baseline OR this
 # many absolute RPM (sensor jitter is not movement). 05-RESEARCH §"P0-3 RPM Read-Back".
 _READBACK_DEADBAND_FRAC = 0.05
@@ -418,10 +423,14 @@ async def _readback_confirm(ctx, server) -> None:
         readings = await ctx.ipmi.get_sensor_readings(server["host"], user, pwd)
         now_rpm = _mean_fan_rpm(readings)
         baseline = pending.get("baseline_rpm")
-        if now_rpm is not None and baseline is not None:
+        prev_target = pending.get("prev_target", pending["target"])
+        # C12: skip the directional 'confirmed' when the target is UNCHANGED — no thermal
+        # change occurred, so direction is undefined and an RPM move (either way) must not be
+        # claimed as a directional confirmation. Leaves 'applied_unverified'.
+        if now_rpm is not None and baseline is not None and pending["target"] != prev_target:
             delta = now_rpm - baseline
             dead_band = max(_READBACK_DEADBAND_RPM, baseline * _READBACK_DEADBAND_FRAC)
-            commanded_up = pending["target"] >= pending.get("prev_target", pending["target"])
+            commanded_up = pending["target"] > prev_target
             if abs(delta) >= dead_band and (
                 (commanded_up and delta > 0) or (not commanded_up and delta < 0)
             ):
@@ -502,12 +511,19 @@ async def _apply_fan_write(ctx, server, target_speed: int) -> bool:
             return False  # caller must NOT broadcast a false 'fanpilot active'
 
     # Accepted: arm a best-effort next-tick read-back. Never blocks the write path.
-    prev = _pending_readback.get(server_id, {})
+    # C12: use the REAL last-commanded speed as prev_target (the prior pending record is
+    # popped each tick by _readback_confirm, so reading it here would always equal target and
+    # make commanded_up always True). Default to target_speed on first command (direction
+    # undefined -> the read-back skips the directional 'confirmed' for an unchanged target).
+    prev_commanded = _last_commanded_speed.get(server_id, target_speed)
     _pending_readback[server_id] = {
         "target": target_speed,
-        "prev_target": prev.get("target", target_speed),
+        "prev_target": prev_commanded,
         "baseline_rpm": baseline_rpm,
     }
+    # Record this as the last-commanded speed so the NEXT command's read-back has a real
+    # directional baseline (set AFTER arming so prev_target above is the prior command).
+    _last_commanded_speed[server_id] = target_speed
     return True
 
 
@@ -974,5 +990,6 @@ async def fanpilot_shutdown():
     _garbage_counts.clear()
     _pending_readback.clear()
     _source_last_seen.clear()
+    _last_commanded_speed.clear()
     global _wake_event
     _wake_event = None

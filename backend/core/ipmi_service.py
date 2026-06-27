@@ -166,7 +166,10 @@ class LocalIPMIService(IPMIService):
         # we inject ONLY into this child's environment (os.environ.copy() preserves PATH /
         # SystemRoot) — never `os.environ[...] = ...`, which would leak the secret process-wide
         # to every other coroutine. NOTE: the password is still in the child's /proc/<pid>/environ
-        # (same-UID/root visibility) — an accepted residual vs the `ps` argv leak (C14).
+        # (same-UID/root visibility) — an accepted, documented residual vs the `ps` argv leak (C14).
+        # Mitigation policy for the residual: do NOT log IPMITOOL_PASSWORD, do NOT export it
+        # process-wide (the os.environ.copy() above keeps it scoped to this child). The longer
+        # rationale lives in the 05-RESEARCH Rider-S section (local-only / gitignored doc).
         cmd = ["ipmitool", "-I", "lanplus", "-H", host, "-U", user, "-E", *args]
         # Empty-password gotcha (05-RESEARCH Pitfall 3): ipmitool accepts IPMITOOL_PASSWORD=""
         # and silently authenticates with an empty password. If decryption ever yields a falsy

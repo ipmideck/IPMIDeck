@@ -397,6 +397,103 @@ def test_source_last_seen_cleared_in_recovery():
     )
 
 
+# === C12 (observability): read-back direction uses a real last-commanded baseline ===
+# Before the fix prev_target was always == target (the prior pending record is popped by
+# _readback_confirm before _apply_fan_write runs), so commanded_up was always True and a
+# noisy up-drift on a DOWN command could be mislabeled 'confirmed'. NO thermal-safety change:
+# read-back still NEVER trips recovery.
+
+
+async def test_readback_down_command_updrift_not_confirmed(monkeypatch):
+    """An accepted DOWN command whose measured RPM drifts UP is NOT labeled 'confirmed'.
+
+    First write a high speed (establish a last-commanded baseline), then a LOWER speed whose
+    next-tick RPM rises (above the dead-band). Because the command was a decrease, an upward
+    RPM move is the WRONG direction -> stays 'applied_unverified'.
+    """
+    _patch_imports(monkeypatch)
+    fp_tasks._last_commanded_speed.pop("srv-c12", None)
+    fp_tasks._pending_readback.pop("srv-c12", None)
+    # Baseline RPM read BEFORE each write is 1000; the read-back tick sees 1500 (drifted UP).
+    low_rpm = [{"type": "fan", "value": 1000.0}]
+    high_rpm = [{"type": "fan", "value": 1500.0}]
+    srv = _server_row(server_id="srv-c12")
+    try:
+        # First command: high speed 90 (baseline read = 1000 RPM).
+        ipmi1 = _SeqIPMI(speed_results=[_ok()], readings=low_rpm)
+        ws = _FakeWS()
+        db, prev = _install(ipmi1, ws)
+        await fp_tasks._apply_fan_write(get_ctx(), srv, 90)
+        if prev is not None:
+            set_ctx(prev)
+        # Second command: LOWER speed 30 (baseline read = 1000 RPM again).
+        ipmi2 = _SeqIPMI(speed_results=[_ok()], readings=low_rpm)
+        db2, prev2 = _install(ipmi2, ws)
+        await fp_tasks._apply_fan_write(get_ctx(), srv, 30)
+        # Read-back tick: RPM drifted UP to 1500 (wrong direction for a down-command).
+        ipmi3 = _SeqIPMI(readings=high_rpm)
+        set_ctx(ModuleContext(db=db2, ipmi=ipmi3, ws=ws, config=None))
+        await fp_tasks._readback_confirm(get_ctx(), srv)
+        results = _command_log_results(db2)
+    finally:
+        fp_tasks._last_commanded_speed.pop("srv-c12", None)
+        fp_tasks._pending_readback.pop("srv-c12", None)
+        if prev2 is not None:
+            set_ctx(prev2)
+    assert "confirmed" not in results, (
+        f"a down-command with up-drift must NOT be 'confirmed'; got {results}"
+    )
+    assert "applied_unverified" in results
+
+
+async def test_readback_same_target_not_falsely_confirmed(monkeypatch):
+    """When the target is UNCHANGED vs last commanded, the directional check is SKIPPED.
+
+    No thermal-safety change occurred, so a directional 'confirmed' must not be claimed even
+    if RPM moved — result stays 'applied_unverified'.
+    """
+    _patch_imports(monkeypatch)
+    fp_tasks._last_commanded_speed.pop("srv-c12b", None)
+    fp_tasks._pending_readback.pop("srv-c12b", None)
+    low_rpm = [{"type": "fan", "value": 1000.0}]
+    high_rpm = [{"type": "fan", "value": 1800.0}]
+    srv = _server_row(server_id="srv-c12b")
+    prev2 = None
+    try:
+        # First command: 50 (baseline read 1000), establishes last-commanded=50.
+        ipmi1 = _SeqIPMI(speed_results=[_ok()], readings=low_rpm)
+        ws = _FakeWS()
+        db, prev = _install(ipmi1, ws)
+        await fp_tasks._apply_fan_write(get_ctx(), srv, 50)
+        if prev is not None:
+            set_ctx(prev)
+        # Second command: SAME target 50 (baseline read 1000) -> direction undefined.
+        ipmi2 = _SeqIPMI(speed_results=[_ok()], readings=low_rpm)
+        db2, prev2 = _install(ipmi2, ws)
+        await fp_tasks._apply_fan_write(get_ctx(), srv, 50)
+        # Read-back tick: RPM moved up, but target was unchanged -> not 'confirmed'.
+        ipmi3 = _SeqIPMI(readings=high_rpm)
+        set_ctx(ModuleContext(db=db2, ipmi=ipmi3, ws=ws, config=None))
+        await fp_tasks._readback_confirm(get_ctx(), srv)
+        results = _command_log_results(db2)
+    finally:
+        fp_tasks._last_commanded_speed.pop("srv-c12b", None)
+        fp_tasks._pending_readback.pop("srv-c12b", None)
+        if prev2 is not None:
+            set_ctx(prev2)
+    assert "confirmed" not in results, (
+        f"an unchanged target must not be falsely 'confirmed'; got {results}"
+    )
+
+
+def test_last_commanded_speed_cleared_on_shutdown():
+    """_last_commanded_speed is a module-level dict cleared in fanpilot_shutdown."""
+    import inspect
+    assert isinstance(fp_tasks._last_commanded_speed, dict)
+    src = inspect.getsource(fp_tasks.fanpilot_shutdown)
+    assert "_last_commanded_speed.clear()" in src
+
+
 # === Pitfall 5: doubly-rejected fail-safe write must NOT be logged as applied ===
 
 
