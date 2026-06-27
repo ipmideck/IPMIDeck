@@ -63,6 +63,40 @@ def _check_garbage_value(server_id: str, value: float) -> bool:
     return False
 
 
+# === C11 (FANPILOT-FAILSAFE-VALUE): vanished source sensor gap guard ===
+# A vanished source row (missing / NULL value) is INVISIBLE to the downstream Phase-4
+# freshness gate (which only runs when a row exists), so a disappearing source sensor would
+# otherwise leave the fans pinned indefinitely with the controller blind. Track the gap here
+# per server: seeded to 'now' on first sight so a SINGLE missing tick never trips; only a
+# sustained gap (>= stale_threshold) routes through the SAME fail-safe primitive. Monotonic
+# seconds (jump-free). Cleared in _recover_to_bmc_auto + fanpilot_shutdown.
+_source_last_seen: dict[str, float] = {}
+
+
+def _check_source_missing(
+    server_id: str, has_reading: bool, stale_threshold: float, now: float | None = None
+) -> bool:
+    """Update the per-server source-gap tracker for one tick; return True to trip fail-safe.
+
+    Mirrors _check_garbage_value (monotonic clock injectable for tests). A usable reading
+    refreshes last-seen and returns False. A missing reading on FIRST sight seeds last-seen
+    to now and returns False (a single missing tick never trips). A missing reading whose
+    recorded last-seen is older than stale_threshold returns True.
+    """
+    import time
+
+    t = now if now is not None else time.monotonic()
+    if has_reading:
+        _source_last_seen[server_id] = t
+        return False
+    last = _source_last_seen.get(server_id)
+    if last is None:
+        # First sight: seed, don't trip on one missing tick.
+        _source_last_seen[server_id] = t
+        return False
+    return (t - last) >= stale_threshold
+
+
 def set_last_state(server_id: str, mode: str, speed_pct: int | None = None) -> None:
     """Update the cached mode/speed for a server.
 
@@ -305,6 +339,8 @@ async def _recover_to_bmc_auto(
     # Drop the controller; user must re-engage to recreate it with the new
     # profile settings (CONTEXT 04-W1-01: no auto-resume after recovery).
     _controllers.pop(server_id, None)
+    # C11: clear the source-gap tracker so a recovered server starts fresh on re-engage.
+    _source_last_seen.pop(server_id, None)
 
     logger.warning(
         "FanPilot fail-safe applied server_id=%s reason=%s mode=%s speed=%s ipmi=%s",
@@ -561,16 +597,32 @@ async def _startup_state_resume(ctx) -> None:
                                 "server_id=%s gap=%.0fs", speed, server_id, gap,
                             )
                         else:
-                            # A rejected resume write is NOT a success — log it, don't pretend.
+                            # C9: a rejected resume is NOT a success — FAIL SAFE (operator
+                            # failsafe) + critical alert, mirroring the runtime _apply_fan_write
+                            # rejection path. Log-only would leave an unknown fan state (the
+                            # GPU-cook condition on the resume path).
                             failed = (
                                 speed_r if (speed_r is not None and not speed_r.ok) else mode_r
                             )
                             logger.warning(
-                                "FanPilot startup resume: manual re-apply REJECTED "
+                                "FanPilot startup resume: manual re-apply REJECTED -> fail-safe "
                                 "server_id=%s detail=%s",
                                 server_id,
                                 failed.detail if failed is not None else "",
                             )
+                            await _recover_to_bmc_auto(
+                                ctx, server_id, row["host"], row["username_enc"],
+                                row["password_enc"], reason="startup_resume_rejected",
+                                vendor=row["vendor"] or "dell",
+                            )
+                            # ctx.ws may be None in some call paths — guard the alert.
+                            if ctx.ws is not None:
+                                await ctx.ws.broadcast_alert(
+                                    server_id, "critical", "FanPilot",
+                                    f"Startup resume rejected "
+                                    f"({failed.detail if failed is not None else ''})",
+                                    speed,
+                                )
                     elif desired_mode == "fanpilot" or row["fanpilot_enabled"]:
                         # Keep fanpilot_enabled=1; the main loop drives the write. Reflect
                         # the resumed mode in the cache so /status is honest immediately.
@@ -741,8 +793,31 @@ async def fanpilot_loop():
                     "ORDER BY timestamp DESC LIMIT 1",
                     (server_id, source_sensor),
                 )
-                if not reading or reading["value"] is None:
+                # C11: a vanished source row (missing / NULL value) is invisible to the
+                # freshness gate below (which only runs when a row exists). Track the gap
+                # per server; a sustained gap (>= stale_threshold) routes through the SAME
+                # fail-safe primitive + a critical alert. A single missing tick does NOT trip.
+                has_reading = bool(reading) and reading["value"] is not None
+                if not has_reading:
+                    if _check_source_missing(server_id, False, stale_threshold):
+                        logger.warning(
+                            "FanPilot source-missing guard TRIPPED server_id=%s "
+                            "threshold=%.1fs sensor=%s",
+                            server_id, stale_threshold, source_sensor,
+                        )
+                        if auto_recover_enabled:
+                            await _recover_to_bmc_auto(
+                                ctx, server_id, server["host"],
+                                server["username_enc"], server["password_enc"],
+                                reason="source_missing", vendor=server["vendor"] or "dell",
+                            )
+                            await ctx.ws.broadcast_alert(
+                                server_id, "critical", source_sensor,
+                                "Source sensor reading vanished; failed safe", None,
+                            )
                     continue
+                # Usable reading: refresh the last-seen so the gap timer resets.
+                _check_source_missing(server_id, True, stale_threshold)
 
                 # 04-W1-02 freshness gate: if the latest sensor reading is
                 # older than 2 × poll_interval, treat as missing → trigger the
@@ -898,5 +973,6 @@ async def fanpilot_shutdown():
     _last_online_state.clear()
     _garbage_counts.clear()
     _pending_readback.clear()
+    _source_last_seen.clear()
     global _wake_event
     _wake_event = None

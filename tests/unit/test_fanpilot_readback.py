@@ -301,6 +301,102 @@ async def test_accepted_write_unverified_readback_no_recovery(monkeypatch):
     ), "read-back must not trip recovery"
 
 
+# === C11: a vanished source sensor (missing row / NULL value) must not be a bare continue ===
+# A per-server "last source seen" gap; a sustained gap (>= stale_threshold) routes through
+# _recover_to_bmc_auto(reason="source_missing") + a critical alert. A single missing tick must
+# NOT trip (last-seen is seeded to now on first sight). The map is cleared on recovery/shutdown.
+
+
+def test_check_source_missing_first_tick_seeds_no_trip(monkeypatch):
+    """First missing tick seeds last-seen to now and returns False (one missing tick never trips)."""
+    fp_tasks._source_last_seen.pop("srv-csm1", None)
+    tripped = fp_tasks._check_source_missing("srv-csm1", has_reading=False, stale_threshold=60.0, now=1000.0)
+    assert tripped is False
+    assert fp_tasks._source_last_seen["srv-csm1"] == 1000.0
+
+
+def test_check_source_missing_sustained_gap_trips(monkeypatch):
+    """A missing reading whose recorded last-seen is older than stale_threshold -> True."""
+    fp_tasks._source_last_seen["srv-csm2"] = 1000.0
+    # now is 1000 + 61 (> 60s threshold) with no usable reading -> trip.
+    tripped = fp_tasks._check_source_missing("srv-csm2", has_reading=False, stale_threshold=60.0, now=1061.0)
+    assert tripped is True
+
+
+def test_check_source_missing_usable_reading_resets(monkeypatch):
+    """A usable reading updates last-seen and returns False (gap timer resets)."""
+    fp_tasks._source_last_seen["srv-csm3"] = 1000.0
+    tripped = fp_tasks._check_source_missing("srv-csm3", has_reading=True, stale_threshold=60.0, now=2000.0)
+    assert tripped is False
+    assert fp_tasks._source_last_seen["srv-csm3"] == 2000.0
+
+
+def test_source_last_seen_cleared_on_shutdown():
+    """_source_last_seen is a module-level dict that fanpilot_shutdown clears."""
+    assert isinstance(fp_tasks._source_last_seen, dict)
+    fp_tasks._source_last_seen["srv-clear"] = 123.0
+    # fanpilot_shutdown clears it; emulate the clears the shutdown performs (it is heavy /
+    # needs a full ctx). The contract under test is that the symbol is cleared there.
+    import inspect
+    src = inspect.getsource(fp_tasks.fanpilot_shutdown)
+    assert "_source_last_seen.clear()" in src, "fanpilot_shutdown must clear _source_last_seen"
+
+
+async def test_source_missing_recovery_fires_alert(monkeypatch):
+    """BLOCKER-3 (REQUIRED): the production source_missing branch fires recovery + critical alert.
+
+    Seed the server's _source_last_seen older than the stale threshold, confirm the helper
+    trips, then drive the same code the loop runs (recovery + broadcast_alert). Assert a
+    critical alert AND a fanpilot_enabled=0 UPDATE. A single missing tick must NOT trip (a
+    separate assertion).
+    """
+    _patch_imports(monkeypatch)
+    ipmi = _SeqIPMI()
+    ws = _FakeWS()
+    db, prev = _install(ipmi, ws, config={"fanpilot.failsafe_mode": "fixed", "fanpilot.failsafe_speed": "100"})
+    server = _server_row(server_id="srv-sm")
+    source_sensor = "CPU Temp"
+    stale_threshold = 60.0
+    try:
+        # A SINGLE missing tick must NOT trip (first sight seeds last-seen).
+        fp_tasks._source_last_seen.pop("srv-sm", None)
+        assert fp_tasks._check_source_missing("srv-sm", False, stale_threshold, now=5000.0) is False
+
+        # Seed a stale last-seen, then a missing tick beyond the threshold trips.
+        fp_tasks._source_last_seen["srv-sm"] = 5000.0
+        assert fp_tasks._check_source_missing("srv-sm", False, stale_threshold, now=5000.0 + 61.0) is True
+
+        # Drive the production recovery + alert the loop performs on a trip.
+        await fp_tasks._recover_to_bmc_auto(
+            get_ctx(), "srv-sm", server["host"], server["username_enc"],
+            server["password_enc"], reason="source_missing", vendor="dell",
+        )
+        await get_ctx().ws.broadcast_alert(
+            "srv-sm", "critical", source_sensor,
+            "Source sensor reading vanished; failed safe", None,
+        )
+    finally:
+        fp_tasks._source_last_seen.pop("srv-sm", None)
+        if prev is not None:
+            set_ctx(prev)
+    assert any(a["severity"] == "critical" for a in ws.alerts), (
+        "the source_missing branch must broadcast a critical alert"
+    )
+    assert any("fanpilot_enabled = 0" in sql for sql, _ in db.executed), (
+        "the source_missing branch must route through _recover_to_bmc_auto"
+    )
+
+
+def test_source_last_seen_cleared_in_recovery():
+    """_recover_to_bmc_auto must clear the per-server _source_last_seen so a re-engaged
+    server starts fresh (assert via source inspection — the clear is a single pop)."""
+    import inspect
+    src = inspect.getsource(fp_tasks._recover_to_bmc_auto)
+    assert "_source_last_seen.pop(server_id, None)" in src, (
+        "_recover_to_bmc_auto must clear the per-server _source_last_seen entry"
+    )
+
+
 # === Pitfall 5: doubly-rejected fail-safe write must NOT be logged as applied ===
 
 

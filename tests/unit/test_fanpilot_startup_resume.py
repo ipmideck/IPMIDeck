@@ -91,18 +91,32 @@ class _FakeDB:
         self.commits += 1
 
 
+class _FakeWS:
+    """Records broadcast_alert calls (mirrors test_fanpilot_readback._FakeWS)."""
+
+    def __init__(self) -> None:
+        self.alerts: list[dict] = []
+
+    async def broadcast_alert(self, server_id, severity, sensor, message, value):
+        self.alerts.append({"server_id": server_id, "severity": severity, "value": value})
+
+
 class _FakeAuth:
     def get_encryption_key(self) -> bytes:
         return b"x" * 32
 
 
-def _install(db: _FakeDB, ipmi: _FakeIPMI, monkeypatch):
-    """Install a fake ctx + monkeypatch call-time imports. Returns prev_ctx for restore."""
+def _install(db: _FakeDB, ipmi: _FakeIPMI, monkeypatch, ws=None):
+    """Install a fake ctx + monkeypatch call-time imports. Returns prev_ctx for restore.
+
+    INFO-6: ws defaults to None so the existing resume tests (which never hit the rejected
+    branch) keep ctx.ws=None byte-for-byte; the C9 test passes ws=_FakeWS() to record alerts.
+    """
     try:
         prev_ctx = get_ctx()
     except Exception:
         prev_ctx = None
-    set_ctx(ModuleContext(db=db, ipmi=ipmi, ws=None, config=None))
+    set_ctx(ModuleContext(db=db, ipmi=ipmi, ws=ws, config=None))
     monkeypatch.setattr(main_mod, "auth", _FakeAuth())
     monkeypatch.setattr(
         crypto_mod, "decrypt", lambda token, key: "u" if "user" in token else "p"
@@ -141,8 +155,8 @@ def _fanpilot_row(server_id: str = "srv-2") -> dict:
     }
 
 
-async def _run_resume(monkeypatch, db: _FakeDB, ipmi: _FakeIPMI):
-    prev_ctx = _install(db, ipmi, monkeypatch)
+async def _run_resume(monkeypatch, db: _FakeDB, ipmi: _FakeIPMI, ws=None):
+    prev_ctx = _install(db, ipmi, monkeypatch, ws=ws)
     ctx = get_ctx()
     try:
         await fp_tasks._startup_state_resume(ctx)
@@ -211,6 +225,37 @@ async def test_resume_rejected_write_not_claimed_success(monkeypatch):
     await _run_resume(monkeypatch, db, ipmi)
 
     # The write was attempted but rejected — cache must NOT show a resumed manual @ 70.
+    state = fp_tasks.get_last_state("srv-rej")
+    assert not (state["mode"] == "manual" and state["speed_pct"] == 70)
+
+
+async def test_resume_rejected_routes_recovery_and_alert(monkeypatch):
+    """C9: a rejected manual resume FAILS SAFE — recovery + critical alert, not log-only.
+
+    A rejected set_fan_speed on the resume path must route through
+    _recover_to_bmc_auto(reason='startup_resume_rejected') (persisting fanpilot_enabled=0)
+    AND fire a critical broadcast_alert. Before the fix only logger.warning runs -> no
+    UPDATE, no alert -> RED.
+    """
+    last_alive = _iso(datetime.utcnow() - timedelta(seconds=30))
+    rejected = FanWriteResult(False, "rejected", "d4", "rsp=0xd4: Insufficient privilege level")
+    db = _FakeDB(
+        config={"fanpilot.last_alive_at": last_alive},
+        intent_rows=[_manual_row(server_id="srv-rej", speed=70)],
+    )
+    ipmi = _FakeIPMI(speed_result=rejected)
+    ws = _FakeWS()
+    await _run_resume(monkeypatch, db, ipmi, ws=ws)
+
+    # Recovery fired: the primitive persists fanpilot_enabled=0.
+    assert any("fanpilot_enabled = 0" in sql for sql, _ in db.executed), (
+        "a rejected resume must route through _recover_to_bmc_auto (fanpilot_enabled=0)"
+    )
+    # A critical alert fired (not log-only).
+    assert any(a["severity"] == "critical" for a in ws.alerts), (
+        "a rejected resume must broadcast a critical alert"
+    )
+    # And the cache must NOT show a resumed manual @ 70 (no false success).
     state = fp_tasks.get_last_state("srv-rej")
     assert not (state["mode"] == "manual" and state["speed_pct"] == 70)
 
