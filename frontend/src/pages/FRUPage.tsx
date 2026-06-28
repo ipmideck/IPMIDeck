@@ -133,39 +133,49 @@ export default function FRUPage() {
             />
           )
         ) : (
-          <div className="space-y-6">
-            {/* System overview — the headline specs, pulled from the system-board FRU device. */}
+          // Earned hierarchy (D-06): a max-width frame lets the warm canvas border the
+          // lifted surfaces; no new color, only the inherited blueprint layers + weight.
+          <div className="mx-auto max-w-6xl space-y-6">
+            {/* System overview — the headline specs, pulled from the system-board FRU device.
+                The lead card: elevated off the canvas (shadow-sm) so it reads as primary. */}
             {summary && (summary.model || summary.vendor || summary.serviceTag) && (
-              <div className="rounded-lg border border-border bg-card p-5">
+              <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
                 <div className="flex items-start gap-4">
                   <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10">
                     <Server className="h-6 w-6 text-primary" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <h2 className="text-lg font-bold leading-tight">{summary.model || t("fru.unknownSystem")}</h2>
+                    {/* Value-first: the system model is the lead element, foreground + bold. */}
+                    <h2 className="text-xl font-bold leading-tight text-foreground">{summary.model || t("fru.unknownSystem")}</h2>
                     <p className="text-sm text-muted-foreground">{summary.vendor}</p>
-                    <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-xs">
+                    <div className="mt-4 flex flex-wrap gap-x-8 gap-y-3 text-xs">
                       {summary.serviceTag && (
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-muted-foreground">{t("fru.serviceTag")}</span>
-                          <span className="font-mono font-medium">{summary.serviceTag}</span>
-                          <button onClick={() => copyToClipboard(summary.serviceTag!)} className="rounded p-0.5 hover:bg-muted">
-                            <Copy className="h-3 w-3 text-muted-foreground" />
-                          </button>
+                        // Stacked label-over-value: the muted field name is secondary,
+                        // the mono value is the foreground lead (value-first, D-06).
+                        <div className="flex flex-col gap-0.5">
+                          <span className="uppercase tracking-wide text-[10px] font-medium text-muted-foreground">{t("fru.serviceTag")}</span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-mono text-sm font-semibold text-foreground">{summary.serviceTag}</span>
+                            <button onClick={() => copyToClipboard(summary.serviceTag!)} className="rounded p-0.5 hover:bg-muted">
+                              <Copy className="h-3 w-3 text-muted-foreground" />
+                            </button>
+                          </div>
                         </div>
                       )}
                       {summary.assetTag && (
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-muted-foreground">{t("fru.assetTag")}</span>
-                          <span className="font-mono font-medium">{summary.assetTag}</span>
+                        <div className="flex flex-col gap-0.5">
+                          <span className="uppercase tracking-wide text-[10px] font-medium text-muted-foreground">{t("fru.assetTag")}</span>
+                          <span className="font-mono text-sm font-semibold text-foreground">{summary.assetTag}</span>
                         </div>
                       )}
-                      <div className="flex items-center gap-1.5">
-                        <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
-                        <span className="text-muted-foreground">{t("fru.cpusDetected")}</span>
+                      <div className="flex flex-col gap-0.5">
+                        <span className="flex items-center gap-1 uppercase tracking-wide text-[10px] font-medium text-muted-foreground">
+                          <Cpu className="h-3 w-3" />
+                          {t("fru.cpusDetected")}
+                        </span>
                         {/* Inferred from live sensor readings — when offline that count
                             would be the LAST seen, so we render an em dash instead. */}
-                        <span className="font-medium">{online && cpuCount > 0 ? cpuCount : "—"}</span>
+                        <span className="text-sm font-semibold text-foreground">{online && cpuCount > 0 ? cpuCount : "—"}</span>
                       </div>
                     </div>
                   </div>
@@ -181,17 +191,22 @@ export default function FRUPage() {
               </p>
             </div>
 
-            {/* All FRU devices, with cleaned/friendly section names. */}
+            {/* All FRU devices, with cleaned/friendly section names. Each card earns
+                hierarchy via the inherited blueprint layers (D-06): the card surface lifts
+                off the canvas (shadow-sm + hover), a surface-2 header band carries a LEGIBLE
+                (non-muted) device title as the scan anchor, and field VALUES lead each row. */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
               {Object.entries(sections).map(([section, fields]) => (
-                <div key={section} className="rounded-lg border border-border bg-card p-5">
-                  <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">{cleanSection(section, t)}</h3>
-                  <div className="space-y-2">
+                <div key={section} className="overflow-hidden rounded-lg border border-border bg-card shadow-sm transition-shadow hover:shadow-md">
+                  <div className="border-b border-border bg-muted px-4 py-2.5">
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-foreground">{cleanSection(section, t)}</h3>
+                  </div>
+                  <div className="divide-y divide-border">
                     {fields.map((f, i) => (
-                      <div key={i} className="flex items-center justify-between gap-4">
-                        <span className="text-xs text-muted-foreground truncate">{f.field}</span>
+                      <div key={i} className="flex items-center justify-between gap-4 px-4 py-2">
+                        <span className="text-[11px] text-muted-foreground truncate">{f.field}</span>
                         <div className="flex items-center gap-1">
-                          <span className="font-mono text-xs font-medium truncate max-w-[180px]">{f.value}</span>
+                          <span className="font-mono text-xs font-semibold text-foreground truncate max-w-[180px]">{f.value}</span>
                           {(f.field.toLowerCase().includes("serial") || f.field.toLowerCase().includes("part")) && (
                             <button onClick={() => copyToClipboard(f.value)} className="rounded p-0.5 hover:bg-muted">
                               <Copy className="h-3 w-3 text-muted-foreground" />
