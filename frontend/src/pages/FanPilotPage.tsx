@@ -110,13 +110,17 @@ const PRESET_ICONS: Record<string, React.ReactNode> = {
 /*  Temperature colors — fixed bands shared across editor + chips      */
 /* ------------------------------------------------------------------ */
 
-// Fixed bands: <50 green, <65 yellow, <80 orange, >=80 red. Used by the curve gradient,
-// the live-temp indicator, the draggable points, and the top temperature chips.
+// Fixed thermal bands: cool <50 / warm <65 / hot <80 / critical >=80. The continuous
+// `base`/`dark` hex feed the SVG curve gradient + live-temp indicator + control points
+// (a deliberate 4-step thermal scale that reads as temperature, not generic status).
+// The CHIP classes are routed onto the foundation semantic tokens (D-04 / Consistency,
+// matching the Dashboard pilot's drop of hardcoded emerald/yellow/red): cool→success,
+// warm/hot→warning, critical→danger — so the strip coheres with the rest of the app.
 const TEMP_BANDS = [
-  { upTo: 50, base: "#22c55e", dark: "#16a34a", chip: "bg-emerald-500/15 text-emerald-500 border-emerald-500/30" },
-  { upTo: 65, base: "#eab308", dark: "#ca8a04", chip: "bg-yellow-500/15 text-yellow-500 border-yellow-500/30" },
-  { upTo: 80, base: "#f97316", dark: "#ea580c", chip: "bg-orange-500/15 text-orange-500 border-orange-500/30" },
-  { upTo: Infinity, base: "#ef4444", dark: "#dc2626", chip: "bg-red-500/15 text-red-500 border-red-500/30" },
+  { upTo: 50, base: "#22c55e", dark: "#16a34a", chip: "bg-[var(--color-success)]/15 text-[var(--color-success)] border-[var(--color-success)]/30" },
+  { upTo: 65, base: "#eab308", dark: "#ca8a04", chip: "bg-[var(--color-warning)]/15 text-[var(--color-warning)] border-[var(--color-warning)]/30" },
+  { upTo: 80, base: "#f97316", dark: "#ea580c", chip: "bg-[var(--color-warning)]/20 text-[var(--color-warning)] border-[var(--color-warning)]/40" },
+  { upTo: Infinity, base: "#ef4444", dark: "#dc2626", chip: "bg-[var(--color-danger)]/15 text-[var(--color-danger)] border-[var(--color-danger)]/30" },
 ] as const;
 
 function tempBand(t: number) {
@@ -973,8 +977,11 @@ export default function FanPilotPage() {
       <Header title={t("nav.fanpilot")}>
         {online && status && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Fan className="h-3.5 w-3.5" />
-            <span>
+            {/* Cyan cooling motif (D-06): the live fan-speed readout is a thermal
+                affordance, so the fan glyph carries the reserved cooling color and
+                the value leads in foreground weight. */}
+            <Fan className="h-3.5 w-3.5 text-[var(--color-cyan-ink)]" aria-hidden />
+            <span className="font-mono font-semibold text-foreground">
               {status.current_speed_pct != null ? `${status.current_speed_pct}%` : "--"}
             </span>
           </div>
@@ -1022,9 +1029,16 @@ export default function FanPilotPage() {
                   <div className="min-w-0 flex-1">
                     <div className="flex min-w-0 items-center gap-1.5">
                       <span className="truncate font-medium text-[13px]">{p.name}</span>
+                      {/* Active-profile pill: cyan cooling motif (D-06) + a non-color
+                          companion — the spinning Fan glyph + translated "Active" text —
+                          so the live profile is legible to colorblind operators (D-04). */}
                       {isActive && (
-                        <span className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-500">
-                          <span className="h-1 w-1 rounded-full bg-emerald-500" />
+                        <span className="flex shrink-0 items-center gap-1 rounded-full border border-[var(--color-cyan)]/30 bg-[var(--color-cyan)]/15 px-1.5 py-0.5 text-[9px] font-semibold text-[var(--color-cyan-ink)]">
+                          <Fan
+                            className="h-2 w-2 animate-spin motion-reduce:animate-none"
+                            style={{ animationDuration: "3s" }}
+                            aria-hidden
+                          />
                           {t("fanpilot.active")}
                         </span>
                       )}
@@ -1097,8 +1111,11 @@ export default function FanPilotPage() {
                 {/* Curve editor */}
                 <div className="flex-1 flex flex-col min-w-0">
                   <div className="mb-3 flex items-start justify-between gap-3">
+                    {/* Value-first hierarchy (D-06): the profile name leads as the
+                        largest/boldest element so the editor's subject is obvious; the
+                        hint recedes below it. */}
                     <div className="min-w-0">
-                      <h2 className="text-sm font-semibold">{editedProfile.name}</h2>
+                      <h2 className="truncate text-lg font-bold leading-tight text-foreground">{editedProfile.name}</h2>
                       <p className="text-xs text-muted-foreground">
                         {t("fanpilot.editorHint")}
                       </p>
@@ -1146,7 +1163,10 @@ export default function FanPilotPage() {
                       </div>
                     )}
                   </div>
-                  <div className="flex-1 rounded-lg border border-border bg-card p-3 min-h-[300px]">
+                  {/* Editor canvas is the lead surface — lifted off the page canvas
+                      with a real shadow (earned hierarchy, D-06) so the curve reads as
+                      the focal element vs the flat control panels around it. */}
+                  <div className="flex-1 rounded-lg border border-border bg-card p-3 min-h-[300px] shadow-md">
                     <CurveEditor
                       points={editedProfile.curve_points}
                       onChange={(pts) =>
@@ -1177,10 +1197,15 @@ export default function FanPilotPage() {
 
                 {/* ---- Right panel: Profile settings ---- */}
                 <div className="w-60 shrink-0 space-y-4">
-                  <div className="rounded-lg border border-border bg-card p-4 space-y-4">
-                    <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  {/* Settings is a secondary surface: a card lifted off the canvas with a
+                      tinted surface-2 header band (earned hierarchy, D-06) so it reads as
+                      a distinct control panel beside the lead editor canvas — not a flat
+                      same-surface sibling. */}
+                  <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+                    <h3 className="border-b border-border bg-muted px-4 py-2.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                       {t("fanpilot.profileSettings")}
                     </h3>
+                    <div className="space-y-4 p-4">
 
                     {/* Source sensor — real sensors from this server, with the live value
                         inline so the user sees what the curve is actually reacting to. */}
@@ -1190,7 +1215,10 @@ export default function FanPilotPage() {
                         {/* Hide the inline live reading when offline so we don't contradict
                             the CurveEditor (which already suppresses its live indicator). */}
                         {online && currentTemp !== null && (
-                          <span className="font-mono text-[11px] text-foreground">
+                          <span className="inline-flex items-center gap-1 font-mono text-[11px] font-semibold text-foreground">
+                            {/* Live thermal reading driving the curve — cyan cooling
+                                cue (D-06) + a non-color thermometer companion (D-04). */}
+                            <Thermometer className="h-3 w-3 text-[var(--color-cyan-ink)]" aria-hidden />
                             {currentTemp}°C
                           </span>
                         )}
@@ -1351,9 +1379,9 @@ export default function FanPilotPage() {
                             {t("fanpilot.resetToDefault")}
                           </button>
                         ) : (
-                          <div className="rounded-md border border-red-500/30 bg-red-500/5 p-2.5">
+                          <div className="rounded-md border border-[var(--color-danger)]/30 bg-[var(--color-danger)]/5 p-2.5">
                             <div className="flex items-start gap-1.5">
-                              <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-red-500" />
+                              <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-[var(--color-danger)]" />
                               <p className="text-[11px] leading-tight text-muted-foreground">
                                 <Trans
                                   i18nKey="fanpilot.resetConfirm"
@@ -1371,7 +1399,7 @@ export default function FanPilotPage() {
                               </button>
                               <button
                                 onClick={handleReset}
-                                className="flex-1 rounded-md bg-red-500 px-2 py-1 text-[11px] font-semibold text-white hover:bg-red-600"
+                                className="flex-1 rounded-md bg-[var(--color-danger)] px-2 py-1 text-[11px] font-semibold text-white hover:opacity-90 transition-opacity"
                               >
                                 {t("fanpilot.reset")}
                               </button>
@@ -1389,6 +1417,7 @@ export default function FanPilotPage() {
                           {t("fanpilot.delete")}
                         </button>
                       )}
+                    </div>
                     </div>
                   </div>
                 </div>
@@ -1452,7 +1481,12 @@ export default function FanPilotPage() {
                   surface a plain "Disconnected" instead of the last-known mode. */}
               <div className="flex min-w-0 items-center gap-2 text-xs">
                 {!online && (
-                  <span className="text-red-500/80">{t("fanpilot.disconnectedStatus")}</span>
+                  <span className="flex items-center gap-1.5 text-[var(--color-danger)]">
+                    {/* Offline state pairs the danger token with a non-color companion
+                        (the alert glyph + text) so it reads without relying on hue (D-04). */}
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                    {t("fanpilot.disconnectedStatus")}
+                  </span>
                 )}
                 {online && status?.mode === "auto" && (
                   <span className="text-muted-foreground">{t("fanpilot.bmcControlling")}</span>
@@ -1467,9 +1501,16 @@ export default function FanPilotPage() {
                 )}
                 {online && status?.mode === "fanpilot" && (
                   <div className="flex items-center gap-1.5">
+                    {/* The active-FanPilot fan carries the cyan cooling motif (D-06,
+                        was generic blue) and respects prefers-reduced-motion: the
+                        rotation is the one animation on this page, so the
+                        component-scoped `motion-reduce:animate-none` makes it a static
+                        cyan fan for motion-sensitive users (D-05, PRODUCT.md a11y) —
+                        state stays legible (cyan + label + %) without the spin. */}
                     <Fan
-                      className="h-3.5 w-3.5 animate-spin text-blue-500"
+                      className="h-3.5 w-3.5 animate-spin text-[var(--color-cyan-ink)] motion-reduce:animate-none"
                       style={{ animationDuration: "3s" }}
+                      aria-hidden
                     />
                     <span className="text-muted-foreground">{t("fanpilot.profileLabel")}</span>
                     <span className="font-medium text-foreground">
@@ -1484,7 +1525,10 @@ export default function FanPilotPage() {
               </div>
             </div>
 
-            {/* Manual speed control — full row, only while in manual mode */}
+            {/* Manual speed control — full row, only while in manual mode.
+                The slider thumb carries the cyan cooling motif (D-06): manual fan
+                speed is a thermal/cooling affordance, so the thumb reads cyan rather
+                than the navy primary reserved for actions. */}
             {status?.mode === "manual" && (
               <div className="mt-3 flex items-center gap-3">
                 <span className="text-xs text-muted-foreground">{t("fanpilot.setSpeed")}</span>
@@ -1494,7 +1538,7 @@ export default function FanPilotPage() {
                   max={100}
                   value={manualSpeed}
                   onChange={(e) => setManualSpeed(Number(e.target.value))}
-                  className="h-1.5 max-w-xs flex-1 cursor-pointer appearance-none rounded-full bg-muted [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:cursor-grab"
+                  className="h-1.5 max-w-xs flex-1 cursor-pointer appearance-none rounded-full bg-muted [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--color-cyan)] [&::-webkit-slider-thumb]:cursor-grab"
                 />
                 <span className="w-10 text-right text-xs font-mono font-medium">
                   {manualSpeed}%
