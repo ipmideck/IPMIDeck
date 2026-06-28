@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { get, post } from "@/api/client";
 import { useAuthStore } from "@/stores/auth-store";
 import { bootstrapAppData } from "@/lib/bootstrap";
-import { Lock, LogIn, Loader2 } from "lucide-react";
+import { AlertCircle, LogIn, Loader2, ServerCog } from "lucide-react";
 
 export default function LoginPage() {
   const { t } = useTranslation();
@@ -71,47 +71,90 @@ export default function LoginPage() {
     }
   }
 
+  // Shared field styling: lift inputs onto the surface, hit --control-min (D-05), and
+  // let the repo-wide :focus-visible ring land (no focus:outline-none override).
+  const fieldClass =
+    "w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground " +
+    "placeholder:text-muted-foreground min-h-[var(--control-min)] transition-colors " +
+    "hover:border-muted-foreground/40";
+
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-background text-foreground">
-      <div className="w-full max-w-sm px-6">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6 py-12 text-foreground">
+      <div className="w-full max-w-sm">
+        {/* Brand presence (D-06): navy brand mark + wordmark tie the login to the app
+         * shell ("IPMIDeck" in the Sidebar) and the marketing site. No new color. */}
         <div className="flex flex-col items-center text-center">
-          <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
-            <Lock className="h-8 w-8 text-primary" />
+          <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm">
+            <ServerCog className="h-7 w-7" aria-hidden="true" />
           </div>
-          <h1 className="text-xl font-bold">{t("login.title")}</h1>
-          <p className="mt-2 max-w-sm text-sm text-muted-foreground">
-            {t("login.subtitle")}
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+            IPMIDeck
           </p>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight text-foreground">
+            {t("login.title")}
+          </h1>
+          <p className="mt-2 text-sm text-muted-foreground">{t("login.subtitle")}</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="mt-6 w-full space-y-3">
-          <input
-            type="text"
-            placeholder={t("login.usernamePlaceholder")}
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            autoComplete="username"
-            autoFocus
-            className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-          />
-          <input
-            type="password"
-            placeholder={t("login.passwordPlaceholder")}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-            className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-          />
-          {error && <p className="text-xs text-red-500">{error}</p>}
+        {/* The form lives on a lifted card surface so it reads as the focused task
+         * (earned hierarchy, D-06) rather than floating on the canvas. */}
+        <form
+          onSubmit={handleSubmit}
+          className="mt-7 w-full space-y-4 rounded-xl border border-border bg-card p-6 shadow-sm"
+        >
+          <div className="space-y-1.5">
+            <label htmlFor="login-username" className="text-xs font-medium text-foreground">
+              {t("login.usernamePlaceholder")}
+            </label>
+            <input
+              id="login-username"
+              type="text"
+              placeholder={t("login.usernamePlaceholder")}
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoComplete="username"
+              autoFocus
+              className={fieldClass}
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label htmlFor="login-password" className="text-xs font-medium text-foreground">
+              {t("login.passwordPlaceholder")}
+            </label>
+            <input
+              id="login-password"
+              type="password"
+              placeholder={t("login.passwordPlaceholder")}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              className={fieldClass}
+            />
+          </div>
+
+          {/* Error: triple-encoded (D-04) — semantic --color-danger token + AlertCircle
+           * icon companion + text, announced via role="alert" for screen readers.
+           * Message text is the backend-supplied generic copy (no enumeration). */}
+          {error && (
+            <p
+              role="alert"
+              className="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
+            >
+              <AlertCircle className="mt-px h-4 w-4 shrink-0" aria-hidden="true" />
+              <span>{error}</span>
+            </p>
+          )}
+
           <button
             type="submit"
             disabled={loading}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-5 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground min-h-[var(--control-min)] hover:bg-primary/90 transition-colors disabled:opacity-50"
           >
             {loading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
             ) : (
-              <LogIn className="h-4 w-4" />
+              <LogIn className="h-4 w-4" aria-hidden="true" />
             )}
             {t("login.signIn")}
           </button>
