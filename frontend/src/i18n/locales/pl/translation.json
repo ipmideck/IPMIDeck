@@ -460,6 +460,11 @@
   "modules": {
     "title": "Moduły",
     "intro": "Włączaj lub wyłączaj moduły, aby dostosować panel. Wyłączenie natychmiast zatrzymuje zadania modułu w tle; jego trasy API są usuwane przy następnym ponownym uruchomieniu.",
+    "summary": "Włączono {{enabled}} z {{total}}",
+    "statusEnabled": "Włączony",
+    "statusDisabled": "Wyłączony",
+    "restartRequired": "Wymagany restart",
+    "toggleAria": "{{name}} — obecnie {{state}}. Przełącz.",
     "dependsOn": "Zależy od: {{deps}}",
     "enabledRestart": "{{name}} włączony — wymagane ponowne uruchomienie, aby go w pełni aktywować.",
     "enabled": "{{name}} włączony",

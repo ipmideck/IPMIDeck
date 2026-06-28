@@ -460,6 +460,11 @@
   "modules": {
     "title": "模块",
     "intro": "启用或禁用模块以自定义您的仪表盘。禁用会立即停止模块的后台任务；其 API 路由将在下次重启时移除。",
+    "summary": "{{total}} 个中已启用 {{enabled}} 个",
+    "statusEnabled": "已启用",
+    "statusDisabled": "已禁用",
+    "restartRequired": "需要重启",
+    "toggleAria": "{{name}} — 当前{{state}}。切换。",
     "dependsOn": "依赖于：{{deps}}",
     "enabledRestart": "{{name}} 已启用 — 需要重启才能完全激活。",
     "enabled": "{{name}} 已启用",

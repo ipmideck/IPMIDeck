@@ -460,6 +460,11 @@
   "modules": {
     "title": "モジュール",
     "intro": "モジュールを有効または無効にしてダッシュボードをカスタマイズします。無効にするとモジュールのバックグラウンドタスクが直ちに停止し、API ルートは次回の再起動時に削除されます。",
+    "summary": "{{total}} 件中 {{enabled}} 件が有効",
+    "statusEnabled": "有効",
+    "statusDisabled": "無効",
+    "restartRequired": "再起動が必要",
+    "toggleAria": "{{name}} — 現在 {{state}}。切り替え。",
     "dependsOn": "依存先：{{deps}}",
     "enabledRestart": "{{name}} を有効にしました — 完全に有効化するには再起動が必要です。",
     "enabled": "{{name}} を有効にしました",

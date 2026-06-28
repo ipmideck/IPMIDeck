@@ -460,6 +460,11 @@
   "modules": {
     "title": "모듈",
     "intro": "모듈을 활성화하거나 비활성화하여 대시보드를 사용자 지정하세요. 비활성화하면 모듈의 백그라운드 작업이 즉시 중지되며, API 경로는 다음 재시작 시 제거됩니다.",
+    "summary": "{{total}}개 중 {{enabled}}개 활성화됨",
+    "statusEnabled": "활성화됨",
+    "statusDisabled": "비활성화됨",
+    "restartRequired": "재시작 필요",
+    "toggleAria": "{{name}} — 현재 {{state}}. 전환.",
     "dependsOn": "종속 대상: {{deps}}",
     "enabledRestart": "{{name}}이(가) 활성화되었습니다 — 완전히 활성화하려면 재시작이 필요합니다.",
     "enabled": "{{name}}이(가) 활성화되었습니다",

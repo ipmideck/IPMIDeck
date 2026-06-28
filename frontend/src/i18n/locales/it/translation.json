@@ -460,6 +460,11 @@
   "modules": {
     "title": "Moduli",
     "intro": "Abilita o disabilita i moduli per personalizzare la dashboard. La disabilitazione ferma immediatamente le attività in background del modulo; le sue route API vengono rimosse al prossimo riavvio.",
+    "summary": "{{enabled}} di {{total}} attivati",
+    "statusEnabled": "Attivato",
+    "statusDisabled": "Disattivato",
+    "restartRequired": "Riavvio richiesto",
+    "toggleAria": "{{name}} — attualmente {{state}}. Attiva/disattiva.",
     "dependsOn": "Dipende da: {{deps}}",
     "enabledRestart": "{{name}} abilitato — è necessario riavviare per attivarlo completamente.",
     "enabled": "{{name}} abilitato",

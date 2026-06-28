@@ -460,6 +460,11 @@
   "modules": {
     "title": "Modules",
     "intro": "Schakel modules in of uit om je dashboard aan te passen. Uitschakelen stopt onmiddellijk de achtergrondtaken van een module; de API-routes worden bij de volgende herstart verwijderd.",
+    "summary": "{{enabled}} van {{total}} ingeschakeld",
+    "statusEnabled": "Ingeschakeld",
+    "statusDisabled": "Uitgeschakeld",
+    "restartRequired": "Herstart vereist",
+    "toggleAria": "{{name}} — momenteel {{state}}. Schakelen.",
     "dependsOn": "Afhankelijk van: {{deps}}",
     "enabledRestart": "{{name}} ingeschakeld — herstart vereist om het volledig te activeren.",
     "enabled": "{{name}} ingeschakeld",

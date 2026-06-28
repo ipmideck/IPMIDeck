@@ -460,6 +460,11 @@
   "modules": {
     "title": "Modules",
     "intro": "Enable or disable modules to customize your dashboard. Disabling stops a module's background tasks immediately; its API routes are removed on next restart.",
+    "summary": "{{enabled}} of {{total}} enabled",
+    "statusEnabled": "Enabled",
+    "statusDisabled": "Disabled",
+    "restartRequired": "Restart required",
+    "toggleAria": "{{name}} — currently {{state}}. Toggle.",
     "dependsOn": "Depends on: {{deps}}",
     "enabledRestart": "{{name}} enabled — restart required to fully activate it.",
     "enabled": "{{name}} enabled",

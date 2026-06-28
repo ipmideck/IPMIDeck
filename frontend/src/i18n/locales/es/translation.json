@@ -460,6 +460,11 @@
   "modules": {
     "title": "Módulos",
     "intro": "Activa o desactiva módulos para personalizar tu panel. Al desactivar, se detienen de inmediato las tareas en segundo plano del módulo; sus rutas de API se eliminan en el próximo reinicio.",
+    "summary": "{{enabled}} de {{total}} activados",
+    "statusEnabled": "Activado",
+    "statusDisabled": "Desactivado",
+    "restartRequired": "Reinicio necesario",
+    "toggleAria": "{{name}} — actualmente {{state}}. Alternar.",
     "dependsOn": "Depende de: {{deps}}",
     "enabledRestart": "{{name}} activado — se requiere reiniciar para activarlo por completo.",
     "enabled": "{{name}} activado",

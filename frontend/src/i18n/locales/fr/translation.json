@@ -460,6 +460,11 @@
   "modules": {
     "title": "Modules",
     "intro": "Activez ou désactivez les modules pour personnaliser votre tableau de bord. La désactivation arrête immédiatement les tâches en arrière-plan d'un module ; ses routes API sont supprimées au prochain redémarrage.",
+    "summary": "{{enabled}} sur {{total}} activés",
+    "statusEnabled": "Activé",
+    "statusDisabled": "Désactivé",
+    "restartRequired": "Redémarrage requis",
+    "toggleAria": "{{name}} — actuellement {{state}}. Basculer.",
     "dependsOn": "Dépend de : {{deps}}",
     "enabledRestart": "{{name}} activé — un redémarrage est nécessaire pour l'activer complètement.",
     "enabled": "{{name}} activé",

@@ -460,6 +460,11 @@
   "modules": {
     "title": "Module",
     "intro": "Aktiviere oder deaktiviere Module, um dein Dashboard anzupassen. Beim Deaktivieren werden die Hintergrundaufgaben eines Moduls sofort gestoppt; seine API-Routen werden beim nächsten Neustart entfernt.",
+    "summary": "{{enabled}} von {{total}} aktiviert",
+    "statusEnabled": "Aktiviert",
+    "statusDisabled": "Deaktiviert",
+    "restartRequired": "Neustart erforderlich",
+    "toggleAria": "{{name}} — aktuell {{state}}. Umschalten.",
     "dependsOn": "Abhängig von: {{deps}}",
     "enabledRestart": "{{name}} aktiviert — Neustart erforderlich, um es vollständig zu aktivieren.",
     "enabled": "{{name}} aktiviert",
