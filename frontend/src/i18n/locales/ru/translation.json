@@ -246,7 +246,9 @@
     "aria": {
       "editServer": "Изменить сервер",
       "testConnection": "Проверить соединение",
-      "deleteServer": "Удалить сервер"
+      "deleteServer": "Удалить сервер",
+      "serverOnline": "Сервер в сети",
+      "serverOffline": "Сервер не в сети"
     },
     "noServersTitle": "Серверы не настроены",
     "noServersDescription": "Добавьте сервер, чтобы начать мониторинг.",
@@ -373,7 +375,31 @@
     "costSaved": "Стоимость обновлена",
     "currencyChanged": "Валюта установлена на {{currency}}",
     "fanpilotVendorUnsupported": "FanPilot пока не поддерживает {{vendor}} — вентиляторы останутся на встроенном профиле BMC.",
-    "save": "Сохранить"
+    "save": "Сохранить",
+    "sections": {
+      "servers": "Серверы",
+      "security": "Безопасность",
+      "notifications": "Уведомления",
+      "energy": "Энергия",
+      "appearance": "Оформление",
+      "system": "Система",
+      "about": "О программе",
+      "serversDescription": "Управляйте подключениями BMC, учётными данными, тарифами и восстановлением управления вентиляторами.",
+      "serversConnectionsHint": "Добавляйте, изменяйте, проверяйте или удаляйте серверы, которыми управляет IPMIDeck.",
+      "securityDescription": "Определите, требует ли IPMIDeck вход в систему.",
+      "securityOn": "Включено",
+      "securityOff": "Отключено",
+      "notificationsDescription": "Получайте уведомления браузера о критических и предупреждающих событиях.",
+      "energyDescription": "Задайте валюту отображения и сбросьте счётчики энергии.",
+      "energyCurrencyHint": "Используется для отображения стоимости электроэнергии на панели.",
+      "appearanceDescription": "Выберите тему и язык интерфейса.",
+      "appearanceThemeHint": "Выберите светлую, тёмную или системную тему.",
+      "appearanceLanguageHint": "Смените язык интерфейса; он применяется сразу.",
+      "appearanceTourHint": "Повторите ознакомительный тур в любое время.",
+      "systemDescription": "Хранение данных, сеть/HTTPS, резервное копирование и восстановление.",
+      "aboutDescription": "Сведения о версии и проекте.",
+      "backToList": "Назад к настройкам"
+    }
   },
   "setup": {
     "welcomeTitle": "Добро пожаловать в IPMIDeck",

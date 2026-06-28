@@ -246,7 +246,9 @@
     "aria": {
       "editServer": "Editar servidor",
       "testConnection": "Testar conexão",
-      "deleteServer": "Excluir servidor"
+      "deleteServer": "Excluir servidor",
+      "serverOnline": "Servidor online",
+      "serverOffline": "Servidor offline"
     },
     "noServersTitle": "Nenhum servidor configurado",
     "noServersDescription": "Adicione um para começar a monitorar.",
@@ -373,7 +375,31 @@
     "costSaved": "Custo atualizado",
     "currencyChanged": "Moeda definida para {{currency}}",
     "fanpilotVendorUnsupported": "FanPilot ainda não suporta {{vendor}} — os ventiladores ficarão no perfil interno do BMC.",
-    "save": "Salvar"
+    "save": "Salvar",
+    "sections": {
+      "servers": "Servidores",
+      "security": "Segurança",
+      "notifications": "Notificações",
+      "energy": "Energia",
+      "appearance": "Aparência",
+      "system": "Sistema",
+      "about": "Sobre",
+      "serversDescription": "Gerencie suas conexões BMC, credenciais, tarifas e a recuperação do controle de ventoinhas.",
+      "serversConnectionsHint": "Adicione, edite, teste ou remova os servidores gerenciados pelo IPMIDeck.",
+      "securityDescription": "Defina se o IPMIDeck exige login.",
+      "securityOn": "Ativada",
+      "securityOff": "Desativada",
+      "notificationsDescription": "Receba alertas do navegador para eventos críticos e de aviso.",
+      "energyDescription": "Defina a moeda de exibição e redefina os contadores de energia.",
+      "energyCurrencyHint": "Usada para exibir os custos de eletricidade no painel.",
+      "appearanceDescription": "Escolha o tema e o idioma da interface.",
+      "appearanceThemeHint": "Escolha um tema claro, escuro ou conforme o sistema.",
+      "appearanceLanguageHint": "Altere o idioma da interface; é aplicado imediatamente.",
+      "appearanceTourHint": "Refaça o tour guiado de introdução quando quiser.",
+      "systemDescription": "Retenção de dados, rede/HTTPS e backup e restauração.",
+      "aboutDescription": "Informações de versão e do projeto.",
+      "backToList": "Voltar às configurações"
+    }
   },
   "setup": {
     "welcomeTitle": "Bem-vindo ao IPMIDeck",

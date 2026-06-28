@@ -246,7 +246,9 @@
     "aria": {
       "editServer": "Server bearbeiten",
       "testConnection": "Verbindung testen",
-      "deleteServer": "Server löschen"
+      "deleteServer": "Server löschen",
+      "serverOnline": "Server erreichbar",
+      "serverOffline": "Server nicht erreichbar"
     },
     "noServersTitle": "Keine Server konfiguriert",
     "noServersDescription": "Füge einen hinzu, um mit der Überwachung zu beginnen.",
@@ -373,7 +375,31 @@
     "costSaved": "Kosten aktualisiert",
     "currencyChanged": "Währung auf {{currency}} gesetzt",
     "fanpilotVendorUnsupported": "FanPilot unterstützt {{vendor}} noch nicht — Lüfter bleiben auf dem eingebauten Profil des BMC.",
-    "save": "Speichern"
+    "save": "Speichern",
+    "sections": {
+      "servers": "Server",
+      "security": "Sicherheit",
+      "notifications": "Benachrichtigungen",
+      "energy": "Energie",
+      "appearance": "Darstellung",
+      "system": "System",
+      "about": "Über",
+      "serversDescription": "Verwalten Sie Ihre BMC-Verbindungen, Anmeldedaten, Tarife und die Lüftersteuerungs-Wiederherstellung.",
+      "serversConnectionsHint": "Server hinzufügen, bearbeiten, testen oder entfernen, die IPMIDeck verwaltet.",
+      "securityDescription": "Legen Sie fest, ob IPMIDeck eine Anmeldung verlangt.",
+      "securityOn": "Aktiviert",
+      "securityOff": "Deaktiviert",
+      "notificationsDescription": "Browser-Hinweise für kritische und Warnereignisse erhalten.",
+      "energyDescription": "Anzeigewährung festlegen und Energiezähler zurücksetzen.",
+      "energyCurrencyHint": "Wird zur Anzeige der Stromkosten im Dashboard verwendet.",
+      "appearanceDescription": "Wählen Sie das Design und die Oberflächensprache.",
+      "appearanceThemeHint": "Helles, dunkles oder systemabhängiges Design wählen.",
+      "appearanceLanguageHint": "Oberflächensprache wechseln; sie wird sofort übernommen.",
+      "appearanceTourHint": "Die geführte Einführungstour jederzeit wiederholen.",
+      "systemDescription": "Datenaufbewahrung, Netzwerk/HTTPS sowie Sicherung & Wiederherstellung.",
+      "aboutDescription": "Versions- und Projektinformationen.",
+      "backToList": "Zurück zu den Einstellungen"
+    }
   },
   "setup": {
     "welcomeTitle": "Willkommen bei IPMIDeck",

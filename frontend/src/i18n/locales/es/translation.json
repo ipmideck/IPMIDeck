@@ -246,7 +246,9 @@
     "aria": {
       "editServer": "Editar servidor",
       "testConnection": "Probar conexión",
-      "deleteServer": "Eliminar servidor"
+      "deleteServer": "Eliminar servidor",
+      "serverOnline": "Servidor en línea",
+      "serverOffline": "Servidor fuera de línea"
     },
     "noServersTitle": "No hay servidores configurados",
     "noServersDescription": "Añade uno para empezar a monitorizar.",
@@ -373,7 +375,31 @@
     "costSaved": "Coste actualizado",
     "currencyChanged": "Moneda establecida en {{currency}}",
     "fanpilotVendorUnsupported": "FanPilot aún no admite {{vendor}} — los ventiladores se quedarán en el perfil integrado del BMC.",
-    "save": "Guardar"
+    "save": "Guardar",
+    "sections": {
+      "servers": "Servidores",
+      "security": "Seguridad",
+      "notifications": "Notificaciones",
+      "energy": "Energía",
+      "appearance": "Apariencia",
+      "system": "Sistema",
+      "about": "Acerca de",
+      "serversDescription": "Gestione sus conexiones BMC, credenciales, tarifas y la recuperación del control de ventiladores.",
+      "serversConnectionsHint": "Añada, edite, pruebe o elimine los servidores que gestiona IPMIDeck.",
+      "securityDescription": "Controle si IPMIDeck requiere iniciar sesión.",
+      "securityOn": "Activado",
+      "securityOff": "Desactivado",
+      "notificationsDescription": "Reciba alertas del navegador para eventos críticos y de advertencia.",
+      "energyDescription": "Defina la moneda de visualización y restablezca los contadores de energía.",
+      "energyCurrencyHint": "Se usa para mostrar los costes de electricidad en el panel.",
+      "appearanceDescription": "Elija el tema y el idioma de la interfaz.",
+      "appearanceThemeHint": "Seleccione un tema claro, oscuro o según el sistema.",
+      "appearanceLanguageHint": "Cambie el idioma de la interfaz; se aplica de inmediato.",
+      "appearanceTourHint": "Repita el recorrido guiado de bienvenida cuando quiera.",
+      "systemDescription": "Retención de datos, red/HTTPS y copia de seguridad y restauración.",
+      "aboutDescription": "Información de versión y del proyecto.",
+      "backToList": "Volver a los ajustes"
+    }
   },
   "setup": {
     "welcomeTitle": "Bienvenido a IPMIDeck",

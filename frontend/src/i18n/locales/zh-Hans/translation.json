@@ -246,7 +246,9 @@
     "aria": {
       "editServer": "编辑服务器",
       "testConnection": "测试连接",
-      "deleteServer": "删除服务器"
+      "deleteServer": "删除服务器",
+      "serverOnline": "服务器在线",
+      "serverOffline": "服务器离线"
     },
     "noServersTitle": "未配置服务器",
     "noServersDescription": "添加一个以开始监控。",
@@ -373,7 +375,31 @@
     "costSaved": "成本已更新",
     "currencyChanged": "货币已设为 {{currency}}",
     "fanpilotVendorUnsupported": "FanPilot 暂不支持 {{vendor}}——风扇将保持在 BMC 内置的配置文件上。",
-    "save": "保存"
+    "save": "保存",
+    "sections": {
+      "servers": "服务器",
+      "security": "安全",
+      "notifications": "通知",
+      "energy": "能耗",
+      "appearance": "外观",
+      "system": "系统",
+      "about": "关于",
+      "serversDescription": "管理您的 BMC 连接、凭据、电价以及风扇控制恢复。",
+      "serversConnectionsHint": "添加、编辑、测试或移除 IPMIDeck 管理的服务器。",
+      "securityDescription": "设置 IPMIDeck 是否需要登录。",
+      "securityOn": "已启用",
+      "securityOff": "已禁用",
+      "notificationsDescription": "针对严重和警告事件接收浏览器提醒。",
+      "energyDescription": "设置显示货币并重置能耗计数器。",
+      "energyCurrencyHint": "用于在仪表板中显示电费。",
+      "appearanceDescription": "选择主题和界面语言。",
+      "appearanceThemeHint": "选择浅色、深色或跟随系统的主题。",
+      "appearanceLanguageHint": "切换界面语言；立即生效。",
+      "appearanceTourHint": "随时重新播放引导教程。",
+      "systemDescription": "数据保留、网络/HTTPS 以及备份与恢复。",
+      "aboutDescription": "版本与项目信息。",
+      "backToList": "返回设置"
+    }
   },
   "setup": {
     "welcomeTitle": "欢迎使用 IPMIDeck",

@@ -246,7 +246,9 @@
     "aria": {
       "editServer": "서버 편집",
       "testConnection": "연결 테스트",
-      "deleteServer": "서버 삭제"
+      "deleteServer": "서버 삭제",
+      "serverOnline": "서버 온라인",
+      "serverOffline": "서버 오프라인"
     },
     "noServersTitle": "구성된 서버가 없습니다",
     "noServersDescription": "모니터링을 시작하려면 하나 추가하세요.",
@@ -373,7 +375,31 @@
     "costSaved": "비용이 업데이트되었습니다",
     "currencyChanged": "통화가 {{currency}}(으)로 설정되었습니다",
     "fanpilotVendorUnsupported": "FanPilot은 아직 {{vendor}}을(를) 지원하지 않습니다 — 팬은 BMC의 내장 프로파일로 유지됩니다.",
-    "save": "저장"
+    "save": "저장",
+    "sections": {
+      "servers": "서버",
+      "security": "보안",
+      "notifications": "알림",
+      "energy": "에너지",
+      "appearance": "모양",
+      "system": "시스템",
+      "about": "정보",
+      "serversDescription": "BMC 연결, 자격 증명, 요금 및 팬 제어 복구를 관리합니다.",
+      "serversConnectionsHint": "IPMIDeck가 관리하는 서버를 추가, 편집, 테스트 또는 제거합니다.",
+      "securityDescription": "IPMIDeck에서 로그인을 요구할지 설정합니다.",
+      "securityOn": "사용",
+      "securityOff": "사용 안 함",
+      "notificationsDescription": "심각 및 경고 이벤트에 대한 브라우저 알림을 받습니다.",
+      "energyDescription": "표시 통화를 설정하고 에너지 카운터를 재설정합니다.",
+      "energyCurrencyHint": "대시보드에서 전기 요금을 표시하는 데 사용됩니다.",
+      "appearanceDescription": "테마와 인터페이스 언어를 선택합니다.",
+      "appearanceThemeHint": "밝게, 어둡게 또는 시스템 연동 테마를 선택합니다.",
+      "appearanceLanguageHint": "인터페이스 언어를 전환합니다. 즉시 적용됩니다.",
+      "appearanceTourHint": "가이드 투어를 언제든지 다시 재생합니다.",
+      "systemDescription": "데이터 보존, 네트워크/HTTPS, 백업 및 복원.",
+      "aboutDescription": "버전 및 프로젝트 정보.",
+      "backToList": "설정으로 돌아가기"
+    }
   },
   "setup": {
     "welcomeTitle": "IPMIDeck에 오신 것을 환영합니다",

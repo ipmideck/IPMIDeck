@@ -246,7 +246,9 @@
     "aria": {
       "editServer": "Edit server",
       "testConnection": "Test connection",
-      "deleteServer": "Delete server"
+      "deleteServer": "Delete server",
+      "serverOnline": "Server online",
+      "serverOffline": "Server offline"
     },
     "noServersTitle": "No servers configured",
     "noServersDescription": "Add one to start monitoring.",
@@ -373,7 +375,31 @@
     "costSaved": "Cost updated",
     "currencyChanged": "Currency set to {{currency}}",
     "fanpilotVendorUnsupported": "FanPilot doesn't support {{vendor}} yet — fans will stay on the BMC's built-in profile.",
-    "save": "Save"
+    "save": "Save",
+    "sections": {
+      "servers": "Servers",
+      "security": "Security",
+      "notifications": "Notifications",
+      "energy": "Energy",
+      "appearance": "Appearance",
+      "system": "System",
+      "about": "About",
+      "serversDescription": "Manage your BMC connections, credentials, tariffs, and fan-control recovery.",
+      "serversConnectionsHint": "Add, edit, test, or remove the servers IPMIDeck manages.",
+      "securityDescription": "Control whether IPMIDeck requires a login.",
+      "securityOn": "Enabled",
+      "securityOff": "Disabled",
+      "notificationsDescription": "Get browser alerts for critical and warning events.",
+      "energyDescription": "Set the display currency and reset energy counters.",
+      "energyCurrencyHint": "Used to display electricity costs across the dashboard.",
+      "appearanceDescription": "Choose the theme and interface language.",
+      "appearanceThemeHint": "Pick a light, dark, or system-matched theme.",
+      "appearanceLanguageHint": "Switch the interface language; it applies immediately.",
+      "appearanceTourHint": "Replay the guided onboarding tour anytime.",
+      "systemDescription": "Data retention, network/HTTPS, and backup & restore.",
+      "aboutDescription": "Version and project information.",
+      "backToList": "Back to settings"
+    }
   },
   "setup": {
     "welcomeTitle": "Welcome to IPMIDeck",

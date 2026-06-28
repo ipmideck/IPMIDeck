@@ -246,7 +246,9 @@
     "aria": {
       "editServer": "Modifier le serveur",
       "testConnection": "Tester la connexion",
-      "deleteServer": "Supprimer le serveur"
+      "deleteServer": "Supprimer le serveur",
+      "serverOnline": "Serveur en ligne",
+      "serverOffline": "Serveur hors ligne"
     },
     "noServersTitle": "Aucun serveur configuré",
     "noServersDescription": "Ajoutez-en un pour commencer la surveillance.",
@@ -373,7 +375,31 @@
     "costSaved": "Coût mis à jour",
     "currencyChanged": "Devise réglée sur {{currency}}",
     "fanpilotVendorUnsupported": "FanPilot ne prend pas encore en charge {{vendor}} — les ventilateurs resteront sur le profil intégré du BMC.",
-    "save": "Enregistrer"
+    "save": "Enregistrer",
+    "sections": {
+      "servers": "Serveurs",
+      "security": "Sécurité",
+      "notifications": "Notifications",
+      "energy": "Énergie",
+      "appearance": "Apparence",
+      "system": "Système",
+      "about": "À propos",
+      "serversDescription": "Gérez vos connexions BMC, identifiants, tarifs et la reprise du contrôle des ventilateurs.",
+      "serversConnectionsHint": "Ajoutez, modifiez, testez ou supprimez les serveurs gérés par IPMIDeck.",
+      "securityDescription": "Choisissez si IPMIDeck exige une connexion.",
+      "securityOn": "Activé",
+      "securityOff": "Désactivé",
+      "notificationsDescription": "Recevez des alertes du navigateur pour les événements critiques et d'avertissement.",
+      "energyDescription": "Définissez la devise d'affichage et réinitialisez les compteurs d'énergie.",
+      "energyCurrencyHint": "Utilisée pour afficher les coûts d'électricité sur le tableau de bord.",
+      "appearanceDescription": "Choisissez le thème et la langue de l'interface.",
+      "appearanceThemeHint": "Choisissez un thème clair, sombre ou selon le système.",
+      "appearanceLanguageHint": "Changez la langue de l'interface ; elle s'applique immédiatement.",
+      "appearanceTourHint": "Rejouez la visite guidée d'accueil à tout moment.",
+      "systemDescription": "Conservation des données, réseau/HTTPS et sauvegarde et restauration.",
+      "aboutDescription": "Informations sur la version et le projet.",
+      "backToList": "Retour aux paramètres"
+    }
   },
   "setup": {
     "welcomeTitle": "Bienvenue sur IPMIDeck",

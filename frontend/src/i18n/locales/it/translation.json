@@ -246,7 +246,9 @@
     "aria": {
       "editServer": "Modifica server",
       "testConnection": "Prova connessione",
-      "deleteServer": "Elimina server"
+      "deleteServer": "Elimina server",
+      "serverOnline": "Server raggiungibile",
+      "serverOffline": "Server non raggiungibile"
     },
     "noServersTitle": "Nessun server configurato",
     "noServersDescription": "Aggiungine uno per iniziare il monitoraggio.",
@@ -373,7 +375,31 @@
     "costSaved": "Costo aggiornato",
     "currencyChanged": "Valuta impostata su {{currency}}",
     "fanpilotVendorUnsupported": "FanPilot non supporta ancora {{vendor}} — le ventole resteranno sul profilo predefinito del BMC.",
-    "save": "Salva"
+    "save": "Salva",
+    "sections": {
+      "servers": "Server",
+      "security": "Sicurezza",
+      "notifications": "Notifiche",
+      "energy": "Energia",
+      "appearance": "Aspetto",
+      "system": "Sistema",
+      "about": "Informazioni",
+      "serversDescription": "Gestisci le connessioni BMC, le credenziali, le tariffe e il ripristino del controllo ventole.",
+      "serversConnectionsHint": "Aggiungi, modifica, prova o rimuovi i server gestiti da IPMIDeck.",
+      "securityDescription": "Stabilisci se IPMIDeck richiede l'accesso.",
+      "securityOn": "Attiva",
+      "securityOff": "Disattivata",
+      "notificationsDescription": "Ricevi avvisi del browser per eventi critici e di avvertimento.",
+      "energyDescription": "Imposta la valuta di visualizzazione e azzera i contatori di energia.",
+      "energyCurrencyHint": "Usata per mostrare i costi dell'elettricità nella dashboard.",
+      "appearanceDescription": "Scegli il tema e la lingua dell'interfaccia.",
+      "appearanceThemeHint": "Scegli un tema chiaro, scuro o basato sul sistema.",
+      "appearanceLanguageHint": "Cambia la lingua dell'interfaccia; viene applicata subito.",
+      "appearanceTourHint": "Riavvia il tour guidato di benvenuto quando vuoi.",
+      "systemDescription": "Conservazione dei dati, rete/HTTPS e backup e ripristino.",
+      "aboutDescription": "Informazioni su versione e progetto.",
+      "backToList": "Torna alle impostazioni"
+    }
   },
   "setup": {
     "welcomeTitle": "Benvenuto in IPMIDeck",

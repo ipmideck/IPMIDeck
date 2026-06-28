@@ -246,7 +246,9 @@
     "aria": {
       "editServer": "Edytuj serwer",
       "testConnection": "Testuj połączenie",
-      "deleteServer": "Usuń serwer"
+      "deleteServer": "Usuń serwer",
+      "serverOnline": "Serwer online",
+      "serverOffline": "Serwer offline"
     },
     "noServersTitle": "Brak skonfigurowanych serwerów",
     "noServersDescription": "Dodaj jeden, aby rozpocząć monitorowanie.",
@@ -373,7 +375,31 @@
     "costSaved": "Koszt zaktualizowany",
     "currencyChanged": "Waluta ustawiona na {{currency}}",
     "fanpilotVendorUnsupported": "FanPilot nie obsługuje jeszcze {{vendor}} — wentylatory pozostaną na wbudowanym profilu BMC.",
-    "save": "Zapisz"
+    "save": "Zapisz",
+    "sections": {
+      "servers": "Serwery",
+      "security": "Bezpieczeństwo",
+      "notifications": "Powiadomienia",
+      "energy": "Energia",
+      "appearance": "Wygląd",
+      "system": "System",
+      "about": "O programie",
+      "serversDescription": "Zarządzaj połączeniami BMC, poświadczeniami, taryfami i przywracaniem sterowania wentylatorami.",
+      "serversConnectionsHint": "Dodawaj, edytuj, testuj lub usuwaj serwery zarządzane przez IPMIDeck.",
+      "securityDescription": "Określ, czy IPMIDeck wymaga logowania.",
+      "securityOn": "Włączone",
+      "securityOff": "Wyłączone",
+      "notificationsDescription": "Otrzymuj powiadomienia przeglądarki o zdarzeniach krytycznych i ostrzeżeniach.",
+      "energyDescription": "Ustaw walutę wyświetlania i zresetuj liczniki energii.",
+      "energyCurrencyHint": "Używana do wyświetlania kosztów energii na pulpicie.",
+      "appearanceDescription": "Wybierz motyw i język interfejsu.",
+      "appearanceThemeHint": "Wybierz motyw jasny, ciemny lub zgodny z systemem.",
+      "appearanceLanguageHint": "Zmień język interfejsu; zostaje zastosowany natychmiast.",
+      "appearanceTourHint": "Odtwórz przewodnik powitalny w dowolnym momencie.",
+      "systemDescription": "Przechowywanie danych, sieć/HTTPS oraz kopia zapasowa i przywracanie.",
+      "aboutDescription": "Informacje o wersji i projekcie.",
+      "backToList": "Powrót do ustawień"
+    }
   },
   "setup": {
     "welcomeTitle": "Witaj w IPMIDeck",

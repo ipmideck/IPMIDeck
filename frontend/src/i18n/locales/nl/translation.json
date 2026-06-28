@@ -246,7 +246,9 @@
     "aria": {
       "editServer": "Server bewerken",
       "testConnection": "Verbinding testen",
-      "deleteServer": "Server verwijderen"
+      "deleteServer": "Server verwijderen",
+      "serverOnline": "Server bereikbaar",
+      "serverOffline": "Server niet bereikbaar"
     },
     "noServersTitle": "Geen servers geconfigureerd",
     "noServersDescription": "Voeg er een toe om te beginnen met monitoren.",
@@ -373,7 +375,31 @@
     "costSaved": "Kosten bijgewerkt",
     "currencyChanged": "Valuta ingesteld op {{currency}}",
     "fanpilotVendorUnsupported": "FanPilot ondersteunt {{vendor}} nog niet — ventilatoren blijven op het ingebouwde profiel van de BMC.",
-    "save": "Opslaan"
+    "save": "Opslaan",
+    "sections": {
+      "servers": "Servers",
+      "security": "Beveiliging",
+      "notifications": "Meldingen",
+      "energy": "Energie",
+      "appearance": "Weergave",
+      "system": "Systeem",
+      "about": "Over",
+      "serversDescription": "Beheer uw BMC-verbindingen, inloggegevens, tarieven en het herstel van de ventilatorregeling.",
+      "serversConnectionsHint": "Voeg servers toe, bewerk, test of verwijder ze die IPMIDeck beheert.",
+      "securityDescription": "Bepaal of IPMIDeck een aanmelding vereist.",
+      "securityOn": "Ingeschakeld",
+      "securityOff": "Uitgeschakeld",
+      "notificationsDescription": "Ontvang browsermeldingen voor kritieke en waarschuwingsgebeurtenissen.",
+      "energyDescription": "Stel de weergavevaluta in en stel de energietellers opnieuw in.",
+      "energyCurrencyHint": "Wordt gebruikt om de elektriciteitskosten op het dashboard te tonen.",
+      "appearanceDescription": "Kies het thema en de taal van de interface.",
+      "appearanceThemeHint": "Kies een licht, donker of systeemgebonden thema.",
+      "appearanceLanguageHint": "Wijzig de interfacetaal; deze wordt meteen toegepast.",
+      "appearanceTourHint": "Speel de begeleide introductietour op elk moment opnieuw af.",
+      "systemDescription": "Gegevensbewaring, netwerk/HTTPS en back-up en herstel.",
+      "aboutDescription": "Versie- en projectinformatie.",
+      "backToList": "Terug naar instellingen"
+    }
   },
   "setup": {
     "welcomeTitle": "Welkom bij IPMIDeck",
