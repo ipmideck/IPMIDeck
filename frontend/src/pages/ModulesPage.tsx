@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Header } from "@/components/layout/Header";
+import { EmptyState } from "@/components/common/EmptyState";
 import { useBackendOnline } from "@/stores/connection-store";
 import { get, put } from "@/api/client";
 import { toast } from "sonner";
@@ -14,6 +15,8 @@ import {
   CheckCircle2,
   CircleSlash,
   RotateCw,
+  AlertTriangle,
+  PackageOpen,
 } from "lucide-react";
 
 interface Module {
@@ -38,6 +41,9 @@ const ICONS: Record<string, React.ReactNode> = {
 export default function ModulesPage() {
   const { t } = useTranslation();
   const [modules, setModules] = useState<Module[]>([]);
+  // load lifecycle so the surface can teach (loading -> empty -> error), instead
+  // of silently swallowing a failed fetch (Error Recovery: name the problem + retry).
+  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   // Modules whose last enable returned restart_required. Tracked client-side
   // (the GET payload has no such field) so the card can carry a persistent
   // "restart required" affordance instead of a one-shot toast. Cleared on a
@@ -49,7 +55,10 @@ export default function ModulesPage() {
     try {
       const data = await get<{ modules: Module[] }>("/api/admin/modules");
       setModules(data.modules);
-    } catch { /* ignore */ }
+      setStatus("ready");
+    } catch {
+      setStatus("error");
+    }
   };
 
   useEffect(() => { loadModules(); }, []);
@@ -123,6 +132,32 @@ export default function ModulesPage() {
               {t("modules.intro")}
             </p>
           </div>
+          {status === "loading" && (
+            <div className="space-y-3" aria-hidden="true">
+              {[0, 1, 2].map((i) => (
+                <div
+                  key={i}
+                  className="h-[88px] animate-pulse rounded-xl border border-border bg-muted"
+                />
+              ))}
+            </div>
+          )}
+          {status === "error" && (
+            <EmptyState
+              icon={AlertTriangle}
+              title={t("modules.loadErrorTitle")}
+              description={t("modules.loadErrorHint")}
+              action={{ label: t("modules.retry"), onClick: () => { setStatus("loading"); loadModules(); } }}
+            />
+          )}
+          {status === "ready" && modules.length === 0 && (
+            <EmptyState
+              icon={PackageOpen}
+              title={t("modules.emptyTitle")}
+              description={t("modules.emptyHint")}
+            />
+          )}
+          {status === "ready" && modules.length > 0 && (
           <div className="space-y-3">
             {modules.map((mod) => {
               const restartRequired = restartIds.has(mod.id);
@@ -202,6 +237,7 @@ export default function ModulesPage() {
               );
             })}
           </div>
+          )}
         </div>
       </div>
     </>
