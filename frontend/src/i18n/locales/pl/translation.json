@@ -486,9 +486,13 @@
     "noServerDescription": "Wybierz serwer z paska bocznego, aby wyświetlić jego dziennik zdarzeń sprzętowych.",
     "emptyTitle": "Brak zarejestrowanych zdarzeń",
     "emptyDescription": "Dziennik zdarzeń systemowych jest pusty. Zdarzenia sprzętowe pojawią się tutaj, gdy wystąpią.",
-    "severityCritical": "krytyczne",
-    "severityWarning": "ostrzeżenie",
-    "severityInfo": "info"
+    "severityCritical": "Krytyczne",
+    "severityWarning": "Ostrzeżenie",
+    "severityInfo": "Info",
+    "eventCount_one": "{{count}} zdarzenie",
+    "eventCount_few": "{{count}} zdarzenia",
+    "eventCount_many": "{{count}} zdarzeń",
+    "eventCount_other": "{{count}} zdarzenia"
   },
   "fru": {
     "title": "Sprzęt",

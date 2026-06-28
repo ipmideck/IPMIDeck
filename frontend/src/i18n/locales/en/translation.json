@@ -486,9 +486,11 @@
     "noServerDescription": "Select a server from the sidebar to view its hardware event log.",
     "emptyTitle": "No events logged",
     "emptyDescription": "The system event log is clear. Hardware events will appear here as they occur.",
-    "severityCritical": "critical",
-    "severityWarning": "warning",
-    "severityInfo": "info"
+    "severityCritical": "Critical",
+    "severityWarning": "Warning",
+    "severityInfo": "Info",
+    "eventCount_one": "{{count}} event",
+    "eventCount_other": "{{count}} events"
   },
   "fru": {
     "title": "Hardware",

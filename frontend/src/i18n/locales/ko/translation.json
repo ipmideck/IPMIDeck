@@ -488,7 +488,8 @@
     "emptyDescription": "시스템 이벤트 로그가 비어 있습니다. 하드웨어 이벤트가 발생하면 여기에 표시됩니다.",
     "severityCritical": "심각",
     "severityWarning": "경고",
-    "severityInfo": "정보"
+    "severityInfo": "정보",
+    "eventCount_other": "이벤트 {{count}}개"
   },
   "fru": {
     "title": "하드웨어",

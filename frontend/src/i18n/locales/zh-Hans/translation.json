@@ -488,7 +488,8 @@
     "emptyDescription": "系统事件日志为空。硬件事件发生时将显示在此处。",
     "severityCritical": "严重",
     "severityWarning": "警告",
-    "severityInfo": "信息"
+    "severityInfo": "信息",
+    "eventCount_other": "{{count}} 个事件"
   },
   "fru": {
     "title": "硬件",

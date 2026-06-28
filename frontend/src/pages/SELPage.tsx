@@ -7,7 +7,15 @@ import { get, post } from "@/api/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/common/EmptyState";
-import { RefreshCw, Download, ServerOff, FileClock } from "lucide-react";
+import {
+  RefreshCw,
+  Download,
+  ServerOff,
+  FileClock,
+  AlertOctagon,
+  AlertTriangle,
+  Info,
+} from "lucide-react";
 
 interface SELEvent {
   event_id: string;
@@ -17,6 +25,19 @@ interface SELEvent {
   description: string;
   severity: string;
 }
+
+// D-04 (colorblind): severity is never conveyed by color alone. Each severity
+// pairs a distinct lucide icon SHAPE + a foundation semantic color token
+// (--color-danger/warning/info) + a translated text label, so it stays
+// unambiguous in grayscale and for red-green color-vision deficiency. Same
+// pattern the Dashboard pilot (06-02) established for widget status.
+type SeverityStyle = { icon: typeof AlertOctagon; badge: string; labelKey: string };
+
+const SEVERITY: Record<string, SeverityStyle> = {
+  critical: { icon: AlertOctagon, badge: "bg-danger/10 text-danger", labelKey: "sel.severityCritical" },
+  warning: { icon: AlertTriangle, badge: "bg-warning/10 text-warning", labelKey: "sel.severityWarning" },
+  info: { icon: Info, badge: "bg-info/10 text-info", labelKey: "sel.severityInfo" },
+};
 
 export default function SELPage() {
   const { t } = useTranslation();
@@ -52,14 +73,23 @@ export default function SELPage() {
 
   const filtered = filter === "all" ? events : events.filter((e) => e.severity === filter);
 
+  // Severity badge: icon shape + semantic token + translated label (D-04).
   const severityBadge = (s: string) => {
-    const cls = s === "critical" ? "bg-red-500/10 text-red-500" : s === "warning" ? "bg-yellow-500/10 text-yellow-500" : "bg-blue-500/10 text-blue-500";
-    const label =
-      s === "critical" ? t("sel.severityCritical")
-      : s === "warning" ? t("sel.severityWarning")
-      : s === "info" ? t("sel.severityInfo")
-      : s;
-    return <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-medium", cls)}>{label}</span>;
+    const style = SEVERITY[s];
+    const Icon = style?.icon ?? Info;
+    const cls = style?.badge ?? "bg-muted text-muted-foreground";
+    const label = style ? t(style.labelKey) : s;
+    return (
+      <span
+        className={cn(
+          "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold",
+          cls
+        )}
+      >
+        <Icon className="h-3 w-3 shrink-0" aria-hidden="true" />
+        {label}
+      </span>
+    );
   };
 
   return (
@@ -108,57 +138,66 @@ export default function SELPage() {
             />
           )
         ) : (
-          <>
-            {/* Desktop (>= md): table */}
-            <div className="hidden rounded-lg border border-border md:block">
+          <div className="mx-auto max-w-6xl">
+            {/* At-a-glance count — Visibility of system status. */}
+            <div className="mb-3 text-xs font-medium text-muted-foreground">
+              {t("sel.eventCount", { count: filtered.length })}
+            </div>
+
+            {/* Desktop (>= md): table — earned hierarchy via blueprint layers
+                (card surface + shadow off the canvas; tinted surface-2 sticky
+                header band; value-first lead column). No new color (D-06). */}
+            <div className="hidden overflow-hidden rounded-lg border border-border bg-card shadow-sm md:block">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-border bg-muted/50">
-                    <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">{t("sel.colSeverity")}</th>
-                    <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">{t("sel.colTimestamp")}</th>
-                    <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">{t("sel.colSensor")}</th>
-                    <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">{t("sel.colEvent")}</th>
-                    <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">{t("sel.colDescription")}</th>
+                  <tr className="border-b border-border bg-muted">
+                    <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{t("sel.colSeverity")}</th>
+                    <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{t("sel.colTimestamp")}</th>
+                    <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{t("sel.colSensor")}</th>
+                    <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{t("sel.colEvent")}</th>
+                    <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{t("sel.colDescription")}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.map((ev, i) => (
-                    <tr key={i} className="border-b border-border/50 hover:bg-muted/30">
-                      <td className="px-4 py-2">{severityBadge(ev.severity)}</td>
-                      <td className="px-4 py-2 font-mono text-xs text-muted-foreground">{ev.timestamp}</td>
-                      <td className="px-4 py-2 text-xs">{ev.sensor_name}</td>
-                      <td className="px-4 py-2 text-xs">{ev.event_type}</td>
-                      <td className="px-4 py-2 text-xs text-muted-foreground">{ev.description}</td>
+                    <tr key={i} className="border-b border-border/60 last:border-0 hover:bg-muted/40">
+                      <td className="px-4 py-2.5 align-middle">{severityBadge(ev.severity)}</td>
+                      <td className="px-4 py-2.5 align-middle whitespace-nowrap font-mono text-xs text-muted-foreground">{ev.timestamp}</td>
+                      <td className="px-4 py-2.5 align-middle text-sm font-medium text-foreground">{ev.sensor_name}</td>
+                      <td className="px-4 py-2.5 align-middle text-xs text-foreground">{ev.event_type}</td>
+                      <td className="px-4 py-2.5 align-middle text-xs text-muted-foreground">{ev.description}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
 
-            {/* Mobile (< md): card list — severity dot leftmost in the primary row. */}
+            {/* Mobile (< md): card list — severity badge leftmost in the primary
+                row, sensor as the value-first lead (Phase-4 reflow re-skinned,
+                not reworked). */}
             <div className="space-y-2 md:hidden">
               {filtered.map((ev, i) => (
-                <div key={i} className="rounded-lg border border-border bg-card p-3 space-y-1">
+                <div key={i} className="space-y-1.5 rounded-lg border border-border bg-card p-3 shadow-sm">
                   <div className="flex items-center gap-2">
                     {severityBadge(ev.severity)}
-                    <span className="text-sm font-medium">{ev.sensor_name}</span>
+                    <span className="text-sm font-semibold text-foreground">{ev.sensor_name}</span>
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    <span className="font-medium">{t("sel.colEvent")}:</span> {ev.event_type}
+                    <span className="font-medium text-foreground">{t("sel.colEvent")}:</span> {ev.event_type}
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    <span className="font-medium">{t("sel.colTimestamp")}:</span>{" "}
+                    <span className="font-medium text-foreground">{t("sel.colTimestamp")}:</span>{" "}
                     <span className="font-mono">{ev.timestamp}</span>
                   </div>
                   {ev.description && (
                     <div className="text-xs text-muted-foreground">
-                      <span className="font-medium">{t("sel.colDescription")}:</span> {ev.description}
+                      <span className="font-medium text-foreground">{t("sel.colDescription")}:</span> {ev.description}
                     </div>
                   )}
                 </div>
               ))}
             </div>
-          </>
+          </div>
         )}
       </div>
     </>

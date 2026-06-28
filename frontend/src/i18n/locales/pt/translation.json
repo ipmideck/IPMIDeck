@@ -486,9 +486,11 @@
     "noServerDescription": "Selecione um servidor na barra lateral para ver seu registro de eventos de hardware.",
     "emptyTitle": "Nenhum evento registrado",
     "emptyDescription": "O registro de eventos do sistema está vazio. Os eventos de hardware aparecerão aqui conforme ocorrerem.",
-    "severityCritical": "crítico",
-    "severityWarning": "aviso",
-    "severityInfo": "info"
+    "severityCritical": "Crítico",
+    "severityWarning": "Aviso",
+    "severityInfo": "Info",
+    "eventCount_one": "{{count}} evento",
+    "eventCount_other": "{{count}} eventos"
   },
   "fru": {
     "title": "Hardware",

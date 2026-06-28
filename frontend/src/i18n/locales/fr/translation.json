@@ -486,9 +486,11 @@
     "noServerDescription": "Sélectionnez un serveur dans la barre latérale pour afficher son journal d'événements matériels.",
     "emptyTitle": "Aucun événement enregistré",
     "emptyDescription": "Le journal d'événements système est vide. Les événements matériels apparaîtront ici au fur et à mesure.",
-    "severityCritical": "critique",
-    "severityWarning": "avertissement",
-    "severityInfo": "info"
+    "severityCritical": "Critique",
+    "severityWarning": "Avertissement",
+    "severityInfo": "Info",
+    "eventCount_one": "{{count}} événement",
+    "eventCount_other": "{{count}} événements"
   },
   "fru": {
     "title": "Matériel",

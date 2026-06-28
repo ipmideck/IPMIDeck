@@ -488,7 +488,8 @@
     "emptyDescription": "システムイベントログは空です。ハードウェアイベントが発生するとここに表示されます。",
     "severityCritical": "重大",
     "severityWarning": "警告",
-    "severityInfo": "情報"
+    "severityInfo": "情報",
+    "eventCount_other": "{{count}} 件のイベント"
   },
   "fru": {
     "title": "ハードウェア",

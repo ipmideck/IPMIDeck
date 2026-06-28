@@ -488,7 +488,9 @@
     "emptyDescription": "Das System-Ereignisprotokoll ist leer. Hardware-Ereignisse erscheinen hier, sobald sie auftreten.",
     "severityCritical": "kritisch",
     "severityWarning": "Warnung",
-    "severityInfo": "Info"
+    "severityInfo": "Info",
+    "eventCount_one": "{{count}} Ereignis",
+    "eventCount_other": "{{count}} Ereignisse"
   },
   "fru": {
     "title": "Hardware",

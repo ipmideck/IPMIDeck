@@ -486,9 +486,11 @@
     "noServerDescription": "Selecteer een server in de zijbalk om het hardware-gebeurtenislogboek te bekijken.",
     "emptyTitle": "Geen gebeurtenissen geregistreerd",
     "emptyDescription": "Het systeemgebeurtenislogboek is leeg. Hardwaregebeurtenissen verschijnen hier zodra ze optreden.",
-    "severityCritical": "kritiek",
-    "severityWarning": "waarschuwing",
-    "severityInfo": "info"
+    "severityCritical": "Kritiek",
+    "severityWarning": "Waarschuwing",
+    "severityInfo": "Info",
+    "eventCount_one": "{{count}} gebeurtenis",
+    "eventCount_other": "{{count}} gebeurtenissen"
   },
   "fru": {
     "title": "Hardware",

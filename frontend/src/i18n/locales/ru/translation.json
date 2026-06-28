@@ -488,7 +488,11 @@
     "emptyDescription": "Системный журнал событий пуст. События оборудования будут появляться здесь по мере их возникновения.",
     "severityCritical": "критическое",
     "severityWarning": "предупреждение",
-    "severityInfo": "инфо"
+    "severityInfo": "инфо",
+    "eventCount_one": "{{count}} событие",
+    "eventCount_few": "{{count}} события",
+    "eventCount_many": "{{count}} событий",
+    "eventCount_other": "{{count}} события"
   },
   "fru": {
     "title": "Оборудование",
