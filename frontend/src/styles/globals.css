@@ -127,6 +127,15 @@ body {
   border-color: var(--color-border);
 }
 
+/* Repo-wide keyboard focus ring (D-05, Pitfall 2: the repo had ZERO :focus-visible).
+ * Single global rule adopted from the blueprint system, driven off --color-ring so it
+ * is theme-correct in both light and dark (Task 1 mapped ring ← blueprint accent). */
+:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
 /* Cursor affordance: HTML5 dropped the default `cursor: pointer` on <button>
  * elements (legacy of <a> only), so without this rule every button across the
  * app renders the default arrow cursor — confusing because the rest of the UI
