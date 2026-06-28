@@ -218,7 +218,11 @@ function WidgetCard({
   return (
     <div
       className={cn(
-        "group relative h-full rounded-lg shadow-sm overflow-hidden border",
+        // D-06: lift the card off the canvas. The card surface (--color-card) already
+        // sits above the page canvas (--color-background); a real shadow + the tinted
+        // header band below give the elevation the eye needs to read each tile as a
+        // distinct layer from ~2m, instead of separation riding on a 1px hairline.
+        "group relative h-full rounded-lg shadow-md overflow-hidden border transition-shadow hover:shadow-lg",
         editMode ? "border-dashed border-primary/50 bg-card/95" : "border-border bg-card",
         accent && "border-l-[3px]"
       )}
@@ -230,14 +234,19 @@ function WidgetCard({
     >
       <div
         className={cn(
-          "widget-drag-handle flex items-center justify-between border-b border-border/50 px-3 py-2",
+          // D-06: a faintly tinted header band (--color-muted = blueprint surface-2)
+          // reads as a third layer above the card body, so the title row is a real
+          // header instead of dissolving into the tile.
+          "widget-drag-handle flex items-center justify-between border-b border-border bg-muted/40 px-3 py-2",
           editMode ? "cursor-grab active:cursor-grabbing" : "cursor-default"
         )}
         // touch-action: none ONLY on the handle, ONLY in edit mode (RESEARCH Pitfall 6).
         // Outside edit mode the user must be able to scroll the page past the header.
         style={editMode ? { touchAction: "none" } : undefined}
       >
-        <span className="text-[11px] font-semibold text-muted-foreground select-none">
+        {/* D-06: brighter, slightly larger title in uppercase tracking so widget
+            identity is scannable at a glance — was text-[11px] muted (too quiet). */}
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-foreground/80 select-none">
           {getWidgetTitle(item, t)}
         </span>
         <div className="flex items-center gap-1">

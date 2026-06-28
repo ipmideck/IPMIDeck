@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { Fan, Cpu } from "lucide-react";
 import { useBackendOnline } from "@/stores/connection-store";
 import { useFanpilotStore } from "@/stores/fanpilot-store";
 
@@ -36,18 +37,24 @@ export function FanPilotStatusWidget({ serverId }: FanPilotStatusWidgetProps) {
     );
   }
 
+  // D-04/D-06: the active/auto state pairs its color with a distinct icon + text.
+  // Cyan is the reserved cooling/fan motif (Fan icon when FanPilot drives the fans);
+  // BMC-auto reads as a neutral Cpu state.
+  const enabled = !!status?.enabled;
+  const StateIcon = enabled ? Fan : Cpu;
   return (
     <div className="flex h-full items-center justify-between">
       <div className="flex flex-col gap-0.5">
         <span className="text-[11px] font-medium text-muted-foreground">
-          {status?.enabled ? t("widget.fanpilotActive") : t("widget.bmcAuto")}
+          {enabled ? t("widget.fanpilotActive") : t("widget.bmcAuto")}
         </span>
-        <span className="text-sm font-semibold">
+        <span className="text-sm font-semibold text-foreground">
           {status?.profile?.name || t("widget.noProfile")}
         </span>
       </div>
-      <div className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${status?.enabled ? "bg-blue-500/10 text-blue-500" : "bg-muted text-muted-foreground"}`}>
-        {status?.enabled ? t("widget.active") : t("widget.auto")}
+      <div className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${enabled ? "bg-cyan/10 text-cyan-ink" : "bg-muted text-muted-foreground"}`}>
+        <StateIcon className="h-3 w-3 shrink-0" aria-hidden="true" />
+        {enabled ? t("widget.active") : t("widget.auto")}
       </div>
     </div>
   );

@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { Power, PowerOff, HelpCircle } from "lucide-react";
 import { useBackendOnline } from "@/stores/connection-store";
 import { usePowerStore } from "@/stores/power-store";
 
@@ -27,21 +28,26 @@ export function PowerStatusWidget({ serverId }: PowerStatusWidgetProps) {
     return (
       <div className="flex h-full flex-col justify-center opacity-50 grayscale transition-[filter,opacity]">
         <div className="flex items-center gap-2.5">
-          <div className="h-2.5 w-2.5 rounded-full bg-muted-foreground/40" />
-          <span className="font-mono text-sm font-semibold text-muted-foreground">{t("power.unknown")}</span>
+          {/* D-04: shape + icon companion so state never rides on color alone. */}
+          <HelpCircle className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <span className="font-mono text-base font-semibold text-muted-foreground">{t("power.unknown")}</span>
         </div>
       </div>
     );
   }
 
+  // D-04 — every power state pairs the semantic color with a distinct lucide icon
+  // (Power / PowerOff / HelpCircle) so red-green colorblind users still read it.
   const isOn = status === "on";
+  const isOff = status === "off";
+  const StateIcon = isOn ? Power : isOff ? PowerOff : HelpCircle;
+  const stateClass = isOn ? "text-success" : isOff ? "text-danger" : "text-muted-foreground";
+  const label = isOn ? t("power.online") : isOff ? t("power.offline") : t("power.unknown");
   return (
     <div className="flex h-full flex-col justify-center">
       <div className="flex items-center gap-2.5">
-        <div className={`h-2.5 w-2.5 rounded-full ${isOn ? "bg-emerald-500" : "bg-red-500"}`} />
-        <span className={`font-mono text-sm font-semibold ${isOn ? "text-emerald-500" : "text-red-500"}`}>
-          {isOn ? t("power.online") : status === "off" ? t("power.offline") : t("power.unknown")}
-        </span>
+        <StateIcon className={`h-4 w-4 shrink-0 ${stateClass}`} aria-hidden="true" />
+        <span className={`font-mono text-base font-semibold ${stateClass}`}>{label}</span>
       </div>
     </div>
   );

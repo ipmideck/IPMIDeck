@@ -5,7 +5,7 @@ import { useSensorStore } from "@/stores/sensor-store";
 import { useBackendOnline } from "@/stores/connection-store";
 import { cn } from "@/lib/utils";
 import { naturalCompare } from "@/modules/sensors/sensorUtils";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, CheckCircle2, AlertTriangle, AlertOctagon, CircleHelp } from "lucide-react";
 
 // Stable empty-array reference for the sparkline selector. Returning a fresh `[]`
 // on every render trips Zustand v5's Object.is equality check, triggering an
@@ -284,10 +284,23 @@ export function MetricWidget({ serverId, sensorName, label, onSelectSensor }: Me
     // render an inner label when the user set a CUSTOM one that differs from it.
     const customLabel = label && label !== effectiveName ? label : null;
 
+    // D-04: status pairs the semantic color with a distinct icon shape AND a
+    // translated label — never color alone. Uses the foundation --color-success/
+    // warning/danger tokens (text-success / text-warning / text-danger) instead of
+    // the old hardcoded emerald/yellow/red-500 (Consistency P2).
     const badgeBg =
-      status === "ok" ? "bg-emerald-500/10 text-emerald-500" :
-      status === "warning" ? "bg-yellow-500/10 text-yellow-500" :
-      status === "critical" ? "bg-red-500/10 text-red-500" : "bg-muted text-muted-foreground";
+      status === "ok" ? "bg-success/10 text-success" :
+      status === "warning" ? "bg-warning/10 text-warning" :
+      status === "critical" ? "bg-danger/10 text-danger" : "bg-muted text-muted-foreground";
+    const StatusIcon =
+      status === "ok" ? CheckCircle2 :
+      status === "warning" ? AlertTriangle :
+      status === "critical" ? AlertOctagon : CircleHelp;
+    // Translated label for EVERY status — no raw untranslated string leaks to the UI.
+    const statusLabel =
+      status === "ok" ? t("widget.statusNormal") :
+      status === "warning" ? t("widget.statusWarning") :
+      status === "critical" ? t("widget.statusCritical") : t("widget.statusUnknown");
 
     const chartColor =
       unit === "C" ? "#2563eb" :
@@ -330,7 +343,9 @@ export function MetricWidget({ serverId, sensorName, label, onSelectSensor }: Me
         )}
 
         <div className="flex flex-1 flex-col justify-center">
-          <div className="font-mono text-2xl font-semibold leading-none tracking-tight">
+          {/* Hierarchy (D-06): the metric value is the lead element on each tile —
+              larger + tighter so it reads from across the room (wall-display scan). */}
+          <div className="font-mono text-3xl font-bold leading-none tracking-tight text-foreground">
             {value !== null && value !== undefined ? (
               <>
                 {Number.isInteger(value) ? value : value.toFixed(1)}
@@ -341,8 +356,9 @@ export function MetricWidget({ serverId, sensorName, label, onSelectSensor }: Me
             )}
           </div>
           <div className="mt-2 flex items-center gap-2">
-            <span className={cn("inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-semibold", badgeBg)}>
-              {status === "ok" ? t("widget.statusNormal") : status}
+            <span className={cn("inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold", badgeBg)}>
+              <StatusIcon className="h-3 w-3 shrink-0" aria-hidden="true" />
+              {statusLabel}
             </span>
             {customLabel && (
               <span className="truncate text-[10px] text-muted-foreground">{customLabel}</span>

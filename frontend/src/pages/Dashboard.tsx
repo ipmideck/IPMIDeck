@@ -91,7 +91,11 @@ export default function Dashboard() {
           ))}
         </div>
       </Header>
-      <div className="flex-1 overflow-auto p-6">
+      {/* D-06: the warm canvas frames the lifted surfaces. A max-width keeps the
+          board from sprawling on ultrawide/wall displays while the generous top
+          padding gives the first row of tiles room to breathe (rhythm, not flatness). */}
+      <div className="flex-1 overflow-auto px-6 pb-6 pt-7">
+        <div className="mx-auto w-full max-w-[1600px]">
         {hasWidgets && hasServers ? (
           <WidgetGrid />
         ) : !hasServers ? (
@@ -109,6 +113,7 @@ export default function Dashboard() {
             action={{ label: t("dashboard.addFirstWidget"), onClick: () => setCatalogOpen(true) }}
           />
         )}
+        </div>
       </div>
       <WidgetCatalog open={catalogOpen} onClose={() => setCatalogOpen(false)} />
     </>
