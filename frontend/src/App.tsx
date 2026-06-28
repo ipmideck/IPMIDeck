@@ -17,6 +17,8 @@ import { applyTheme, useThemeStore } from "@/stores/theme-store";
 import { useServerStore } from "@/stores/server-store";
 import { useAuthStore } from "@/stores/auth-store";
 import { useCurrencyStore } from "@/stores/currency-store";
+import { useEnergyResetStore } from "@/stores/energy-reset-store";
+import { useAlertingStore } from "@/stores/alerting-store";
 import { bootstrapAppData } from "@/lib/bootstrap";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { get, setUnauthorizedHandler } from "@/api/client";
@@ -159,7 +161,11 @@ function AppShell() {
                       <Route path="/sel" element={<SELPage />} />
                       <Route path="/fru" element={<FRUPage />} />
                       <Route path="/modules" element={<ModulesPage />} />
-                      <Route path="/settings" element={<SettingsPage />} />
+                      {/* Wildcard so SettingsPage owns the section sub-routing
+                          (06-08 builds the two-pane + nested section routes; the
+                          index redirect to /settings/servers already lives inside
+                          SettingsPage so bare /settings call-sites land populated). */}
+                      <Route path="/settings/*" element={<SettingsPage />} />
                     </Routes>
                   </Suspense>
                 </PageLayout>
@@ -198,6 +204,20 @@ export default function App() {
   // hook) keeps this effect dependency-free and avoids a re-render subscription.
   useEffect(() => {
     useCurrencyStore.getState().hydrate();
+  }, []);
+
+  // Pitfall 4 / D-13 high caveat: energy-reset (feeds powerShared.tsx) and alerting
+  // (feeds useWebSocket.ts) hydrate ONLY inside the monolithic SettingsPage today. When
+  // 06-08 splits Settings into URL-routed sections, a user landing on `/` would never
+  // mount SettingsPage and these would silently never fire. Lift both to the App shell
+  // NOW, mirroring the idempotent currency hydrate above. getState() (not the hook) keeps
+  // these effects dependency-free; each store's `hydrated` guard makes a second call from
+  // SettingsPage a no-op (06-08 cleans up the duplicate calls).
+  useEffect(() => {
+    useEnergyResetStore.getState().hydrate();
+  }, []);
+  useEffect(() => {
+    useAlertingStore.getState().hydrate();
   }, []);
 
   // Boot: fetch /api/auth/me FIRST, then load protected data only when usable.

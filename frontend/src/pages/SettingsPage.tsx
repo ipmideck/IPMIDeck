@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { Header } from "@/components/layout/Header";
 import { useServerStore, type Server } from "@/stores/server-store";
 import { useCurrencyStore } from "@/stores/currency-store";
@@ -638,6 +638,16 @@ export default function SettingsPage() {
       return next;
     });
   };
+
+  // Blocker #2 (D-13): App.tsx now routes /settings/* here. When the path is exactly
+  // /settings (no section), redirect to the default landing section so bare-/settings
+  // call-sites (Sidebar/MobileNavDrawer/CommandPalette/Dashboard) land populated. The
+  // full two-pane + per-section routing is built in 06-08; for now any /settings/<section>
+  // path falls through to the existing monolith as a single-panel passthrough.
+  // (All hooks above run unconditionally — this early return is after them.)
+  if (location.pathname === "/settings" || location.pathname === "/settings/") {
+    return <Navigate replace to="/settings/servers" />;
+  }
 
   return (
     <>
