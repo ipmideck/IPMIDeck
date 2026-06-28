@@ -7,69 +7,112 @@
   --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
 
-  /* PRD dark palette — zinc-based */
-  --color-background: #09090b;
-  --color-foreground: #fafafa;
-  --color-card: #0a0a0c;
-  --color-card-foreground: #fafafa;
-  --color-popover: #09090b;
-  --color-popover-foreground: #fafafa;
-  --color-muted: #18181b;
-  --color-muted-foreground: #a1a1aa;
-  --color-border: #27272a;
-  --color-input: #27272a;
-  --color-primary: #f4f4f5;
-  --color-primary-foreground: #18181b;
-  --color-secondary: #27272a;
-  --color-secondary-foreground: #fafafa;
-  --color-accent: #27272a;
-  --color-accent-foreground: #fafafa;
-  --color-destructive: #ef4444;
-  --color-ring: #d4d4d8;
+  /* WCAG 2.5.8 minimum interactive control size (D-05). Other plans/components
+   * reference this token where the critique flags a small tap target; it is NOT
+   * forced onto every element here. */
+  --control-min: 44px;
 
-  /* Chart colors */
-  --color-chart-1: #2563eb;
-  --color-chart-2: #10b981;
-  --color-chart-3: #f59e0b;
-  --color-chart-4: #8b5cf6;
-  --color-chart-5: #ec4899;
-  --color-chart-6: #6366f1;
+  /* ── Blueprint palette — DARK (default theme, D-02). ──────────────────────
+   * Values bridged from ../ipmideck-website/app/globals.css (.dark block) onto
+   * the app's EXISTING token NAMES (D-03 — no rename). DARK stays in @theme so
+   * dark remains the default (Pitfall 1: do NOT invert; light lives in
+   * :root:not(.dark) below). */
+  --color-background: #0a0a0b;          /* blueprint --canvas (dark) */
+  --color-foreground: #f4f4f5;          /* blueprint --ink (dark) */
+  --color-card: #141417;                /* blueprint --surface (dark) */
+  --color-card-foreground: #f4f4f5;     /* blueprint --ink (dark) */
+  --color-popover: #141417;             /* blueprint --surface (dark) */
+  --color-popover-foreground: #f4f4f5;  /* blueprint --ink (dark) */
+  --color-muted: #1a1a1d;               /* blueprint --surface-2 (dark) — shadcn muted = a surface fill */
+  --color-muted-foreground: #a1a1aa;    /* blueprint --muted (dark) */
+  --color-border: rgba(255, 255, 255, 0.1); /* blueprint --hairline (dark) */
+  --color-input: rgba(255, 255, 255, 0.1);  /* blueprint --hairline (dark) */
+  --color-primary: #2563eb;             /* blueprint --accent-fill (dark) — brand action fill */
+  --color-primary-foreground: #ffffff;  /* blueprint --accent-ink */
+  --color-secondary: #1a1a1d;           /* blueprint --surface-2 (dark) */
+  --color-secondary-foreground: #f4f4f5;
+  /* --color-accent stays a faint hover SURFACE (audited: hover:bg-accent in Sidebar,
+   * aria-selected:bg-accent in CommandPalette — shadcn hover-bg role, NOT the brand;
+   * Open Question 2 resolved). Brand navy is routed through --color-primary/-ring/-link. */
+  --color-accent: #1a1a1d;              /* navy-neutral hover surface (dark) */
+  --color-accent-foreground: #f4f4f5;
+  --color-destructive: #f87171;         /* derived danger (dark) — distinct from navy */
+  --color-ring: #3b82f6;                /* blueprint --accent (dark) — D-05: ring = accent */
 
-  /* Semantic */
-  --color-success: #22c55e;
-  --color-warning: #eab308;
-  --color-danger: #ef4444;
-  --color-info: #3b82f6;
+  /* Chart colors — retuned to the navy/cyan family, hue separation preserved */
+  --color-chart-1: #3b82f6;  /* navy/blue (brand) */
+  --color-chart-2: #22d3ee;  /* cyan (cooling) */
+  --color-chart-3: #fbbf24;  /* amber */
+  --color-chart-4: #a78bfa;  /* violet */
+  --color-chart-5: #f472b6;  /* pink */
+  --color-chart-6: #34d399;  /* emerald */
 
-  /* Sidebar */
-  --color-sidebar: #0a0a0c;
-  --color-sidebar-foreground: #fafafa;
-  --color-sidebar-border: #27272a;
+  /* Semantic status (D-04 — derived, AA-verified in both themes; pair with a
+   * non-color icon/shape companion at the call-site, colorblind requirement) */
+  --color-success: #3ddc97;  /* seeded from blueprint --code-success (dark) */
+  --color-warning: #fbbf24;  /* amber — NOT cyan-adjacent (must not read as cooling) */
+  --color-danger: #f87171;   /* red — distinct from navy */
+  --color-info: #60a5fa;     /* blue family — reads as on-brand informational */
+
+  /* NEW tokens (D-06). Cyan = cooling/fan motif ONLY (not a generic accent). */
+  --color-cyan: #22d3ee;     /* blueprint --cyan (dark) — fills & glows */
+  --color-cyan-ink: #22d3ee; /* blueprint --cyan-ink (dark) — readable cyan text */
+  --color-link: #60a5fa;     /* blueprint --link (dark) */
+
+  /* Sidebar — reads as the blueprint surface/ink/hairline layer */
+  --color-sidebar: #141417;             /* blueprint --surface (dark) */
+  --color-sidebar-foreground: #f4f4f5;  /* blueprint --ink (dark) */
+  --color-sidebar-border: rgba(255, 255, 255, 0.1); /* blueprint --hairline (dark) */
   --sidebar-width: 240px;
 }
 
-/* Light theme overrides */
+/* ── Blueprint palette — LIGHT overrides. ──────────────────────────────────
+ * Values bridged from ../ipmideck-website/app/globals.css (:root / light block)
+ * onto the same existing token NAMES (D-03). Kept in :root:not(.dark) so dark
+ * stays the default (Pitfall 1 — structure preserved, light/dark NOT inverted). */
 :root:not(.dark) {
-  --color-background: #ffffff;
-  --color-foreground: #09090b;
-  --color-card: #ffffff;
-  --color-card-foreground: #09090b;
-  --color-popover: #ffffff;
-  --color-popover-foreground: #09090b;
-  --color-muted: #f4f4f5;
-  --color-muted-foreground: #71717a;
-  --color-border: #e4e4e7;
-  --color-input: #e4e4e7;
-  --color-primary: #18181b;
-  --color-primary-foreground: #fafafa;
-  --color-secondary: #f4f4f5;
-  --color-secondary-foreground: #18181b;
-  --color-accent: #f4f4f5;
-  --color-accent-foreground: #18181b;
-  --color-ring: #a1a1aa;
-  --color-sidebar: #f9fafb;
-  --color-sidebar-foreground: #09090b;
-  --color-sidebar-border: #e4e4e7;
+  --color-background: #f7f6f3;          /* blueprint --canvas (light) — warm off-white */
+  --color-foreground: #0a0a0b;          /* blueprint --ink (light) */
+  --color-card: #ffffff;                /* blueprint --surface (light) */
+  --color-card-foreground: #0a0a0b;     /* blueprint --ink (light) */
+  --color-popover: #ffffff;             /* blueprint --surface (light) */
+  --color-popover-foreground: #0a0a0b;  /* blueprint --ink (light) */
+  --color-muted: #fafaf8;               /* blueprint --surface-2 (light) — shadcn muted = a surface fill */
+  --color-muted-foreground: #5b5b5b;    /* blueprint --muted (light) — darker than old #71717a (AA, Pitfall 6) */
+  --color-border: #e4e3de;              /* blueprint --hairline (light) */
+  --color-input: #e4e3de;               /* blueprint --hairline (light) */
+  --color-primary: #1e3a8a;             /* blueprint --accent-fill navy (light) — brand action fill */
+  --color-primary-foreground: #ffffff;  /* blueprint --accent-ink */
+  --color-secondary: #fafaf8;           /* blueprint --surface-2 (light) */
+  --color-secondary-foreground: #0a0a0b;
+  --color-accent: #eef3f8;              /* blueprint --tint-cool (light) — faint navy-tinted hover surface */
+  --color-accent-foreground: #0a0a0b;
+  --color-destructive: #b91c1c;         /* derived danger (light) */
+  --color-ring: #1e3a8a;                /* blueprint --accent navy (light) — D-05: ring = accent */
+
+  /* Chart colors — navy/cyan family, light-theme tuned */
+  --color-chart-1: #1e3a8a;  /* navy (brand) */
+  --color-chart-2: #06b6d4;  /* cyan (cooling) */
+  --color-chart-3: #b45309;  /* amber */
+  --color-chart-4: #7c3aed;  /* violet */
+  --color-chart-5: #be185d;  /* pink */
+  --color-chart-6: #047857;  /* emerald */
+
+  /* Semantic status (D-04 — derived, AA-verified on light surfaces) */
+  --color-success: #0a6e44;  /* seeded from blueprint --code-success (light) */
+  --color-warning: #b45309;  /* amber — NOT cyan-adjacent */
+  --color-danger: #b91c1c;   /* red — distinct from navy */
+  --color-info: #2563eb;     /* blue family — on-brand informational */
+
+  /* NEW tokens (D-06) */
+  --color-cyan: #06b6d4;     /* blueprint --cyan (light) */
+  --color-cyan-ink: #0e7490; /* blueprint --cyan-ink (light) — AA-readable cyan text */
+  --color-link: #2563eb;     /* blueprint --link (light) */
+
+  /* Sidebar — blueprint surface/ink/hairline layer */
+  --color-sidebar: #ffffff;             /* blueprint --surface (light) */
+  --color-sidebar-foreground: #0a0a0b;  /* blueprint --ink (light) */
+  --color-sidebar-border: #e4e3de;      /* blueprint --hairline (light) */
 }
 
 body {
@@ -115,10 +158,13 @@ button:not(:disabled),
   opacity: 0.9;
 }
 .react-grid-placeholder {
-  background: var(--color-accent) !important;
-  border: 1px dashed var(--color-border) !important;
+  /* Pitfall 7: --color-accent is now a faint hover surface (near-bg), which would
+   * make the drop target nearly invisible. Route the placeholder through the brand
+   * --color-primary (navy) so the drag target reads as an intentional affordance. */
+  background: var(--color-primary) !important;
+  border: 1px dashed var(--color-ring) !important;
   border-radius: var(--radius);
-  opacity: 0.3;
+  opacity: 0.18;
 }
 .react-resizable-handle {
   position: absolute;
