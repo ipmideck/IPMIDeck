@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Plus, Trash2, TestTube, Pencil, Fan } from "lucide-react";
+import { Plus, Trash2, TestTube, Pencil, Fan, Wifi, WifiOff } from "lucide-react";
 import { useServerStore, type Server } from "@/stores/server-store";
 import { get, post, put, del } from "@/api/client";
 import { toast } from "sonner";
@@ -352,15 +352,23 @@ export function ServersSection({ headingRef }: ServersSectionProps) {
             {servers.map((s) => (
               <div key={s.id}>
                 <div className="flex items-center gap-3 rounded-md border border-border p-3">
-                  <span
-                    className={cn("h-2.5 w-2.5 shrink-0 rounded-full", s.is_online ? "bg-success" : "bg-danger")}
-                    aria-hidden="true"
-                  />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium">{s.name}</div>
                     <div className="truncate font-mono text-xs text-muted-foreground">{s.host}</div>
                   </div>
-                  <span className="sr-only">{s.is_online ? t("settings.aria.serverOnline") : t("settings.aria.serverOffline")}</span>
+                  {/* Status — triple-encoded (color + icon shape + text label) so it
+                      is not color-only for colorblind operators (D-04). */}
+                  <span
+                    className={cn(
+                      "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium",
+                      s.is_online ? "bg-success/10 text-success" : "bg-danger/10 text-danger",
+                    )}
+                  >
+                    {s.is_online
+                      ? <Wifi className="h-3 w-3" aria-hidden="true" />
+                      : <WifiOff className="h-3 w-3" aria-hidden="true" />}
+                    <span>{s.is_online ? t("settings.aria.serverOnline") : t("settings.aria.serverOffline")}</span>
+                  </span>
                   <div className="flex gap-1">
                     <button onClick={() => startEdit(s)} aria-label={t("settings.aria.editServer")} className="rounded-md border border-border p-2 hover:bg-muted min-h-[--control-min] min-w-[--control-min] md:min-h-9 md:min-w-9 inline-flex items-center justify-center">
                       <Pencil className="h-4 w-4" />

@@ -276,8 +276,10 @@ export function SystemSection({ headingRef }: SystemSectionProps) {
           {t("settings.network.genCertButton")}
         </button>
 
-        <div className="mt-4 flex items-start gap-2 rounded-md border border-warning/30 bg-warning/5 p-3 text-xs text-warning">
-          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        {/* Warning callout — the amber color rides the icon + hairline; the body
+            text stays on the readable ink ramp (avoids washed-out amber-on-amber). */}
+        <div className="mt-4 flex items-start gap-2 rounded-md border border-warning/30 bg-warning/5 p-3 text-xs text-muted-foreground">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" aria-hidden="true" />
           <span>{t("settings.network.selfSignedNote")}</span>
         </div>
       </FieldGroup>
