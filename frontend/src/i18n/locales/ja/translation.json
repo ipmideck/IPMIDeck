@@ -501,7 +501,11 @@
     "enabled": "{{name}} を有効にしました",
     "disabledWithDeps": "{{name}} を無効にしました — 依存モジュールも停止しました：{{deps}}。API ルートを完全に削除するには再起動してください。",
     "disabled": "{{name}} を無効にしました — バックグラウンドタスクを停止しました。API ルートを完全に削除するには再起動してください。",
-    "toggleFailed": "モジュールの切り替えに失敗しました"
+    "toggleFailed": "モジュールの切り替えに失敗しました",
+    "disableConfirmTitle": "{{name}} を無効にしますか？",
+    "disableConfirmBody": "{{name}} を無効にすると、依存するモジュールも停止します：{{deps}}。",
+    "disableConfirmCancel": "キャンセル",
+    "disableConfirmConfirm": "それでも無効にする"
   },
   "sel": {
     "title": "イベントログ",
@@ -549,7 +553,8 @@
       "backplane": "バックプレーン {{n}}",
       "storageController": "ストレージコントローラー",
       "networkDaughterCard": "ネットワークドーターカード"
-    }
+    },
+    "copyField": "{{field}}をコピー"
   },
   "fanpilot": {
     "title": "FanPilot",

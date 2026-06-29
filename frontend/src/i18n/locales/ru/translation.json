@@ -501,7 +501,11 @@
     "enabled": "{{name}} включён",
     "disabledWithDeps": "{{name}} отключён — также остановлены зависимые модули: {{deps}}. Перезапустите, чтобы полностью удалить маршруты API.",
     "disabled": "{{name}} отключён — фоновые задачи остановлены. Перезапустите, чтобы полностью удалить его маршруты API.",
-    "toggleFailed": "Не удалось переключить модуль"
+    "toggleFailed": "Не удалось переключить модуль",
+    "disableConfirmTitle": "Отключить {{name}}?",
+    "disableConfirmBody": "Отключение {{name}} также остановит зависимые модули: {{deps}}.",
+    "disableConfirmCancel": "Отмена",
+    "disableConfirmConfirm": "Всё равно отключить"
   },
   "sel": {
     "title": "Журнал событий",
@@ -552,7 +556,8 @@
       "backplane": "Объединительная плата {{n}}",
       "storageController": "Контроллер хранилища",
       "networkDaughterCard": "Сетевая дочерняя плата"
-    }
+    },
+    "copyField": "Копировать {{field}}"
   },
   "fanpilot": {
     "title": "FanPilot",

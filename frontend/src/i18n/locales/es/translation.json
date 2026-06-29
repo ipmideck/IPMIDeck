@@ -501,7 +501,11 @@
     "enabled": "{{name}} activado",
     "disabledWithDeps": "{{name}} desactivado — también se detuvieron los módulos dependientes: {{deps}}. Reinicia para eliminar por completo las rutas de API.",
     "disabled": "{{name}} desactivado — tareas en segundo plano detenidas. Reinicia para eliminar por completo sus rutas de API.",
-    "toggleFailed": "No se pudo alternar el módulo"
+    "toggleFailed": "No se pudo alternar el módulo",
+    "disableConfirmTitle": "¿Desactivar {{name}}?",
+    "disableConfirmBody": "Desactivar {{name}} también detendrá estos módulos dependientes: {{deps}}.",
+    "disableConfirmCancel": "Cancelar",
+    "disableConfirmConfirm": "Desactivar de todos modos"
   },
   "sel": {
     "title": "Registro de eventos",
@@ -550,7 +554,8 @@
       "backplane": "Placa posterior {{n}}",
       "storageController": "Controlador de almacenamiento",
       "networkDaughterCard": "Tarjeta hija de red"
-    }
+    },
+    "copyField": "Copiar {{field}}"
   },
   "fanpilot": {
     "title": "FanPilot",

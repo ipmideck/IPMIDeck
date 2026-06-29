@@ -501,7 +501,11 @@
     "enabled": "{{name}} abilitato",
     "disabledWithDeps": "{{name}} disabilitato — fermati anche i moduli dipendenti: {{deps}}. Riavvia per rimuovere completamente le route API.",
     "disabled": "{{name}} disabilitato — attività in background fermate. Riavvia per rimuovere completamente le sue route API.",
-    "toggleFailed": "Impossibile commutare il modulo"
+    "toggleFailed": "Impossibile commutare il modulo",
+    "disableConfirmTitle": "Disattivare {{name}}?",
+    "disableConfirmBody": "Disattivando {{name}} verranno fermati anche questi moduli dipendenti: {{deps}}.",
+    "disableConfirmCancel": "Annulla",
+    "disableConfirmConfirm": "Disattiva comunque"
   },
   "sel": {
     "title": "Registro eventi",
@@ -550,7 +554,8 @@
       "backplane": "Backplane {{n}}",
       "storageController": "Controller di storage",
       "networkDaughterCard": "Scheda figlia di rete"
-    }
+    },
+    "copyField": "Copia {{field}}"
   },
   "fanpilot": {
     "title": "FanPilot",

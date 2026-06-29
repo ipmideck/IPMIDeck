@@ -501,7 +501,11 @@
     "enabled": "{{name}} aktiviert",
     "disabledWithDeps": "{{name}} deaktiviert — abhängige Module ebenfalls gestoppt: {{deps}}. Neustart, um die API-Routen vollständig zu entfernen.",
     "disabled": "{{name}} deaktiviert — Hintergrundaufgaben gestoppt. Neustart, um seine API-Routen vollständig zu entfernen.",
-    "toggleFailed": "Modul konnte nicht umgeschaltet werden"
+    "toggleFailed": "Modul konnte nicht umgeschaltet werden",
+    "disableConfirmTitle": "{{name}} deaktivieren?",
+    "disableConfirmBody": "Beim Deaktivieren von {{name}} werden auch diese abhängigen Module gestoppt: {{deps}}.",
+    "disableConfirmCancel": "Abbrechen",
+    "disableConfirmConfirm": "Trotzdem deaktivieren"
   },
   "sel": {
     "title": "Ereignisprotokoll",
@@ -550,7 +554,8 @@
       "backplane": "Backplane {{n}}",
       "storageController": "Speichercontroller",
       "networkDaughterCard": "Netzwerk-Tochterkarte"
-    }
+    },
+    "copyField": "{{field}} kopieren"
   },
   "fanpilot": {
     "title": "FanPilot",

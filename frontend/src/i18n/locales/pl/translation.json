@@ -501,7 +501,11 @@
     "enabled": "{{name}} włączony",
     "disabledWithDeps": "{{name}} wyłączony — zatrzymano także moduły zależne: {{deps}}. Uruchom ponownie, aby całkowicie usunąć trasy API.",
     "disabled": "{{name}} wyłączony — zadania w tle zatrzymane. Uruchom ponownie, aby całkowicie usunąć jego trasy API.",
-    "toggleFailed": "Nie udało się przełączyć modułu"
+    "toggleFailed": "Nie udało się przełączyć modułu",
+    "disableConfirmTitle": "Wyłączyć {{name}}?",
+    "disableConfirmBody": "Wyłączenie {{name}} zatrzyma także te zależne moduły: {{deps}}.",
+    "disableConfirmCancel": "Anuluj",
+    "disableConfirmConfirm": "Wyłącz mimo to"
   },
   "sel": {
     "title": "Dziennik zdarzeń",
@@ -552,7 +556,8 @@
       "backplane": "Płyta montażowa {{n}}",
       "storageController": "Kontroler pamięci masowej",
       "networkDaughterCard": "Sieciowa karta podrzędna"
-    }
+    },
+    "copyField": "Kopiuj {{field}}"
   },
   "fanpilot": {
     "title": "FanPilot",

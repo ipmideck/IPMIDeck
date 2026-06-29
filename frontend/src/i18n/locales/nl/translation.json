@@ -501,7 +501,11 @@
     "enabled": "{{name}} ingeschakeld",
     "disabledWithDeps": "{{name}} uitgeschakeld — afhankelijke modules ook gestopt: {{deps}}. Herstart om de API-routes volledig te verwijderen.",
     "disabled": "{{name}} uitgeschakeld — achtergrondtaken gestopt. Herstart om de API-routes volledig te verwijderen.",
-    "toggleFailed": "Kan module niet wisselen"
+    "toggleFailed": "Kan module niet wisselen",
+    "disableConfirmTitle": "{{name}} uitschakelen?",
+    "disableConfirmBody": "Door {{name}} uit te schakelen worden ook deze afhankelijke modules gestopt: {{deps}}.",
+    "disableConfirmCancel": "Annuleren",
+    "disableConfirmConfirm": "Toch uitschakelen"
   },
   "sel": {
     "title": "Gebeurtenislogboek",
@@ -550,7 +554,8 @@
       "backplane": "Backplane {{n}}",
       "storageController": "Opslagcontroller",
       "networkDaughterCard": "Netwerkdochterkaart"
-    }
+    },
+    "copyField": "{{field}} kopiëren"
   },
   "fanpilot": {
     "title": "FanPilot",

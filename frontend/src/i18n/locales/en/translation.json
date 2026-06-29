@@ -501,7 +501,11 @@
     "enabled": "{{name}} enabled",
     "disabledWithDeps": "{{name}} disabled — also stopped dependent module(s): {{deps}}. Restart to fully remove API routes.",
     "disabled": "{{name}} disabled — background tasks stopped. Restart to fully remove its API routes.",
-    "toggleFailed": "Failed to toggle module"
+    "toggleFailed": "Failed to toggle module",
+    "disableConfirmTitle": "Disable {{name}}?",
+    "disableConfirmBody": "Disabling {{name}} will also stop these dependent modules: {{deps}}.",
+    "disableConfirmCancel": "Cancel",
+    "disableConfirmConfirm": "Disable anyway"
   },
   "sel": {
     "title": "Event Log",
@@ -550,7 +554,8 @@
       "backplane": "Backplane {{n}}",
       "storageController": "Storage Controller",
       "networkDaughterCard": "Network Daughter Card"
-    }
+    },
+    "copyField": "Copy {{field}}"
   },
   "fanpilot": {
     "title": "FanPilot",

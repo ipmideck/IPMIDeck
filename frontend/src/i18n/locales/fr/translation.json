@@ -501,7 +501,11 @@
     "enabled": "{{name}} activé",
     "disabledWithDeps": "{{name}} désactivé — modules dépendants également arrêtés : {{deps}}. Redémarrez pour supprimer complètement les routes API.",
     "disabled": "{{name}} désactivé — tâches en arrière-plan arrêtées. Redémarrez pour supprimer complètement ses routes API.",
-    "toggleFailed": "Échec du basculement du module"
+    "toggleFailed": "Échec du basculement du module",
+    "disableConfirmTitle": "Désactiver {{name}} ?",
+    "disableConfirmBody": "Désactiver {{name}} arrêtera aussi ces modules dépendants : {{deps}}.",
+    "disableConfirmCancel": "Annuler",
+    "disableConfirmConfirm": "Désactiver quand même"
   },
   "sel": {
     "title": "Journal d'événements",
@@ -550,7 +554,8 @@
       "backplane": "Fond de panier {{n}}",
       "storageController": "Contrôleur de stockage",
       "networkDaughterCard": "Carte fille réseau"
-    }
+    },
+    "copyField": "Copier {{field}}"
   },
   "fanpilot": {
     "title": "FanPilot",

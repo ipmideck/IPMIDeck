@@ -501,7 +501,11 @@
     "enabled": "{{name}}이(가) 활성화되었습니다",
     "disabledWithDeps": "{{name}}이(가) 비활성화되었습니다 — 종속 모듈도 중지되었습니다: {{deps}}. API 경로를 완전히 제거하려면 재시작하세요.",
     "disabled": "{{name}}이(가) 비활성화되었습니다 — 백그라운드 작업이 중지되었습니다. API 경로를 완전히 제거하려면 재시작하세요.",
-    "toggleFailed": "모듈 전환에 실패했습니다"
+    "toggleFailed": "모듈 전환에 실패했습니다",
+    "disableConfirmTitle": "{{name}}을(를) 비활성화하시겠습니까?",
+    "disableConfirmBody": "{{name}}을(를) 비활성화하면 종속 모듈도 중지됩니다: {{deps}}.",
+    "disableConfirmCancel": "취소",
+    "disableConfirmConfirm": "그래도 비활성화"
   },
   "sel": {
     "title": "이벤트 로그",
@@ -549,7 +553,8 @@
       "backplane": "백플레인 {{n}}",
       "storageController": "스토리지 컨트롤러",
       "networkDaughterCard": "네트워크 도터 카드"
-    }
+    },
+    "copyField": "{{field}} 복사"
   },
   "fanpilot": {
     "title": "FanPilot",

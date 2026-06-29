@@ -501,7 +501,11 @@
     "enabled": "{{name}} 已启用",
     "disabledWithDeps": "{{name}} 已禁用 — 同时停止了依赖模块：{{deps}}。重启以完全移除 API 路由。",
     "disabled": "{{name}} 已禁用 — 后台任务已停止。重启以完全移除其 API 路由。",
-    "toggleFailed": "切换模块失败"
+    "toggleFailed": "切换模块失败",
+    "disableConfirmTitle": "禁用 {{name}}？",
+    "disableConfirmBody": "禁用 {{name}} 还会停止以下依赖模块：{{deps}}。",
+    "disableConfirmCancel": "取消",
+    "disableConfirmConfirm": "仍然禁用"
   },
   "sel": {
     "title": "事件日志",
@@ -549,7 +553,8 @@
       "backplane": "背板 {{n}}",
       "storageController": "存储控制器",
       "networkDaughterCard": "网络子卡"
-    }
+    },
+    "copyField": "复制{{field}}"
   },
   "fanpilot": {
     "title": "FanPilot",

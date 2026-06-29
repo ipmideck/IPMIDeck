@@ -156,8 +156,13 @@ export default function FRUPage() {
                           <span className="uppercase tracking-wide text-[10px] font-medium text-muted-foreground">{t("fru.serviceTag")}</span>
                           <div className="flex items-center gap-1.5">
                             <span className="font-mono text-sm font-semibold text-foreground">{summary.serviceTag}</span>
-                            <button onClick={() => copyToClipboard(summary.serviceTag!)} className="rounded p-0.5 hover:bg-muted">
-                              <Copy className="h-3 w-3 text-muted-foreground" />
+                            <button
+                              onClick={() => copyToClipboard(summary.serviceTag!)}
+                              aria-label={t("fru.copyField", { field: t("fru.serviceTag") })}
+                              title={t("fru.copyField", { field: t("fru.serviceTag") })}
+                              className="inline-flex min-h-11 min-w-11 items-center justify-center rounded hover:bg-muted"
+                            >
+                              <Copy className="h-3 w-3 text-muted-foreground" aria-hidden="true" />
                             </button>
                           </div>
                         </div>
@@ -208,8 +213,13 @@ export default function FRUPage() {
                         <div className="flex items-center gap-1">
                           <span className="font-mono text-xs font-semibold text-foreground truncate max-w-[180px]">{f.value}</span>
                           {(f.field.toLowerCase().includes("serial") || f.field.toLowerCase().includes("part")) && (
-                            <button onClick={() => copyToClipboard(f.value)} className="rounded p-0.5 hover:bg-muted">
-                              <Copy className="h-3 w-3 text-muted-foreground" />
+                            <button
+                              onClick={() => copyToClipboard(f.value)}
+                              aria-label={t("fru.copyField", { field: f.field })}
+                              title={t("fru.copyField", { field: f.field })}
+                              className="inline-flex min-h-11 min-w-11 items-center justify-center rounded hover:bg-muted"
+                            >
+                              <Copy className="h-3 w-3 text-muted-foreground" aria-hidden="true" />
                             </button>
                           )}
                         </div>
