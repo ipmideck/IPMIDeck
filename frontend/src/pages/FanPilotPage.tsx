@@ -1399,7 +1399,7 @@ export default function FanPilotPage() {
                               </button>
                               <button
                                 onClick={handleReset}
-                                className="flex-1 rounded-md bg-[var(--color-danger)] px-2 py-1 text-[11px] font-semibold text-white hover:opacity-90 transition-opacity"
+                                className="flex-1 rounded-md bg-danger px-2 py-1 text-[11px] font-semibold text-danger-foreground hover:opacity-90 transition-opacity"
                               >
                                 {t("fanpilot.reset")}
                               </button>

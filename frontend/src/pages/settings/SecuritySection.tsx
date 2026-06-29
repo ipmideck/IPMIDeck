@@ -124,7 +124,7 @@ export function SecuritySection({ headingRef }: SecuritySectionProps) {
                     onClick={disableAuth}
                     disabled={secBusy || !online || !secCurrentPassword.trim()}
                     title={offlineTip}
-                    className="flex-1 rounded-md bg-danger px-3 py-2 text-sm font-semibold text-white hover:bg-danger/90 min-h-[--control-min] md:min-h-9 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex-1 rounded-md bg-danger px-3 py-2 text-sm font-semibold text-danger-foreground hover:bg-danger/90 min-h-[--control-min] md:min-h-9 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {secBusy ? t("settings.disabling") : t("settings.confirmDisable")}
                   </button>

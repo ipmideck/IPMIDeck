@@ -296,7 +296,7 @@ export default function ModulesPage() {
                         type="button"
                         onClick={() => toggleModule(mod.id, false)}
                         disabled={!online}
-                        className="rounded-md bg-danger px-3 py-1.5 text-xs font-semibold text-white hover:bg-danger/90 min-h-9 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded-md bg-danger px-3 py-1.5 text-xs font-semibold text-danger-foreground hover:bg-danger/90 min-h-9 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {t("modules.disableConfirmConfirm")}
                       </button>

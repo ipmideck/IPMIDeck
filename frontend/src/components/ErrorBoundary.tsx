@@ -40,7 +40,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 this.setState({ hasError: false, error: null });
                 window.location.reload();
               }}
-              className="mt-4 rounded-md bg-danger px-4 py-2 text-sm font-medium text-white hover:bg-danger/90"
+              className="mt-4 rounded-md bg-danger px-4 py-2 text-sm font-medium text-danger-foreground hover:bg-danger/90"
             >
               {i18n.t("error.reload")}
             </button>

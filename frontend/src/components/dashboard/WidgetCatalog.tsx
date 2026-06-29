@@ -174,7 +174,7 @@ export function WidgetCatalog({ open, onClose }: WidgetCatalogProps) {
                   onClick={handleReset}
                   disabled={resetting || !online}
                   title={!online ? t("header.backendDisconnected") : undefined}
-                  className="flex-1 rounded-md bg-danger px-3 py-1.5 text-xs font-semibold text-white hover:bg-danger/90 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex-1 rounded-md bg-danger px-3 py-1.5 text-xs font-semibold text-danger-foreground hover:bg-danger/90 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {resetting ? t("widget.resetting") : t("widget.reset")}
                 </button>

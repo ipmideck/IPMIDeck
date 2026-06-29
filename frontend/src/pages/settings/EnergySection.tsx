@@ -89,7 +89,7 @@ export function EnergySection({ headingRef }: EnergySectionProps) {
                   try { await resetAll(); setResetAllConfirm(false); toast.success(t("settings.energy.resetSuccess")); }
                   catch { toast.error(t("settings.energy.resetFailed")); }
                 }}
-                className="flex-1 rounded-md bg-danger px-3 py-2 text-sm font-semibold text-white hover:bg-danger/90 min-h-[--control-min] md:min-h-9"
+                className="flex-1 rounded-md bg-danger px-3 py-2 text-sm font-semibold text-danger-foreground hover:bg-danger/90 min-h-[--control-min] md:min-h-9"
               >
                 {t("settings.energy.confirmResetAll")}
               </button>
@@ -122,7 +122,7 @@ export function EnergySection({ headingRef }: EnergySectionProps) {
                           try { await resetServer(server.id); setResetConfirmId(null); toast.success(t("settings.energy.resetSuccess")); }
                           catch { toast.error(t("settings.energy.resetFailed")); }
                         }}
-                        className="flex-1 rounded-md bg-danger px-3 py-2 text-sm font-semibold text-white hover:bg-danger/90 min-h-[--control-min] md:min-h-9"
+                        className="flex-1 rounded-md bg-danger px-3 py-2 text-sm font-semibold text-danger-foreground hover:bg-danger/90 min-h-[--control-min] md:min-h-9"
                       >
                         {t("settings.energy.confirmReset")}
                       </button>

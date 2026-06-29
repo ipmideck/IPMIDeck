@@ -211,7 +211,7 @@ export function SystemSection({ headingRef }: SystemSectionProps) {
                 <p className="text-xs text-muted-foreground">{t("settings.data.confirmCleanupBody", { days: retentionDays })}</p>
                 <div className="flex gap-2">
                   <button type="button" onClick={() => setCleanupConfirm(false)} className={cn(secondaryBtnClass, "flex-1")}>{t("settings.cancel")}</button>
-                  <button type="button" onClick={onRunCleanup} disabled={cleanupBusy || !online} className="flex-1 rounded-md bg-danger px-3 py-2 text-sm font-semibold text-white hover:bg-danger/90 min-h-[--control-min] md:min-h-9 disabled:opacity-50">
+                  <button type="button" onClick={onRunCleanup} disabled={cleanupBusy || !online} className="flex-1 rounded-md bg-danger px-3 py-2 text-sm font-semibold text-danger-foreground hover:bg-danger/90 min-h-[--control-min] md:min-h-9 disabled:opacity-50">
                     {t("settings.data.confirmCleanup")}
                   </button>
                 </div>
@@ -312,7 +312,7 @@ export function SystemSection({ headingRef }: SystemSectionProps) {
                 <p className="text-xs text-muted-foreground">{t("settings.backup.confirmRestoreBody")}</p>
                 <div className="flex gap-2">
                   <button type="button" onClick={() => setRestoreConfirm(false)} className={cn(secondaryBtnClass, "flex-1")}>{t("settings.cancel")}</button>
-                  <button type="button" onClick={onRestore} className="flex-1 rounded-md bg-danger px-3 py-2 text-sm font-semibold text-white hover:bg-danger/90 min-h-[--control-min] md:min-h-9">
+                  <button type="button" onClick={onRestore} className="flex-1 rounded-md bg-danger px-3 py-2 text-sm font-semibold text-danger-foreground hover:bg-danger/90 min-h-[--control-min] md:min-h-9">
                     {t("settings.backup.confirmRestore")}
                   </button>
                 </div>
