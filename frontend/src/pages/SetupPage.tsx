@@ -7,7 +7,7 @@ import { useAuthStore } from "@/stores/auth-store";
 import { LanguageSelect } from "@/components/LanguageSelect";
 import { cn } from "@/lib/utils";
 import {
-  MonitorCog,
+  ServerCog,
   User,
   Server,
   CheckCircle2,
@@ -17,7 +17,16 @@ import {
   ShieldCheck,
   Globe,
   Lock,
+  AlertCircle,
 } from "lucide-react";
+
+// Shared field styling: lift inputs onto the card surface, hit --control-min
+// (D-05), and let the repo-wide :focus-visible ring land (no focus:outline-none
+// override — that suppresses the global ring the rest of the re-skinned app uses).
+const fieldClass =
+  "w-full rounded-lg border border-border bg-card text-sm text-foreground " +
+  "placeholder:text-muted-foreground min-h-[var(--control-min)] transition-colors " +
+  "hover:border-muted-foreground/40";
 
 // Step + vendor metadata: only stable keys/codes live at module load. The displayed
 // labels are resolved via t() INSIDE the component so they re-render on language change.
@@ -170,7 +179,7 @@ export default function SetupPage() {
       <div className="relative">
         {/* Onboarding language box: detected default (i18next), correctable, switches the wizard immediately (D-09/D-10/D-12) */}
         <div className="absolute right-6 top-10 z-10">
-          <LanguageSelect className="rounded-md border border-border bg-card px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50" />
+          <LanguageSelect className="rounded-md border border-border bg-card px-2 py-1 text-xs text-foreground" />
         </div>
         <div className="mx-auto flex w-full max-w-2xl items-center justify-center gap-2 px-6 pt-10 pb-6">
           {STEPS.map((label, i) => (
@@ -178,10 +187,14 @@ export default function SetupPage() {
             <div
               className={cn(
                 "flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold transition-colors",
-                i < step && "bg-emerald-500 text-white",
+                // Completed steps use the blueprint success token (not raw emerald)
+                // and carry a check GLYPH as the non-color companion (D-04): a
+                // colorblind operator reads "done" from the \u2713, not the fill alone.
+                i < step && "bg-success text-white",
                 i === step && "bg-primary text-primary-foreground",
                 i > step && "bg-muted text-muted-foreground"
               )}
+              aria-current={i === step ? "step" : undefined}
             >
               {i < step ? "\u2713" : i + 1}
             </div>
@@ -206,19 +219,25 @@ export default function SetupPage() {
         {/* Step 0: Welcome */}
         {step === 0 && (
           <div className="flex flex-col items-center text-center">
-            <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-primary/10">
-              <MonitorCog className="h-10 w-10 text-primary" />
+            {/* Brand presence (D-06): the same navy mark + IPMIDeck wordmark the
+             * Login screen uses, so the first-run wizard reads as the same product
+             * (and the marketing site) on sight. No new color — navy --primary. */}
+            <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm">
+              <ServerCog className="h-8 w-8" aria-hidden="true" />
             </div>
-            <h1 className="text-2xl font-bold">{t("setup.welcomeTitle")}</h1>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+              IPMIDeck
+            </p>
+            <h1 className="mt-1 text-2xl font-bold tracking-tight">{t("setup.welcomeTitle")}</h1>
             <p className="mt-3 max-w-sm text-sm leading-relaxed text-muted-foreground">
               {t("setup.welcomeBody")}
             </p>
             <button
               onClick={() => setStep(1)}
-              className="mt-8 inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+              className="mt-8 inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground min-h-[var(--control-min)] hover:bg-primary/90 transition-colors"
             >
               {t("setup.getStarted")}
-              <ChevronRight className="h-4 w-4" />
+              <ChevronRight className="h-4 w-4" aria-hidden="true" />
             </button>
           </div>
         )}
@@ -332,7 +351,8 @@ export default function SetupPage() {
                       placeholder={t("setup.auth.usernamePlaceholder")}
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
-                      className="w-full rounded-lg border border-border bg-card py-2 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      autoComplete="username"
+                      className={cn(fieldClass, "py-2 pl-9 pr-3")}
                     />
                   </div>
                   <div className="relative">
@@ -342,7 +362,8 @@ export default function SetupPage() {
                       placeholder={t("setup.auth.passwordPlaceholder")}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="w-full rounded-lg border border-border bg-card py-2 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      autoComplete="new-password"
+                      className={cn(fieldClass, "py-2 pl-9 pr-3")}
                     />
                   </div>
                   <div className="relative">
@@ -352,23 +373,39 @@ export default function SetupPage() {
                       placeholder={t("setup.auth.confirmPasswordPlaceholder")}
                       value={passwordConfirm}
                       onChange={(e) => setPasswordConfirm(e.target.value)}
+                      autoComplete="new-password"
+                      aria-invalid={
+                        !!(password && passwordConfirm && password !== passwordConfirm)
+                      }
                       className={cn(
-                        "w-full rounded-lg border bg-card py-2 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50",
-                        password && passwordConfirm && password !== passwordConfirm
-                          ? "border-red-500/60"
-                          : "border-border"
+                        fieldClass,
+                        "py-2 pl-9 pr-3",
+                        // Mismatch uses the blueprint danger token (not raw red).
+                        password && passwordConfirm && password !== passwordConfirm &&
+                          "border-danger/60"
                       )}
                     />
                   </div>
+                  {/* Inline mismatch hint — triple-encoded (D-04): danger token +
+                   * AlertCircle companion + text, announced via role="alert". */}
                   {password && passwordConfirm && password !== passwordConfirm && (
-                    <p className="text-xs text-red-500">{t("setup.auth.passwordsDoNotMatch")}</p>
+                    <p role="alert" className="flex items-center gap-1.5 text-xs text-danger">
+                      <AlertCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                      {t("setup.auth.passwordsDoNotMatch")}
+                    </p>
                   )}
                 </div>
               )}
 
+              {/* Error: triple-encoded (D-04) — danger token + AlertCircle companion
+               * + text, on a tinted callout, announced via role="alert". */}
               {authError && (
-                <p className="flex items-center gap-1.5 text-xs text-red-500">
-                  {authError}
+                <p
+                  role="alert"
+                  className="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
+                >
+                  <AlertCircle className="mt-px h-4 w-4 shrink-0" aria-hidden="true" />
+                  <span>{authError}</span>
                 </p>
               )}
             </div>
@@ -376,19 +413,19 @@ export default function SetupPage() {
             <div className="mt-7 flex w-full max-w-md items-center gap-3">
               <button
                 onClick={() => setStep(0)}
-                className="inline-flex items-center gap-1 rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+                className="inline-flex items-center gap-1 rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-muted-foreground min-h-[var(--control-min)] transition-colors hover:bg-muted/50 hover:text-foreground"
               >
-                <ChevronLeft className="h-4 w-4" />
+                <ChevronLeft className="h-4 w-4" aria-hidden="true" />
                 {t("common.back")}
               </button>
               <button
                 onClick={handleAuthStep}
                 disabled={authLoading}
-                className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-50"
+                className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground min-h-[var(--control-min)] shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-50"
               >
-                {authLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+                {authLoading && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
                 {t("common.continue")}
-                <ChevronRight className="h-4 w-4" />
+                <ChevronRight className="h-4 w-4" aria-hidden="true" />
               </button>
             </div>
           </div>
@@ -415,7 +452,7 @@ export default function SetupPage() {
                   placeholder={t("setup.server.namePlaceholder")}
                   value={serverName}
                   onChange={(e) => setServerName(e.target.value)}
-                  className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  className={cn(fieldClass, "px-3 py-2")}
                 />
               </div>
               <div className="flex gap-2">
@@ -428,7 +465,7 @@ export default function SetupPage() {
                     placeholder={t("setup.server.hostPlaceholder")}
                     value={serverHost}
                     onChange={(e) => setServerHost(e.target.value)}
-                    className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    className={cn(fieldClass, "px-3 py-2")}
                   />
                 </div>
                 <div className="w-20">
@@ -439,7 +476,7 @@ export default function SetupPage() {
                     type="number"
                     value={serverPort}
                     onChange={(e) => setServerPort(e.target.value)}
-                    className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    className={cn(fieldClass, "px-3 py-2")}
                   />
                 </div>
               </div>
@@ -451,7 +488,7 @@ export default function SetupPage() {
                   type="text"
                   value={serverUser}
                   onChange={(e) => setServerUser(e.target.value)}
-                  className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  className={cn(fieldClass, "px-3 py-2")}
                 />
               </div>
               <div>
@@ -462,7 +499,8 @@ export default function SetupPage() {
                   type="password"
                   value={serverPass}
                   onChange={(e) => setServerPass(e.target.value)}
-                  className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  autoComplete="off"
+                  className={cn(fieldClass, "px-3 py-2")}
                 />
               </div>
               <div>
@@ -472,7 +510,7 @@ export default function SetupPage() {
                 <select
                   value={serverVendor}
                   onChange={(e) => setServerVendor(e.target.value)}
-                  className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  className={cn(fieldClass, "px-3 py-2")}
                 >
                   {VENDORS.map((v) => (
                     <option key={v.value} value={v.value}>
@@ -482,18 +520,25 @@ export default function SetupPage() {
                 </select>
               </div>
 
+              {/* All three states triple-encoded (D-04): semantic token + lucide
+               * icon companion + text, announced via role="alert"/"status". */}
               {serverError && (
-                <p className="text-xs text-red-500">{serverError}</p>
+                <p role="alert" className="flex items-start gap-2 text-xs text-danger">
+                  <AlertCircle className="mt-px h-4 w-4 shrink-0" aria-hidden="true" />
+                  <span>{serverError}</span>
+                </p>
               )}
 
               {testResult === "success" && (
-                <p className="text-xs text-emerald-500">
-                  {t("setup.server.testSuccess")}
+                <p role="status" className="flex items-start gap-2 text-xs text-success">
+                  <CheckCircle2 className="mt-px h-4 w-4 shrink-0" aria-hidden="true" />
+                  <span>{t("setup.server.testSuccess")}</span>
                 </p>
               )}
               {testResult === "fail" && (
-                <p className="text-xs text-red-500">
-                  {t("setup.server.testFail")}
+                <p role="alert" className="flex items-start gap-2 text-xs text-danger">
+                  <AlertCircle className="mt-px h-4 w-4 shrink-0" aria-hidden="true" />
+                  <span>{t("setup.server.testFail")}</span>
                 </p>
               )}
             </div>
@@ -501,27 +546,27 @@ export default function SetupPage() {
             <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
               <button
                 onClick={() => setStep(1)}
-                className="inline-flex items-center gap-1 rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+                className="inline-flex items-center gap-1 rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground min-h-[var(--control-min)] hover:text-foreground transition-colors"
               >
-                <ChevronLeft className="h-4 w-4" />
+                <ChevronLeft className="h-4 w-4" aria-hidden="true" />
                 {t("common.back")}
               </button>
               <button
                 onClick={handleTestConnection}
                 disabled={testLoading}
-                className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground min-h-[var(--control-min)] hover:text-foreground transition-colors disabled:opacity-50"
               >
-                {testLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+                {testLoading && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
                 {t("common.testConnection")}
               </button>
               <button
                 onClick={handleAddServer}
                 disabled={serverLoading}
-                className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2 text-sm font-medium text-primary-foreground min-h-[var(--control-min)] hover:bg-primary/90 transition-colors disabled:opacity-50"
               >
-                {serverLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+                {serverLoading && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
                 {t("setup.server.addServer")}
-                <ChevronRight className="h-4 w-4" />
+                <ChevronRight className="h-4 w-4" aria-hidden="true" />
               </button>
             </div>
           </div>
@@ -530,8 +575,10 @@ export default function SetupPage() {
         {/* Step 3: Done */}
         {step === 3 && (
           <div className="flex flex-col items-center text-center">
-            <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-emerald-500/10">
-              <CheckCircle2 className="h-10 w-10 text-emerald-500" />
+            {/* Success uses the blueprint success token; the CheckCircle2 glyph is
+             * the non-color companion (D-04) so "complete" reads without color. */}
+            <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-success/10">
+              <CheckCircle2 className="h-10 w-10 text-success" aria-hidden="true" />
             </div>
             <h1 className="text-2xl font-bold">{t("setup.done.title")}</h1>
             <p className="mt-3 max-w-sm text-sm leading-relaxed text-muted-foreground">
@@ -539,10 +586,10 @@ export default function SetupPage() {
             </p>
             <button
               onClick={() => navigate("/")}
-              className="mt-8 inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+              className="mt-8 inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground min-h-[var(--control-min)] hover:bg-primary/90 transition-colors"
             >
               {t("setup.done.goToDashboard")}
-              <ChevronRight className="h-4 w-4" />
+              <ChevronRight className="h-4 w-4" aria-hidden="true" />
             </button>
           </div>
         )}
