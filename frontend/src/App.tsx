@@ -121,7 +121,7 @@ function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
   // Wave 7: Sonner toasts move to bottom-center on mobile for thumb reach,
-  // top-right on desktop (Decision M — Toaster is mounted HERE, not PageLayout).
+  // bottom-right on desktop (Decision M — Toaster is mounted HERE, not PageLayout).
   const isMobile = useMediaQuery("(max-width: 767px)");
   useEffect(() => {
     setUnauthorizedHandler(() => {
@@ -178,7 +178,7 @@ function AppShell() {
       <ShortcutsHelp />
       <Toaster
         theme="dark"
-        position={isMobile ? "bottom-center" : "top-right"}
+        position={isMobile ? "bottom-center" : "bottom-right"}
         mobileOffset={{ bottom: "16px" }}
         toastOptions={{
           className: "!bg-card !border-border !text-foreground",
