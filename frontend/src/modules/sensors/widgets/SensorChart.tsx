@@ -67,6 +67,32 @@ function fanSpinSeconds(rpm: number): number {
   return Math.max(0.8, 5 - 4 * normalized);
 }
 
+// Best-fit {cols, rows} so all N cards fill the container with no scroll.
+// Aspect target ~1.15 (slightly wider than tall -> readable RPM); penalize empty trailing cells.
+function bestFanGrid(n: number, w: number, h: number, gap = 8): { cols: number; rows: number } {
+  if (n <= 0) return { cols: 1, rows: 1 };
+  if (w <= 0 || h <= 0) {
+    // pre-measure fallback: count-only near-square
+    const cols = Math.min(n, Math.ceil(Math.sqrt(n)));
+    return { cols, rows: Math.ceil(n / cols) };
+  }
+  let best = { cols: 1, rows: n };
+  let bestScore = Infinity;
+  for (let cols = 1; cols <= n; cols++) {
+    const rows = Math.ceil(n / cols);
+    const cellW = (w - gap * (cols - 1)) / cols;
+    const cellH = (h - gap * (rows - 1)) / rows;
+    if (cellW <= 0 || cellH <= 0) continue;
+    const aspect = cellW / cellH;
+    const score = Math.abs(Math.log(aspect / 1.15)) + (cols * rows - n) * 0.5;
+    if (score < bestScore) {
+      bestScore = score;
+      best = { cols, rows };
+    }
+  }
+  return best;
+}
+
 function FanCard({ name, rpm, online, t }: { name: string; rpm: number | null; online: boolean; t: TFunction }) {
   const stopped = rpm == null || rpm <= 0;
   const band = fanBand(rpm ?? 0);
@@ -80,34 +106,65 @@ function FanCard({ name, rpm, online, t }: { name: string; rpm: number | null; o
     // Parent SensorChart wrapper already applies opacity-50 grayscale — don't add a
     // second opacity here or the two compound multiplicatively to ~30% effective.
     return (
-      <div className="flex flex-col items-center justify-center gap-1.5 rounded-lg border border-border bg-muted/20 p-2.5">
-        <div className="flex h-12 w-12 items-center justify-center">
-          <Fan className="h-10 w-10 text-muted-foreground" />
+      <div
+        className="flex min-h-0 min-w-0 flex-col items-center justify-center overflow-hidden rounded-lg border border-border bg-muted/20"
+        style={{ containerType: "size", padding: "clamp(3px, 6cqmin, 10px)", gap: "clamp(2px, 4cqmin, 6px)" }}
+      >
+        <div className="flex items-center justify-center">
+          <Fan
+            className="text-muted-foreground"
+            style={{ width: "clamp(16px, 42cqmin, 44px)", height: "clamp(16px, 42cqmin, 44px)" }}
+          />
         </div>
-        <div className="truncate text-[10px] uppercase tracking-wider text-muted-foreground" title={name}>
+        <div
+          className="max-w-full truncate uppercase tracking-wider text-muted-foreground"
+          style={{ fontSize: "clamp(7px, 13cqmin, 11px)" }}
+          title={name}
+        >
           {name}
         </div>
-        <div className="font-mono text-sm font-semibold tabular-nums text-muted-foreground">—</div>
+        <div
+          className="font-mono font-semibold tabular-nums text-muted-foreground"
+          style={{ fontSize: "clamp(9px, 17cqmin, 15px)" }}
+        >
+          —
+        </div>
       </div>
     );
   }
 
   return (
-    <div className={cn("flex flex-col items-center justify-center gap-1.5 rounded-lg border p-2.5", band.chip)}>
-      <div className="flex h-12 w-12 items-center justify-center">
+    <div
+      className={cn("flex min-h-0 min-w-0 flex-col items-center justify-center overflow-hidden rounded-lg border", band.chip)}
+      style={{ containerType: "size", padding: "clamp(3px, 6cqmin, 10px)", gap: "clamp(2px, 4cqmin, 6px)" }}
+    >
+      <div className="flex items-center justify-center">
         <Fan
-          className={cn("h-10 w-10", stopped && "animate-fan-alarm")}
+          className={cn(stopped && "animate-fan-alarm")}
           style={
             stopped
-              ? { color: band.stroke }
-              : { color: band.stroke, animation: `fan-spin ${duration}s linear infinite`, transformOrigin: "50% 50%" }
+              ? { color: band.stroke, width: "clamp(16px, 42cqmin, 44px)", height: "clamp(16px, 42cqmin, 44px)" }
+              : {
+                  color: band.stroke,
+                  animation: `fan-spin ${duration}s linear infinite`,
+                  transformOrigin: "50% 50%",
+                  width: "clamp(16px, 42cqmin, 44px)",
+                  height: "clamp(16px, 42cqmin, 44px)",
+                }
           }
         />
       </div>
-      <div className="truncate text-[10px] uppercase tracking-wider text-muted-foreground" title={name}>
+      <div
+        className="max-w-full truncate uppercase tracking-wider text-muted-foreground"
+        style={{ fontSize: "clamp(7px, 13cqmin, 11px)" }}
+        title={name}
+      >
         {name}
       </div>
-      <div className="font-mono text-sm font-semibold tabular-nums">
+      <div
+        className="font-mono font-semibold tabular-nums"
+        style={{ fontSize: "clamp(9px, 17cqmin, 15px)" }}
+      >
         {stopped ? t("widget.fanStopped") : `${rpm} RPM`}
       </div>
     </div>
@@ -138,6 +195,22 @@ export function SensorChart({
   const range = useRangeStore((s) => s.range);
   const meta = CHART_TYPE_META[chartType];
   const lastUpdateRef = useRef(0);
+
+  // Cards-view container measurement — drives a fit-to-widget {cols,rows} grid so all
+  // fan cards are always visible with no vertical scroll. Deps keyed off view/chartType
+  // so re-entering cards view re-observes the freshly mounted grid node.
+  const cardsRef = useRef<HTMLDivElement | null>(null);
+  const [cardsSize, setCardsSize] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = cardsRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const cr = entries[0]?.contentRect;
+      if (cr) setCardsSize({ w: cr.width, h: cr.height });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [view, chartType]);
 
   // Subscribe to the readings MAP for this server (stable ref per server — Zustand v5
   // returns the same object reference unless it changes, so this won't trip React #185).
@@ -278,8 +351,18 @@ export function SensorChart({
     );
   } else if (chartType === "fan" && view === "cards") {
     // Animated cards view — one spinning fan per visible sensor. No history needed.
+    // Fit-to-widget: compute {cols,rows} from the measured container so every card is
+    // visible with NO scroll; each card scales to its cell via CSS container queries.
+    const { cols, rows } = bestFanGrid(visibleSensors.length, cardsSize.w, cardsSize.h);
     body = (
-      <div className="grid h-full content-start gap-2 overflow-y-auto pr-1 pt-1 [grid-template-columns:repeat(auto-fill,minmax(110px,1fr))]">
+      <div
+        ref={cardsRef}
+        className="grid h-full min-h-0 gap-2 pr-1 pt-1"
+        style={{
+          gridTemplateColumns: `repeat(${cols},minmax(0,1fr))`,
+          gridTemplateRows: `repeat(${rows},minmax(0,1fr))`,
+        }}
+      >
         {visibleSensors.map((name) => {
           const r = readings?.[name];
           const v = r?.value;
