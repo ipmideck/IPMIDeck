@@ -43,14 +43,21 @@ interface SensorChartProps {
 /*  Fan visual mapping (cards view)                                    */
 /* ------------------------------------------------------------------ */
 
-// Inverse-to-speed color: stopped = red, faster = greener. Used for both icon stroke
-// color and the card border/background tint.
+// Inverse-to-speed thermal scale, routed through the semantic token system (D-01/D-04)
+// instead of a raw red/orange/yellow/lime/emerald palette. Intent preserved:
+//   stopped  -> danger  (alarm; pairs with the blink shape + "Fan Stopped" text)
+//   slow     -> warning (running but barely moving air)
+//   moderate -> warning, lighter tint (the mid step)
+//   fast     -> success (healthy airflow)
+//   max      -> cyan    (the project's cooling/fan motif — coldest/most air)
+// `stroke` is a CSS var() reference (not a hardcoded hex) so the spinning <Fan> icon's
+// inline style stays theme-correct in both light and dark.
 function fanBand(rpm: number) {
-  if (rpm <= 0) return { stroke: "#ef4444", chip: "border-red-500/40 bg-red-500/10", label: "alarm" };
-  if (rpm < 1500) return { stroke: "#f97316", chip: "border-orange-500/30 bg-orange-500/5", label: "low" };
-  if (rpm < 3000) return { stroke: "#eab308", chip: "border-yellow-500/30 bg-yellow-500/5", label: "mid" };
-  if (rpm < 6000) return { stroke: "#84cc16", chip: "border-lime-500/30 bg-lime-500/5", label: "high" };
-  return { stroke: "#22c55e", chip: "border-emerald-500/30 bg-emerald-500/5", label: "max" };
+  if (rpm <= 0) return { stroke: "var(--color-danger)", chip: "border-danger/40 bg-danger/10", label: "alarm" };
+  if (rpm < 1500) return { stroke: "var(--color-warning)", chip: "border-warning/40 bg-warning/10", label: "low" };
+  if (rpm < 3000) return { stroke: "var(--color-warning)", chip: "border-warning/25 bg-warning/5", label: "mid" };
+  if (rpm < 6000) return { stroke: "var(--color-success)", chip: "border-success/30 bg-success/5", label: "high" };
+  return { stroke: "var(--color-cyan)", chip: "border-cyan/30 bg-cyan/5", label: "max" };
 }
 
 // Calming spin: at 0 RPM no rotation; at high RPM still no faster than ~0.8s/rev.
