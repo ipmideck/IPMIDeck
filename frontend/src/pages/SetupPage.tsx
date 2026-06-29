@@ -190,7 +190,11 @@ export default function SetupPage() {
                 // Completed steps use the blueprint success token (not raw emerald)
                 // and carry a check GLYPH as the non-color companion (D-04): a
                 // colorblind operator reads "done" from the \u2713, not the fill alone.
-                i < step && "bg-success text-white",
+                // R-3: the glyph is dark INK on the light-mint success fill \u2014 white on
+                // success is only 1.77:1 in the default dark theme (#3ddc97). text-background
+                // is near-black on dark-theme mint (AA+) and off-white on light-theme deep
+                // green (#0a6e44, AA+), so the \u2713 stays legible in BOTH themes.
+                i < step && "bg-success text-background",
                 i === step && "bg-primary text-primary-foreground",
                 i > step && "bg-muted text-muted-foreground"
               )}
