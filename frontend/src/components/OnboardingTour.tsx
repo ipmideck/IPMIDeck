@@ -28,11 +28,12 @@ import { useUIOverlayStore } from "@/stores/ui-overlay-store";
 
 /**
  * Poll the DOM until `selector` exists (or `timeout` elapses), then resolve.
- * Used by the Language step's `before` hook: after navigating to /settings the
- * SettingsPage is lazy-loaded, so `[data-tour="language-select"]` is NOT in the
- * DOM yet. Awaiting this before the step presents guarantees react-joyride finds
- * the real anchor and does not skip the step (BUG 1). Resolves (never rejects)
- * so the tour always continues even if the anchor never appears.
+ * Used by the Language step's `before` hook: after navigating to /settings/appearance
+ * the SettingsPage shell + Appearance panel are lazy-loaded, so
+ * `[data-tour="language-select"]` is NOT in the DOM yet. Awaiting this before the
+ * step presents guarantees react-joyride finds the real anchor and does not skip
+ * the step (BUG 1). Resolves (never rejects) so the tour always continues even if
+ * the anchor never appears.
  */
 function waitForEl(selector: string, timeout = 5000): Promise<void> {
   return new Promise((resolve) => {
@@ -135,8 +136,9 @@ export function OnboardingTour() {
   const requestCommandOpen = useUIOverlayStore((s) => s.requestCommandOpen);
 
   // Steps 1-4 anchor to data-tour attributes that ALL live on the Dashboard
-  // route (Sidebar + Dashboard header). Step 5 (language) navigates to /settings
-  // and spotlights the REAL lazy language selector (awaited via targetWaitTimeout);
+  // route (Sidebar + Dashboard header). Step 5 (language) navigates to
+  // /settings/appearance and spotlights the REAL lazy language selector (awaited
+  // via targetWaitTimeout);
   // step 6 (Cmd+K) opens the REAL cmdk palette live and anchors the tooltip to the
   // open palette ([data-tour="command-palette"]) with a SIDE placement so the
   // tooltip sits BESIDE the palette (not behind it) and its buttons stay clickable.
@@ -167,9 +169,11 @@ export function OnboardingTour() {
       content: t("tour.fanpilotBody"),
     },
     {
-      // Real language selector lives in the lazy /settings route. Navigate there
-      // in `before`, then let targetWaitTimeout poll (every 100ms) for the anchor
-      // to mount before the step presents (RESEARCH §3).
+      // Real language selector lives in the lazy /settings/appearance section
+      // (the Appearance panel after the 06-08 Settings split — bare /settings now
+      // index-redirects to Servers, which has no language control). Navigate to
+      // /settings/appearance in `before`, then let targetWaitTimeout poll (every
+      // 100ms) for the anchor to mount before the step presents (RESEARCH §3).
       target: '[data-tour="language-select"]',
       title: t("tour.languageTitle"),
       content: t("tour.languageBody"),
@@ -178,15 +182,20 @@ export function OnboardingTour() {
       // polls for the lazy target up to 5s before giving up (BUG 1 belt-and-braces).
       targetWaitTimeout: 5000,
       before: async () => {
-        if (location.pathname !== "/settings") navigate("/settings");
-        // The SettingsPage is lazy-loaded — block the step until the real anchor
-        // actually mounts so react-joyride attaches/spotlights it instead of
-        // skipping the step (BUG 1). The 100ms targetWaitTimeout default was too
-        // short for the lazy chunk to load + render; awaiting the element here
-        // makes the step reliable. Cap at 4500ms — just under the engine's
-        // beforeTimeout (5000ms) so this hook always resolves before the engine
-        // force-times-out the before phase; the targetWaitTimeout backstop (5000ms)
-        // then covers an anchor that mounts a hair later.
+        // Repointed to /settings/appearance (06-09 / D-14): the Appearance section
+        // is where [data-tour="language-select"] lives after the Settings two-pane
+        // split. Bare /settings desktop-redirects to Servers, which would never
+        // mount the language anchor, so the step must target the Appearance route.
+        if (location.pathname !== "/settings/appearance") navigate("/settings/appearance");
+        // The SettingsPage shell + Appearance panel are lazy-loaded — block the
+        // step until the real anchor actually mounts so react-joyride attaches/
+        // spotlights it instead of skipping the step (BUG 1). The 100ms
+        // targetWaitTimeout default was too short for the lazy chunk to load +
+        // render; awaiting the element here makes the step reliable. Cap at 4500ms
+        // — just under the engine's beforeTimeout (5000ms) so this hook always
+        // resolves before the engine force-times-out the before phase; the
+        // targetWaitTimeout backstop (5000ms) then covers an anchor that mounts a
+        // hair later.
         await waitForEl('[data-tour="language-select"]', 4500);
       },
     },
