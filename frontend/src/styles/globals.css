@@ -52,6 +52,10 @@
   --color-success: #3ddc97;  /* seeded from blueprint --code-success (dark) */
   --color-warning: #fbbf24;  /* amber — NOT cyan-adjacent (must not read as cooling) */
   --color-danger: #f87171;   /* red — distinct from navy */
+  /* Readable ink ON a --color-danger FILL (destructive button labels). The light-red
+   * dark-theme danger needs a DARK foreground: #1a0606 = 7.08:1 on #f87171 (AA + AAA).
+   * White (the old value) was 2.77:1 — a WCAG AA fail on safety-critical confirm buttons. */
+  --color-danger-foreground: #1a0606;
   --color-info: #60a5fa;     /* blue family — reads as on-brand informational */
 
   /* NEW tokens (D-06). Cyan = cooling/fan motif ONLY (not a generic accent). */
@@ -102,6 +106,9 @@
   --color-success: #0a6e44;  /* seeded from blueprint --code-success (light) */
   --color-warning: #b45309;  /* amber — NOT cyan-adjacent */
   --color-danger: #b91c1c;   /* red — distinct from navy */
+  /* Readable ink ON a --color-danger FILL. The deep-red light-theme danger needs a
+   * near-white foreground: #ffffff = 6.47:1 on #b91c1c (AA). */
+  --color-danger-foreground: #ffffff;
   --color-info: #2563eb;     /* blue family — on-brand informational */
 
   /* NEW tokens (D-06) */
