@@ -21,12 +21,15 @@ function formatTime(ts: string) {
 
 function CommandIcon({ type }: { type: string }) {
   const { t } = useTranslation();
+  // Command-type category accents routed through the foundation tokens (D-01/D-03):
+  // power → warning, fan_* → cyan (the reserved cooling motif), sensor_poll → success,
+  // sel_clear → danger. No raw blue/yellow/emerald/red palette.
   const colors: Record<string, string> = {
-    power: "text-yellow-500",
-    fan_mode: "text-blue-500",
-    fan_speed: "text-blue-400",
-    sensor_poll: "text-emerald-500",
-    sel_clear: "text-red-400",
+    power: "text-warning",
+    fan_mode: "text-cyan-ink",
+    fan_speed: "text-cyan-ink",
+    sensor_poll: "text-success",
+    sel_clear: "text-danger",
     sel_fetch: "text-muted-foreground",
     fru_fetch: "text-muted-foreground",
   };
@@ -45,7 +48,7 @@ function EntryRow({ entry }: { entry: CommandEntry }) {
   return (
     <div className={cn(
       "border-b border-border/30 px-3 py-2 text-[11px] hover:bg-muted/50 transition-colors",
-      isError && "bg-red-500/5"
+      isError && "bg-danger/5"
     )}>
       <div className="flex items-center justify-between gap-2">
         <CommandIcon type={entry.command_type} />
@@ -55,12 +58,12 @@ function EntryRow({ entry }: { entry: CommandEntry }) {
         {entry.command_detail}
       </div>
       {entry.result && !isError && (
-        <div className="mt-0.5 font-mono text-emerald-500/80 truncate">
+        <div className="mt-0.5 font-mono text-success/80 truncate">
           {entry.result}
         </div>
       )}
       {isError && (
-        <div className="mt-0.5 font-mono text-red-400 truncate">
+        <div className="mt-0.5 font-mono text-danger truncate">
           {entry.error_message}
         </div>
       )}

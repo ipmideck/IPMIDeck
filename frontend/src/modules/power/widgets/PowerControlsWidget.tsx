@@ -94,13 +94,13 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
         <Power
           className={cn(
             "h-4 w-4",
-            isOn ? "text-emerald-500" : isOff ? "text-red-500" : "text-muted-foreground"
+            isOn ? "text-success" : isOff ? "text-danger" : "text-muted-foreground"
           )}
         />
         <span
           className={cn(
             "font-mono text-sm font-semibold",
-            isOn ? "text-emerald-500" : isOff ? "text-red-500" : "text-muted-foreground"
+            isOn ? "text-success" : isOff ? "text-danger" : "text-muted-foreground"
           )}
         >
           {!online ? t("power.unknown") : isOn ? t("power.online") : isOff ? t("power.offline") : t("power.unknown")}
@@ -240,7 +240,7 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
                 "flex items-center justify-center gap-1 rounded-md border px-1.5 py-1.5 text-[10px] font-medium transition-colors",
                 isOn
                   ? "cursor-not-allowed border-border text-muted-foreground/40"
-                  : "border-emerald-500/40 bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20",
+                  : "border-success/40 bg-success/10 text-success hover:bg-success/20",
                 loading === "on" && "opacity-50"
               )}
             >
@@ -259,8 +259,8 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
                   className={cn(
                     "flex items-center justify-center gap-1 rounded-md border px-1.5 py-1.5 text-[10px] font-medium transition-colors",
                     confirming
-                      ? "border-red-500 bg-red-500/20 text-red-400"
-                      : "border-border text-muted-foreground hover:border-red-500/50 hover:text-red-400",
+                      ? "border-danger bg-danger/20 text-danger"
+                      : "border-border text-muted-foreground hover:border-danger/50 hover:text-danger",
                     isOff && "cursor-not-allowed opacity-40 hover:border-border hover:text-muted-foreground",
                     loading === a.id && "opacity-50"
                   )}
@@ -281,7 +281,7 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
                 "flex w-full items-center justify-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors",
                 isOn
                   ? "cursor-not-allowed border-border text-muted-foreground/40"
-                  : "border-emerald-500/40 bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20",
+                  : "border-success/40 bg-success/10 text-success hover:bg-success/20",
                 loading === "on" && "opacity-50"
               )}
             >
@@ -301,8 +301,8 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
                     className={cn(
                       "flex items-center justify-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors",
                       confirming
-                        ? "border-red-500 bg-red-500/20 text-red-400"
-                        : "border-border text-muted-foreground hover:border-red-500/50 hover:text-red-400",
+                        ? "border-danger bg-danger/20 text-danger"
+                        : "border-border text-muted-foreground hover:border-danger/50 hover:text-danger",
                       isOff && "cursor-not-allowed opacity-40 hover:border-border hover:text-muted-foreground",
                       loading === a.id && "opacity-50"
                     )}

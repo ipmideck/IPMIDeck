@@ -28,19 +28,19 @@ export function ConnectionBanner() {
       className={cn(
         "flex flex-wrap items-center gap-2 border-b px-4 py-2 text-xs",
         reconnecting
-          ? "border-yellow-500/30 bg-yellow-500/10"
-          : "border-red-500/40 bg-red-500/10"
+          ? "border-warning/30 bg-warning/10"
+          : "border-danger/40 bg-danger/10"
       )}
     >
       {reconnecting ? (
-        <RotateCw className="h-3.5 w-3.5 shrink-0 animate-spin text-yellow-500" />
+        <RotateCw className="h-3.5 w-3.5 shrink-0 animate-spin text-warning" />
       ) : (
-        <WifiOff className="h-3.5 w-3.5 shrink-0 text-red-500" />
+        <WifiOff className="h-3.5 w-3.5 shrink-0 text-danger" />
       )}
       <span
         className={cn(
           "font-semibold",
-          reconnecting ? "text-yellow-500" : "text-red-500"
+          reconnecting ? "text-warning" : "text-danger"
         )}
       >
         {reconnecting ? t("banner.reconnecting") : t("banner.disconnected")}

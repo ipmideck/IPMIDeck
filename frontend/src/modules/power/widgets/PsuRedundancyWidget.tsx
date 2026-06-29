@@ -115,11 +115,14 @@ export function PsuRedundancyWidget({ serverId, w, h }: Props) {
   const tone = aggregateTone(psus);
   const okCount = psus.filter((p) => p.status === "ok").length;
   const Icon = tone === "ok" ? CheckCircle2 : tone === "warn" ? AlertTriangle : XCircle;
+  // D-04: pill pairs the semantic token color with a distinct icon (CheckCircle2 /
+  // AlertTriangle / XCircle) + a translated label. Routed through the foundation
+  // --color-success/warning/danger tokens, not raw emerald/yellow/red-500.
   const pillClass = cn(
     "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-semibold",
-    tone === "ok" && "bg-emerald-500/10 text-emerald-500",
-    tone === "warn" && "bg-yellow-500/10 text-yellow-500",
-    tone === "fail" && "bg-red-500/10 text-red-500",
+    tone === "ok" && "bg-success/10 text-success",
+    tone === "warn" && "bg-warning/10 text-warning",
+    tone === "fail" && "bg-danger/10 text-danger",
   );
   // Aggregate label: when fully redundant use the "Redundant" key (Decision S /
   // hygiene #4 — widget.psuRedundant, NOT psuStatusRedundant); otherwise reuse the
@@ -162,10 +165,10 @@ export function PsuRedundancyWidget({ serverId, w, h }: Props) {
           const wattage = psu.voltage != null && psu.current != null ? psu.voltage * psu.current : null;
           const dotColor =
             psu.status === "ok"
-              ? "bg-emerald-500"
+              ? "bg-success"
               : psu.status === "predictive"
-                ? "bg-yellow-500"
-                : "bg-red-500";
+                ? "bg-warning"
+                : "bg-danger";
           const statusLabel =
             psu.status === "ok"
               ? t("widget.psuStatusOk")

@@ -155,9 +155,9 @@ export function WidgetCatalog({ open, onClose }: WidgetCatalogProps) {
               {t("widget.resetLayout")}
             </button>
           ) : (
-            <div className="mt-3 rounded-md border border-red-500/30 bg-red-500/5 p-3">
+            <div className="mt-3 rounded-md border border-danger/30 bg-danger/5 p-3">
               <div className="flex items-start gap-2">
-                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-500" />
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-danger" />
                 <p className="text-xs text-muted-foreground">
                   {t("widget.resetLayoutConfirm")}
                 </p>
@@ -174,7 +174,7 @@ export function WidgetCatalog({ open, onClose }: WidgetCatalogProps) {
                   onClick={handleReset}
                   disabled={resetting || !online}
                   title={!online ? t("header.backendDisconnected") : undefined}
-                  className="flex-1 rounded-md bg-red-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-600 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex-1 rounded-md bg-danger px-3 py-1.5 text-xs font-semibold text-white hover:bg-danger/90 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {resetting ? t("widget.resetting") : t("widget.reset")}
                 </button>

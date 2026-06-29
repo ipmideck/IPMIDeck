@@ -24,11 +24,11 @@ export function DemoBanner() {
   if (!visible) return null;
 
   return (
-    <div className="flex items-center justify-center gap-2 bg-amber-500/90 px-4 py-1.5 text-xs font-medium text-amber-950">
+    <div className="flex items-center justify-center gap-2 bg-warning px-4 py-1.5 text-xs font-medium text-background">
       <span>{t("banner.demoText")}</span>
       <button
         onClick={() => setVisible(false)}
-        className="ml-1 rounded p-0.5 hover:bg-amber-600/30 transition-colors"
+        className="ml-1 rounded p-0.5 hover:bg-background/20 transition-colors"
         aria-label={t("banner.dismiss")}
       >
         <X className="h-3.5 w-3.5" />

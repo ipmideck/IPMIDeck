@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { LogOut, Menu, MoreVertical } from "lucide-react";
+import { LogOut, Menu, MoreVertical, Wifi, WifiOff, RotateCw } from "lucide-react";
 import { useServerStore } from "@/stores/server-store";
 import { useAuthStore } from "@/stores/auth-store";
 import { useConnectionStore, type WSStatus } from "@/stores/connection-store";
@@ -16,27 +16,38 @@ interface HeaderProps {
 
 function ConnectionBadge({ status }: { status: WSStatus }) {
   const { t } = useTranslation();
+  // D-04: WS status pairs the semantic token color with a distinct lucide icon
+  // (Wifi / RotateCw / WifiOff) AND a translated text label that is ALWAYS visible —
+  // state never rides on hue alone, even on mobile. Routed through the foundation
+  // --color-success/warning/danger tokens (text-success/warning/danger) instead of
+  // the old hardcoded emerald/yellow/red-500 (D-01/D-03 — out of the split-brain).
+  const StatusIcon =
+    status === "connected" ? Wifi : status === "connecting" ? RotateCw : WifiOff;
+  const tone =
+    status === "connected" ? "bg-success/10 text-success" :
+    status === "connecting" ? "bg-warning/10 text-warning" :
+    "bg-danger/10 text-danger";
+  const label =
+    status === "connected" ? t("header.live") :
+    status === "connecting" ? t("header.connecting") :
+    t("header.offline");
   return (
     <div
       className={cn(
-        "flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium",
-        status === "connected" && "bg-emerald-500/10 text-emerald-500",
-        status === "connecting" && "bg-yellow-500/10 text-yellow-500",
-        status === "disconnected" && "bg-red-500/10 text-red-500"
+        "flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium",
+        tone
       )}
     >
-      <div
+      <StatusIcon
         className={cn(
-          "h-1.5 w-1.5 rounded-full",
-          status === "connected" && "bg-emerald-500",
-          status === "connecting" && "bg-yellow-500",
-          status === "disconnected" && "bg-red-500"
+          "h-3 w-3 shrink-0",
+          status === "connecting" && "animate-spin"
         )}
+        aria-hidden="true"
       />
-      {/* Text label drops below sm: — the colored dot stays as the at-a-glance indicator. */}
-      <span className="hidden sm:inline">
-        {status === "connected" ? t("header.live") : status === "connecting" ? t("header.connecting") : t("header.offline")}
-      </span>
+      {/* Always-visible label — the non-color signal that keeps the state readable
+          at every breakpoint (icon shape + text, not just a colored dot). */}
+      <span>{label}</span>
     </div>
   );
 }

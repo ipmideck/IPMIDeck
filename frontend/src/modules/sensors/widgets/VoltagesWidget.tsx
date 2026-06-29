@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { SlidersHorizontal } from "lucide-react";
+import { SlidersHorizontal, CheckCircle2, AlertTriangle, AlertOctagon, CircleHelp } from "lucide-react";
 import { useSensorStore } from "@/stores/sensor-store";
 import { useBackendOnline } from "@/stores/connection-store";
 import { cn } from "@/lib/utils";
@@ -73,14 +73,17 @@ export function VoltagesWidget({ serverId, hiddenSensors, onHiddenChange }: Volt
     return <div className="flex h-full items-center justify-center text-muted-foreground">—</div>;
   }
 
-  const dotColor = (status?: string) =>
+  // D-04: each rail status pairs the semantic token color with a distinct icon
+  // SHAPE and a translated text label — never color (the dot) alone. Routed through
+  // the foundation --color-success/warning/danger tokens, not raw emerald/yellow/red.
+  const statusMeta = (status?: string) =>
     status === "ok"
-      ? "bg-emerald-500"
+      ? { Icon: CheckCircle2, tone: "text-success", label: t("widget.statusNormal") }
       : status === "warning"
-        ? "bg-yellow-500"
+        ? { Icon: AlertTriangle, tone: "text-warning", label: t("widget.statusWarning") }
         : status === "critical"
-          ? "bg-red-500"
-          : "bg-muted-foreground/40";
+          ? { Icon: AlertOctagon, tone: "text-danger", label: t("widget.statusCritical") }
+          : { Icon: CircleHelp, tone: "text-muted-foreground", label: t("widget.statusUnknown") };
 
   // 04-W5-02: one card per non-PSU voltage rail. PSU V/A pairs are rendered by the
   // dedicated PSU Redundancy widget now, so no voltage↔current pairing happens here.
@@ -156,10 +159,15 @@ export function VoltagesWidget({ serverId, hiddenSensors, onHiddenChange }: Volt
           filterControl ? "pt-6" : ""
         )}
       >
-        {cards.map((c) => (
+        {cards.map((c) => {
+          const sm = statusMeta(c.status);
+          return (
           <div key={c.key} className="rounded-lg border border-border bg-background/40 p-2.5">
             <div className="flex items-center gap-1.5">
-              <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", dotColor(c.status))} />
+              {/* D-04 companion: icon SHAPE + semantic color + a translated status
+                  word — never color (a bare dot) alone. The rail name follows. */}
+              <sm.Icon className={cn("h-3 w-3 shrink-0", sm.tone)} aria-hidden="true" />
+              <span className={cn("shrink-0 text-[10px] font-medium", sm.tone)}>{sm.label}</span>
               <span className="truncate text-[11px] text-muted-foreground">{c.label}</span>
             </div>
             {c.voltage != null ? (
@@ -171,7 +179,8 @@ export function VoltagesWidget({ serverId, hiddenSensors, onHiddenChange }: Volt
               <div className="mt-1 font-mono text-2xl font-bold leading-none text-muted-foreground">—</div>
             )}
           </div>
-        ))}
+          );
+        })}
       </div>
     );
   }

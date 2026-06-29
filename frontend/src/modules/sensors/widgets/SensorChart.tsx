@@ -367,7 +367,7 @@ export function SensorChart({
   // the top-right control icons. Small, unobtrusive, always reachable.
   const disconnectedOverlay = !online ? (
     <div className="pointer-events-none absolute bottom-2 left-2 z-10">
-      <div className="flex items-center gap-1.5 rounded-md border border-red-500/30 bg-card/95 px-2 py-0.5 text-[10px] font-medium text-red-500 shadow">
+      <div className="flex items-center gap-1.5 rounded-md border border-danger/30 bg-card/95 px-2 py-0.5 text-[10px] font-medium text-danger shadow">
         <WifiOff className="h-3 w-3" />
         {t("power.disconnected")}
       </div>
