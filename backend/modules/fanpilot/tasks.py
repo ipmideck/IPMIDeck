@@ -7,6 +7,7 @@ import json
 import logging
 from datetime import datetime
 
+from backend.core.ipmi_service import is_fan_capable
 from backend.modules.fanpilot.engine import FanPilotController
 
 logger = logging.getLogger("ipmideck.modules.fanpilot")
@@ -28,6 +29,15 @@ _last_state: dict[str, dict] = {}
 # this in-memory map is safe (PROJECT constraint: single process). Module-level
 # so it survives across loop iterations; cleared on fanpilot_shutdown().
 _last_online_state: dict[str, bool] = {}
+
+# 08-03 (D-14): one-shot skip alert for MONITORING-ONLY vendors (hpe/lenovo/generic —
+# is_fan_capable(vendor) is False). Maps str server_id -> the vendor last alerted, so the loop
+# alerts ONCE per (server, vendor) instead of every tick. Because the loop NEVER mutates
+# fanpilot_enabled for these servers (unlike the write_rejected fail-safe), switching the
+# server's vendor to a fan-capable one auto-resumes control on a later tick; the else-branch
+# pops the entry so a later monitoring-only switch re-arms the alert. Cleared on
+# fanpilot_shutdown() alongside the other per-server maps.
+_monitoring_only_alerted: dict[str, str] = {}
 
 # === P0-2 (FANPILOT-FAILSAFE-VALUE): garbage-value plausibility guard ===
 # A *fresh* sensor row holding an implausible value falls through the Phase-4
@@ -776,6 +786,34 @@ async def fanpilot_loop():
                 if not current_online:
                     continue
 
+                # 08-03 (D-14): monitoring-only vendor (hpe/lenovo/generic — is_fan_capable
+                # is False). SKIP the fan write entirely; do NOT call _apply_fan_write and do
+                # NOT mutate fanpilot_enabled (so switching the vendor to a supported one
+                # auto-resumes control on a later tick). Alert ONCE per (server, vendor) — never
+                # once per tick — and re-arm on vendor change. This is a DIFFERENT path from the
+                # write_rejected fail-safe (which sets enabled=0); the write path below is simply
+                # never reached for these vendors, so the enabled=0 mutation no longer fires for
+                # a monitoring-only server. The unsupported-vendor guard INSIDE _apply_fan_write
+                # stays as defense-in-depth.
+                vendor = server["vendor"] or "dell"
+                if not is_fan_capable(vendor):
+                    if _monitoring_only_alerted.get(server_id) != vendor:
+                        _monitoring_only_alerted[server_id] = vendor
+                        if ctx.ws is not None:
+                            await ctx.ws.broadcast_alert(
+                                server_id, "warning", "FanPilot",
+                                f"FanPilot skipped: '{vendor}' is monitoring-only "
+                                f"(no IPMI fan control). Switch to a supported vendor to "
+                                f"enable control.",
+                                None,
+                            )
+                    # Honest /status: not actively controlling (no false 'fanpilot active').
+                    set_last_state(server_id, "auto")
+                    continue
+                # Fan-capable vendor: re-arm the one-shot flag so a later monitoring-only
+                # switch alerts again.
+                _monitoring_only_alerted.pop(server_id, None)
+
                 # P0-3 best-effort read-back: confirm the PRIOR tick's accepted write
                 # actually moved the fans (records 'confirmed' / 'applied_unverified').
                 # Observational only — never trips recovery (D-P03-02).
@@ -987,6 +1025,7 @@ async def fanpilot_shutdown():
     _controllers.clear()
     _last_state.clear()
     _last_online_state.clear()
+    _monitoring_only_alerted.clear()
     _garbage_counts.clear()
     _pending_readback.clear()
     _source_last_seen.clear()
