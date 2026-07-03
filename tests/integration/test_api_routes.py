@@ -308,6 +308,116 @@ def test_update_server_without_host_succeeds(client):
     assert match[0]["host"] == "192.0.2.42"
 
 
+# --- 08-01 (D-12): strict vendor enum -> automatic 422 at the parse layer -------------------
+
+
+def test_create_server_rejects_unknown_vendor(client):
+    """POST with a non-enum vendor is rejected with a Pydantic 422 (parse-layer), not a 200.
+
+    The Literal[...] on ServerCreate.vendor raises BEFORE create_server's body runs, so the
+    response is a genuine HTTP 422 — never a 200 with {"success": False}. RFC5737 host only.
+    """
+    resp = client.post(
+        "/api/servers",
+        json={
+            "name": "Bad vendor",
+            "host": "192.0.2.60",
+            "username": "root",
+            "password": "calvin",
+            "vendor": "acme",
+        },
+    )
+    assert resp.status_code == 422, resp.text
+
+    # The rejected create must not have inserted a row with that host.
+    list_resp = client.get("/api/servers")
+    assert list_resp.status_code == 200
+    hosts = [s["host"] for s in list_resp.json()["servers"]]
+    assert "192.0.2.60" not in hosts
+
+
+def test_update_server_rejects_unknown_vendor(client):
+    """Create a valid server, then PUT a non-enum vendor -> 422 (parse-layer rejection)."""
+    create_resp = client.post(
+        "/api/servers",
+        json={
+            "name": "Vendor edit",
+            "host": "192.0.2.61",
+            "username": "root",
+            "password": "calvin",
+            "vendor": "dell",
+        },
+    )
+    assert create_resp.status_code == 200, create_resp.text
+    server_id = create_resp.json()["server_id"]
+
+    update_resp = client.put(f"/api/servers/{server_id}", json={"vendor": "acme"})
+    assert update_resp.status_code == 422, update_resp.text
+
+    # The invalid PUT left the stored vendor unchanged (still 'dell').
+    get_resp = client.get(f"/api/servers/{server_id}")
+    assert get_resp.status_code == 200
+    assert get_resp.json()["server"]["vendor"] == "dell"
+
+
+def test_update_server_without_vendor_ok(client):
+    """PUT that OMITS vendor is accepted (not 422) and leaves the stored vendor unchanged.
+
+    Pitfall 8: vendor stays Optional, so exclude_unset semantics keep an omitted vendor intact.
+    """
+    create_resp = client.post(
+        "/api/servers",
+        json={
+            "name": "Keep vendor",
+            "host": "192.0.2.62",
+            "username": "root",
+            "password": "calvin",
+            "vendor": "supermicro",
+        },
+    )
+    assert create_resp.status_code == 200, create_resp.text
+    server_id = create_resp.json()["server_id"]
+
+    update_resp = client.put(f"/api/servers/{server_id}", json={"name": "Renamed only"})
+    assert update_resp.status_code == 200, update_resp.text
+    assert update_resp.json()["success"] is True
+
+    get_resp = client.get(f"/api/servers/{server_id}")
+    assert get_resp.status_code == 200
+    server = get_resp.json()["server"]
+    assert server["name"] == "Renamed only"
+    assert server["vendor"] == "supermicro"  # unchanged
+
+
+def test_create_server_accepts_new_vendors(client):
+    """POST with the two NEW enum values (lenovo, ibm) succeeds — proves the enum accepts them."""
+    lenovo_resp = client.post(
+        "/api/servers",
+        json={
+            "name": "Lenovo XCC",
+            "host": "192.0.2.63",
+            "username": "root",
+            "password": "calvin",
+            "vendor": "lenovo",
+        },
+    )
+    assert lenovo_resp.status_code == 200, lenovo_resp.text
+    assert lenovo_resp.json()["success"] is True
+
+    ibm_resp = client.post(
+        "/api/servers",
+        json={
+            "name": "IBM IMM",
+            "host": "192.0.2.64",
+            "username": "root",
+            "password": "calvin",
+            "vendor": "ibm",
+        },
+    )
+    assert ibm_resp.status_code == 200, ibm_resp.text
+    assert ibm_resp.json()["success"] is True
+
+
 # --- 05-02 (P0-3): /mode route success-honesty -------------------------------------------
 
 

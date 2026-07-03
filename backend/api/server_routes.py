@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -10,6 +11,13 @@ from pydantic import BaseModel
 from backend.core.i18n import get_lang, t
 
 router = APIRouter()
+
+
+# 08-01 D-01/D-12: the canonical six-value vendor vocabulary. As a Pydantic Literal on the
+# request models, ANY other string is rejected at the PARSE layer with an automatic HTTP 422
+# (before the handler body runs), closing the "garbage vendor string reaches dispatch" class
+# and retiring the legacy 'hp' value (normalized to 'hpe' by the database.py D-02 migration).
+Vendor = Literal["dell", "supermicro", "hpe", "lenovo", "ibm", "generic"]
 
 
 SERVER_COLORS = ["#2563eb", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899", "#6366f1"]
@@ -54,7 +62,7 @@ class ServerCreate(BaseModel):
     port: int = 623
     username: str
     password: str
-    vendor: str = "dell"
+    vendor: Vendor = "dell"
     color: str = ""
     # 04-W2-02: per-server energy tariff (€/kWh, USD/kWh, etc.). NULL = not configured.
     cost_per_kwh: float | None = None
@@ -67,7 +75,9 @@ class ServerUpdate(BaseModel):
     port: int | None = None
     username: str | None = None
     password: str | None = None
-    vendor: str | None = None
+    # 08-01 Pitfall 8: keep vendor OPTIONAL so a PUT that omits it leaves the column
+    # unchanged (exclude_unset). Only a NON-null INVALID value trips the Literal -> 422.
+    vendor: Vendor | None = None
     color: str | None = None
     # 04-W2-02: per-server energy tariff. Explicit null clears; omitted leaves unchanged
     # (handled via model_dump(exclude_unset=True) in update_server).
