@@ -39,6 +39,11 @@ import pytest
 # FIXED commit constants (REVIEW FIX-1) — NEVER substitute a moving HEAD for a product-diff.
 PHASE6_BASELINE = "a9d2f12"  # pre-Phase-6 baseline (== main tip)
 PHASE6_TIP = "b207817"  # Phase-6 branch tip — FIXED; product diff is a9d2f12..b207817
+# 08-01: Phase-7 tip — FIXED upper bound for the scaffolding-scope range. Phase 8 legitimately
+# commits backend PRODUCT python (vendor correctness), so pinning the Phase-7 range END here
+# (mirroring the FIX-1 moving-HEAD rationale above) keeps the "Phase-7 added ONLY scaffolding"
+# guard exact and immune to Phase-8+ commits — an unbounded b207817..HEAD would falsely flag them.
+PHASE7_TIP = "86268dd"  # last Phase-7 commit (== HEAD immediately before Phase 8 began)
 
 # Repo root derived at runtime (CLAUDE.md: never hardcode an absolute user path).
 # This file lives at <repo>/tests/integration/test_baseline_invariance.py -> parents[2] == repo.
@@ -61,7 +66,7 @@ def _require_baseline() -> None:
     A skipped invariance test cannot be told apart from a silent regression pass, so a missing
     baseline must FAIL — it can never count as C3 evidence.
     """
-    for sha in (PHASE6_BASELINE, PHASE6_TIP):
+    for sha in (PHASE6_BASELINE, PHASE6_TIP, PHASE7_TIP):
         result = _git("cat-file", "-e", f"{sha}^{{commit}}")
         if result.returncode != 0:
             pytest.fail(
@@ -164,19 +169,21 @@ def test_route_declaration_files_unchanged_phase6():
 
 
 def test_phase7_scaffolding_scope_only():
-    """The Phase-7 range b207817..HEAD contains ONLY verification scaffolding (REVIEW FIX-1).
+    """The Phase-7 range b207817..86268dd contains ONLY verification scaffolding (REVIEW FIX-1).
 
-    This is the SEPARATE scaffolding check — it intentionally references HEAD because it guards
-    the Phase-7 commits themselves (NOT a Phase-6 product diff). Allow-list per changed path:
+    This is the SEPARATE scaffolding check — it guards the Phase-7 commits themselves (NOT a
+    Phase-6 product diff). The upper bound is PINNED to the Phase-7 tip (PHASE7_TIP), NOT a moving
+    HEAD: Phase 8 legitimately adds backend PRODUCT python (per-vendor IPMI correctness), and an
+    unbounded b207817..HEAD would falsely flag those Phase-8 commits. Pinning the END mirrors the
+    FIX-1 rationale already applied to the Phase-6 product diff, so the guard stays exact forever.
+
+    Allow-list per changed path in the Phase-7 range:
       * tests/integration/*.py  (the verification tests), OR
       * scripts/*               (optional check scripts).
     Explicitly: ZERO backend/**.py outside tests/, and ZERO frontend/** product code.
-
-    At plan-write time b207817..HEAD was EMPTY (HEAD == b207817) -> vacuously green; it encodes
-    the policy for when 07-01/07-02 commit their test files.
     """
     _require_baseline()
-    changed = _changed_paths(f"{PHASE6_TIP}..HEAD")
+    changed = _changed_paths(f"{PHASE6_TIP}..{PHASE7_TIP}")
 
     def _allowed(path: str) -> bool:
         if path.startswith("tests/integration/") and path.endswith(".py"):
@@ -189,7 +196,7 @@ def test_phase7_scaffolding_scope_only():
     assert out_of_allowlist == [], (
         "Phase-7 range must contain ONLY verification scaffolding "
         "(tests/integration/*.py or scripts/), but these are out of the allow-list "
-        f"across {PHASE6_TIP}..HEAD:\n" + "\n".join(out_of_allowlist)
+        f"across {PHASE6_TIP}..{PHASE7_TIP}:\n" + "\n".join(out_of_allowlist)
     )
 
     # Hard belt-and-suspenders: no backend product python, no frontend product code.
