@@ -239,10 +239,6 @@
     "passwordPlaceholder": "IPMI 密码",
     "editUsernamePlaceholder": "用户名（留空以保留当前值）",
     "editPasswordPlaceholder": "密码（留空以保留当前值）",
-    "vendorDell": "Dell",
-    "vendorSupermicro": "Supermicro",
-    "vendorHpe": "HPE",
-    "vendorGeneric": "通用",
     "aria": {
       "editServer": "编辑服务器",
       "testConnection": "测试连接",
@@ -410,12 +406,6 @@
       "authSetup": "身份验证",
       "addServer": "添加服务器",
       "done": "完成"
-    },
-    "vendors": {
-      "supermicro": "Supermicro",
-      "dell": "Dell iDRAC",
-      "hp": "HP iLO",
-      "generic": "通用 IPMI"
     },
     "auth": {
       "title": "需要登录吗？",
@@ -660,5 +650,18 @@
     "criticalTitle": "IPMIDeck — 严重事件",
     "warningTitle": "IPMIDeck — 警告",
     "fanpilotRecovered": "FanPilot 已在 {{name}} 上恢复 BMC-auto(服务器离线)"
+  },
+  "vendors": {
+    "dell": "Dell",
+    "supermicro": "Supermicro",
+    "ibm": "IBM",
+    "hpe": "HPE",
+    "lenovo": "Lenovo",
+    "generic": "通用"
+  },
+  "vendorTier": {
+    "tested": "已测试",
+    "experimental": "实验性",
+    "monitoringOnly": "仅监控"
   }
 }

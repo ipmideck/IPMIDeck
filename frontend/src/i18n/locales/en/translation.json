@@ -239,10 +239,6 @@
     "passwordPlaceholder": "IPMI Password",
     "editUsernamePlaceholder": "Username (leave blank to keep current)",
     "editPasswordPlaceholder": "Password (leave blank to keep current)",
-    "vendorDell": "Dell",
-    "vendorSupermicro": "Supermicro",
-    "vendorHpe": "HPE",
-    "vendorGeneric": "Generic",
     "aria": {
       "editServer": "Edit server",
       "testConnection": "Test connection",
@@ -410,12 +406,6 @@
       "authSetup": "Auth Setup",
       "addServer": "Add Server",
       "done": "Done"
-    },
-    "vendors": {
-      "supermicro": "Supermicro",
-      "dell": "Dell iDRAC",
-      "hp": "HP iLO",
-      "generic": "Generic IPMI"
     },
     "auth": {
       "title": "Require login?",
@@ -662,5 +652,18 @@
     "criticalTitle": "IPMIDeck — Critical event",
     "warningTitle": "IPMIDeck — Warning",
     "fanpilotRecovered": "FanPilot restored BMC-auto on {{name}} (server offline)"
+  },
+  "vendors": {
+    "dell": "Dell",
+    "supermicro": "Supermicro",
+    "ibm": "IBM",
+    "hpe": "HPE",
+    "lenovo": "Lenovo",
+    "generic": "Generic"
+  },
+  "vendorTier": {
+    "tested": "Tested",
+    "experimental": "Experimental",
+    "monitoringOnly": "Monitoring-only"
   }
 }

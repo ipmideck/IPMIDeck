@@ -239,10 +239,6 @@
     "passwordPlaceholder": "IPMI 비밀번호",
     "editUsernamePlaceholder": "사용자 이름 (현재 값을 유지하려면 비워 두세요)",
     "editPasswordPlaceholder": "비밀번호 (현재 값을 유지하려면 비워 두세요)",
-    "vendorDell": "Dell",
-    "vendorSupermicro": "Supermicro",
-    "vendorHpe": "HPE",
-    "vendorGeneric": "일반",
     "aria": {
       "editServer": "서버 편집",
       "testConnection": "연결 테스트",
@@ -410,12 +406,6 @@
       "authSetup": "인증",
       "addServer": "서버 추가",
       "done": "완료"
-    },
-    "vendors": {
-      "supermicro": "Supermicro",
-      "dell": "Dell iDRAC",
-      "hp": "HP iLO",
-      "generic": "일반 IPMI"
     },
     "auth": {
       "title": "로그인을 요구하시겠습니까?",
@@ -660,5 +650,18 @@
     "criticalTitle": "IPMIDeck — 중요 이벤트",
     "warningTitle": "IPMIDeck — 경고",
     "fanpilotRecovered": "FanPilot이 {{name}}에서 BMC-auto를 복구했습니다 (서버 오프라인)"
+  },
+  "vendors": {
+    "dell": "Dell",
+    "supermicro": "Supermicro",
+    "ibm": "IBM",
+    "hpe": "HPE",
+    "lenovo": "Lenovo",
+    "generic": "일반"
+  },
+  "vendorTier": {
+    "tested": "테스트됨",
+    "experimental": "실험적",
+    "monitoringOnly": "모니터링 전용"
   }
 }

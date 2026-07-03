@@ -239,10 +239,6 @@
     "passwordPlaceholder": "IPMI-wachtwoord",
     "editUsernamePlaceholder": "Gebruikersnaam (leeg laten om te behouden)",
     "editPasswordPlaceholder": "Wachtwoord (leeg laten om te behouden)",
-    "vendorDell": "Dell",
-    "vendorSupermicro": "Supermicro",
-    "vendorHpe": "HPE",
-    "vendorGeneric": "Generiek",
     "aria": {
       "editServer": "Server bewerken",
       "testConnection": "Verbinding testen",
@@ -410,12 +406,6 @@
       "authSetup": "Authenticatie",
       "addServer": "Server toevoegen",
       "done": "Klaar"
-    },
-    "vendors": {
-      "supermicro": "Supermicro",
-      "dell": "Dell iDRAC",
-      "hp": "HP iLO",
-      "generic": "Generieke IPMI"
     },
     "auth": {
       "title": "Aanmelden vereisen?",
@@ -662,5 +652,18 @@
     "criticalTitle": "IPMIDeck — Kritieke gebeurtenis",
     "warningTitle": "IPMIDeck — Waarschuwing",
     "fanpilotRecovered": "FanPilot heeft BMC-auto hersteld op {{name}} (server offline)"
+  },
+  "vendors": {
+    "dell": "Dell",
+    "supermicro": "Supermicro",
+    "ibm": "IBM",
+    "hpe": "HPE",
+    "lenovo": "Lenovo",
+    "generic": "Generiek"
+  },
+  "vendorTier": {
+    "tested": "Getest",
+    "experimental": "Experimenteel",
+    "monitoringOnly": "Alleen bewaking"
   }
 }

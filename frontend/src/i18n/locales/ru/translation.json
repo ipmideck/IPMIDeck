@@ -239,10 +239,6 @@
     "passwordPlaceholder": "Пароль IPMI",
     "editUsernamePlaceholder": "Имя пользователя (оставьте пустым, чтобы сохранить)",
     "editPasswordPlaceholder": "Пароль (оставьте пустым, чтобы сохранить)",
-    "vendorDell": "Dell",
-    "vendorSupermicro": "Supermicro",
-    "vendorHpe": "HPE",
-    "vendorGeneric": "Универсальный",
     "aria": {
       "editServer": "Изменить сервер",
       "testConnection": "Проверить соединение",
@@ -410,12 +406,6 @@
       "authSetup": "Аутентификация",
       "addServer": "Добавить сервер",
       "done": "Готово"
-    },
-    "vendors": {
-      "supermicro": "Supermicro",
-      "dell": "Dell iDRAC",
-      "hp": "HP iLO",
-      "generic": "Универсальный IPMI"
     },
     "auth": {
       "title": "Требовать вход?",
@@ -666,5 +656,18 @@
     "criticalTitle": "IPMIDeck — Критическое событие",
     "warningTitle": "IPMIDeck — Предупреждение",
     "fanpilotRecovered": "FanPilot восстановил BMC-auto на {{name}} (сервер оффлайн)"
+  },
+  "vendors": {
+    "dell": "Dell",
+    "supermicro": "Supermicro",
+    "ibm": "IBM",
+    "hpe": "HPE",
+    "lenovo": "Lenovo",
+    "generic": "Общий"
+  },
+  "vendorTier": {
+    "tested": "Протестировано",
+    "experimental": "Экспериментально",
+    "monitoringOnly": "Только мониторинг"
   }
 }

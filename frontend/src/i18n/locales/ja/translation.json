@@ -239,10 +239,6 @@
     "passwordPlaceholder": "IPMI パスワード",
     "editUsernamePlaceholder": "ユーザー名（現在の値を保持するには空欄）",
     "editPasswordPlaceholder": "パスワード（現在の値を保持するには空欄）",
-    "vendorDell": "Dell",
-    "vendorSupermicro": "Supermicro",
-    "vendorHpe": "HPE",
-    "vendorGeneric": "汎用",
     "aria": {
       "editServer": "サーバーを編集",
       "testConnection": "接続をテスト",
@@ -410,12 +406,6 @@
       "authSetup": "認証",
       "addServer": "サーバーを追加",
       "done": "完了"
-    },
-    "vendors": {
-      "supermicro": "Supermicro",
-      "dell": "Dell iDRAC",
-      "hp": "HP iLO",
-      "generic": "汎用 IPMI"
     },
     "auth": {
       "title": "ログインを要求しますか？",
@@ -660,5 +650,18 @@
     "criticalTitle": "IPMIDeck — 重大イベント",
     "warningTitle": "IPMIDeck — 警告",
     "fanpilotRecovered": "FanPilot は {{name}} で BMC-auto を復旧しました(サーバーオフライン)"
+  },
+  "vendors": {
+    "dell": "Dell",
+    "supermicro": "Supermicro",
+    "ibm": "IBM",
+    "hpe": "HPE",
+    "lenovo": "Lenovo",
+    "generic": "汎用"
+  },
+  "vendorTier": {
+    "tested": "テスト済み",
+    "experimental": "実験的",
+    "monitoringOnly": "監視のみ"
   }
 }
