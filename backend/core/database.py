@@ -114,6 +114,24 @@ class Database:
                 msg = str(e).lower()
                 if "duplicate column" not in msg and "already exists" not in msg:
                     raise
+        # 08-01 D-02 (SC-1): normalize the servers.vendor vocabulary to the canonical
+        # six-value enum (dell | supermicro | hpe | lenovo | ibm | generic). This is a
+        # DATA migration (not a schema change) — idempotent, mirroring the core-column
+        # ALTER precedent above, so it runs safely on every startup. NULL/'' are LEFT
+        # AS-IS so the runtime default 'dell' (Phase-4 Decision G) still applies.
+        # Ordering is deliberate: lowercase FIRST ('HP'->'hp'), THEN 'hp'->'hpe', THEN the
+        # non-enum sweep (so a just-lowercased valid value like 'dell' is not swept away).
+        await self._db.execute(
+            "UPDATE servers SET vendor = lower(vendor) "
+            "WHERE vendor IS NOT NULL AND vendor <> lower(vendor)"
+        )
+        await self._db.execute("UPDATE servers SET vendor = 'hpe' WHERE vendor = 'hp'")
+        await self._db.execute(
+            "UPDATE servers SET vendor = 'generic' "
+            "WHERE vendor IS NOT NULL AND vendor <> '' "
+            "AND vendor NOT IN ('dell','supermicro','hpe','lenovo','ibm','generic')"
+        )
+        await self._db.commit()
         logger.info("Database connected: %s", self.db_path)
 
     async def close(self) -> None:
