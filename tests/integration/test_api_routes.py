@@ -588,3 +588,82 @@ def test_mode_auto_persists_intent_and_clears_speed(client):
     intent = _server_intent(client, server_id)
     assert intent["fan_desired_mode"] == "auto"
     assert intent["fan_desired_speed"] is None
+
+
+# --- 08-04 (D-17): demo vendor-aware argv echo -> command_log (hardware-free routing proof) --
+
+
+def _create_server(client, vendor: str, host: str) -> str:
+    """Create a server of a given vendor through the auth-OFF client and return its id."""
+    resp = client.post(
+        "/api/servers",
+        json={
+            "name": f"Demo {vendor}",
+            "host": host,
+            "username": "demo",
+            "password": "demo",
+            "vendor": vendor,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()["server_id"]
+
+
+def _latest_log_text(client, server_id: str) -> str:
+    """Return the newest command_log row's command_detail + error_message joined, via /api/logs."""
+    logs_resp = client.get(f"/api/logs?server_id={server_id}")
+    assert logs_resp.status_code == 200, logs_resp.text
+    rows = logs_resp.json()["logs"]
+    assert rows, "expected at least one command_log row for the server"
+    row = rows[0]
+    return " ".join(str(row.get(k) or "") for k in ("command_detail", "error_message"))
+
+
+def test_demo_supermicro_write_echoes_argv_to_command_log(client):
+    """A demo supermicro manual /mode write records the both-zone 0x30 0x70 0x66 argv in command_log.
+
+    Proves per-vendor routing is assertable via GET /api/logs WITHOUT hardware: the vendor-aware
+    DemoIPMIService computes the would-be ipmitool argv through the shared build_fan_argv() and the
+    /mode route persists it into the command_log row (D-17).
+    """
+    server_id = _create_server(client, "supermicro", "192.0.2.71")
+    resp = client.post(
+        f"/api/modules/fanpilot/{server_id}/mode",
+        json={"mode": "manual", "speed": 50},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["success"] is True
+    detail = _latest_log_text(client, server_id)
+    assert "0x30 0x70 0x66" in detail, detail
+
+
+def test_demo_hpe_write_records_no_fan_argv(client):
+    """A demo hpe (monitoring-only) /mode write is unsupported — NO fan argv (0x..) recorded.
+
+    hpe has no IPMI fan control (VendorProfile fan_capable=False), so the demo service returns an
+    'unsupported' result, the route reports success:false, and the command_log row carries the
+    honest 'not supported' message — never a per-vendor raw argv.
+    """
+    server_id = _create_server(client, "hpe", "192.0.2.72")
+    resp = client.post(
+        f"/api/modules/fanpilot/{server_id}/mode",
+        json={"mode": "manual", "speed": 50},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["success"] is False  # monitoring-only vendor -> unsupported write
+    detail = _latest_log_text(client, server_id)
+    assert "0x70" not in detail
+    assert "0x30 0x70 0x66" not in detail
+
+
+def test_demo_dell_write_echoes_argv_to_command_log(client):
+    """A demo dell manual /mode write records the Dell 0x30 0x30 0x02 0xff speed argv (D-17)."""
+    server_id = _create_server(client, "dell", "192.0.2.73")
+    resp = client.post(
+        f"/api/modules/fanpilot/{server_id}/mode",
+        json={"mode": "manual", "speed": 50},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["success"] is True
+    detail = _latest_log_text(client, server_id)
+    assert "0x30 0x30 0x02 0xff" in detail, detail

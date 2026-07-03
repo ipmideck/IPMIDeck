@@ -15,6 +15,23 @@ from backend.modules.sensors.tasks import wake_loop as wake_sensor_loop
 router = APIRouter()
 
 
+def _fan_argv_echo(*results) -> str:
+    """Collect the per-vendor would-be ipmitool argv carried in FanWriteResult.detail (D-17).
+
+    The DemoIPMIService surfaces the would-be argv in `.detail` as a "raw 0x.. ..." string so
+    per-vendor routing is assertable via GET /api/logs without hardware. The REAL
+    LocalIPMIService returns detail="" on a successful write, so this is a no-op on the real
+    path (an empty echo changes nothing). Only details that start with "raw " are treated as
+    an argv echo — completion-code messages (e.g. "rsp=0xd4: ...") are deliberately excluded.
+    """
+    echoes = [
+        d
+        for res in results
+        if res is not None and (d := (res.detail or "").strip()) and d.startswith("raw ")
+    ]
+    return "; ".join(echoes)
+
+
 class ProfileCreate(BaseModel):
     name: str
     description: str = ""
@@ -189,6 +206,8 @@ async def set_fanpilot_mode(server_id: str, body: FanMode, lang: str = Depends(g
     # actual write and owns honesty there (P0-3 loop reaction), so it stays success.
     write_ok = True
     write_detail = ""
+    # D-17: the demo service echoes the would-be per-vendor argv here; "" on the real path.
+    argv_echo = ""
 
     # 05-03 (FANPILOT-RESUME-STATE / D-SR-01): persist the operator's DESIRED fan state
     # (fan_desired_mode + fan_desired_speed) on every /mode change so startup state-resume
@@ -200,6 +219,7 @@ async def set_fanpilot_mode(server_id: str, body: FanMode, lang: str = Depends(g
         mode_res = await ctx.ipmi.set_fan_mode(host, user, pwd, manual=False, vendor=vendor)
         write_ok = mode_res is None or mode_res.ok
         write_detail = "" if write_ok else mode_res.detail
+        argv_echo = _fan_argv_echo(mode_res)
         if write_ok:
             await ctx.db.execute(
                 "UPDATE servers SET fanpilot_enabled = 0, "
@@ -212,6 +232,7 @@ async def set_fanpilot_mode(server_id: str, body: FanMode, lang: str = Depends(g
         mode_res = await ctx.ipmi.set_fan_mode(host, user, pwd, manual=True, vendor=vendor)
         speed_res = await ctx.ipmi.set_fan_speed(host, user, pwd, speed, vendor=vendor)
         write_ok = (mode_res is None or mode_res.ok) and (speed_res is None or speed_res.ok)
+        argv_echo = _fan_argv_echo(mode_res, speed_res)
         if not write_ok:
             # Surface the rejected write's detail; prefer the speed result's message.
             failed = speed_res if (speed_res is not None and not speed_res.ok) else mode_res
@@ -252,10 +273,14 @@ async def set_fanpilot_mode(server_id: str, body: FanMode, lang: str = Depends(g
     # Log the REAL outcome — 'rejected' (with the BMC detail in error_message) when the
     # immediate write was refused, 'success' otherwise. Never an unconditional 'success'.
     result = "success" if write_ok else "rejected"
+    # D-17: when the service echoed the would-be per-vendor argv (demo mode), append it to
+    # command_detail so GET /api/logs proves routing (e.g. supermicro -> 0x30 0x70 0x66) with
+    # no hardware. Empty on the real path, so command_detail stays just the mode there.
+    command_detail = f"{body.mode} | {argv_echo}" if argv_echo else body.mode
     await ctx.db.execute(
         "INSERT INTO command_log (server_id, command_type, command_detail, result, error_message) "
         "VALUES (?, ?, ?, ?, ?)",
-        (server_id, "fan_mode", body.mode, result, None if write_ok else write_detail),
+        (server_id, "fan_mode", command_detail, result, None if write_ok else write_detail),
     )
     await ctx.db.commit()
 

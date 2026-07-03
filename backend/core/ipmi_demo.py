@@ -6,7 +6,21 @@ import math
 import random
 import time
 
-from backend.core.ipmi_service import FanWriteResult, IPMIService
+from backend.core.ipmi_service import (
+    FanWriteResult,
+    IPMIService,
+    build_fan_argv,
+    is_fan_capable,
+)
+
+
+def _argv_display(argvs: list[list[str]]) -> str:
+    """Flatten build_fan_argv() operand-lists to a single display string for the command-log echo.
+
+    e.g. [["raw","0x30","0x70","0x66","0x01","0x00","0x32"], [...0x01...]] ->
+    "raw 0x30 0x70 0x66 0x01 0x00 0x32; raw 0x30 0x70 0x66 0x01 0x01 0x32". Empty list -> "".
+    """
+    return "; ".join(" ".join(a) for a in argvs)
 
 
 class DemoIPMIService(IPMIService):
@@ -67,17 +81,36 @@ class DemoIPMIService(IPMIService):
     async def set_fan_mode(
         self, host: str, user: str, password: str, manual: bool, vendor: str = "dell"
     ) -> FanWriteResult:
-        # Demo: vendor is ignored (mock) — signature matches the ABC (Decision G).
+        # 08-04 (D-17): vendor-aware demo. Compute the would-be ipmitool argv via the SHARED
+        # builder and surface it in `.detail` so the caller (fanpilot /mode route) records it
+        # into command_log — per-vendor routing becomes assertable via GET /api/logs WITHOUT
+        # hardware. A monitoring-only vendor returns kind="unsupported" exactly as production.
+        vendor = (vendor or "dell").lower()
+        if not is_fan_capable(vendor):
+            return FanWriteResult(
+                False, "unsupported", None,
+                f"Fan control not supported for vendor '{vendor}'",
+            )
+        argvs = build_fan_argv(vendor, "mode", manual=manual)
         # P0-3: return a structured ok result so downstream code (loop/route) reads `.ok`.
+        # IBM manual-mode is a no-op ([] argv -> "") — same as production.
         self._fan_manual[host] = manual
-        return FanWriteResult(True, "ok", None, "")
+        return FanWriteResult(True, "ok", None, _argv_display(argvs))
 
     async def set_fan_speed(
         self, host: str, user: str, password: str, speed_pct: int, vendor: str = "dell"
     ) -> FanWriteResult:
-        # Demo: vendor is ignored (mock) — signature matches the ABC (Decision G).
+        # 08-04 (D-17): vendor-aware demo argv echo (see set_fan_mode). Supermicro -> both
+        # zones, IBM -> both banks, Dell -> single write; monitoring-only -> unsupported.
+        vendor = (vendor or "dell").lower()
+        if not is_fan_capable(vendor):
+            return FanWriteResult(
+                False, "unsupported", None,
+                f"Fan speed not supported for vendor '{vendor}'",
+            )
+        argvs = build_fan_argv(vendor, "speed", duty=speed_pct)
         self._fan_speed[host] = max(0, min(100, speed_pct))
-        return FanWriteResult(True, "ok", None, "")
+        return FanWriteResult(True, "ok", None, _argv_display(argvs))
 
     async def get_sel(self, host: str, user: str, password: str) -> list[dict]:
         return [
