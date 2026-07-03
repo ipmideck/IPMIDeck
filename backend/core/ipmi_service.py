@@ -204,6 +204,31 @@ def _scan_write_response(text: str) -> FanWriteResult | None:
     return classify_ipmi_error(RuntimeError(text))
 
 
+# === 08-02 (Pitfall 2): multi-write worst-of fold + bounded transient retry ===
+#
+# A vendor op can issue MORE than one raw write (Supermicro 2 zones, IBM 2 banks). A partial
+# failure (one zone/bank rejected or transient) must NEVER fold to a false ok while half the
+# board is uncontrolled. We fold the per-write FanWriteResults to the WORST outcome by this
+# severity ladder, and retry the WHOLE argv list when the fold is transient (mirror the loop's
+# C2 "retry BOTH writes" rule so a transient never masks a still-uncontrolled bank).
+_FAN_RESULT_SEVERITY = {"ok": 0, "transient": 1, "unsupported": 2, "rejected": 3}
+# Bounded whole-list retries for a TRANSIENT fan write. Total tries incl. the first; a small
+# local bound (the loop-level `_apply_fan_write` retry remains the outer safety net).
+_ARGV_RETRY_ATTEMPTS = 3
+
+
+def _worse_fan_result(current: FanWriteResult | None, new: FanWriteResult) -> FanWriteResult:
+    """Fold two FanWriteResults to the worst-of (rejected > unsupported > transient > ok).
+
+    A rejected/transient on ANY write outranks an ok, so the overall op is never a false ok
+    while a zone/bank is uncontrolled. The worst result's own ccode/detail is preserved."""
+    if current is None:
+        return new
+    if _FAN_RESULT_SEVERITY.get(new.kind, 3) > _FAN_RESULT_SEVERITY.get(current.kind, 3):
+        return new
+    return current
+
+
 class IPMIService(ABC):
     """Abstract IPMI interface. Implementations: Local (ipmitool) or Demo (mock)."""
 
@@ -349,16 +374,56 @@ class LocalIPMIService(IPMIService):
         output = await self._exec(host, user, password, ["chassis", "power", action])
         return output.strip()
 
+    async def _run_fan_argv(
+        self, host: str, user: str, password: str, argv_list: list[list[str]]
+    ) -> FanWriteResult:
+        """Issue each argv in `argv_list` through the UNCHANGED Phase-5 per-command pipeline,
+        fold worst-of, and retry the WHOLE list on a transient (bounded — Pitfall 1/2).
+
+        Single-write vendors (Dell) pass a 1-element list -> behavior identical to Phase 5.
+        Multi-write vendors (Supermicro 2 zones, IBM 2 banks) fold every write to the worst
+        outcome, so a rejected/transient on ANY write is never a false ok while a bank is
+        uncontrolled. The classify/scan/except lines below are byte-identical to Phase 5;
+        only their placement (inside the per-argv loop) changed (D-09)."""
+
+        async def _run_once() -> FanWriteResult:
+            worst: FanWriteResult | None = None
+            for args in argv_list:
+                try:
+                    out, err = await self._exec_capture(host, user, password, args)
+                except Exception as e:  # classify rejected/transient — never a false success.
+                    res = classify_ipmi_error(e)
+                else:
+                    # C1 / 05-RESEARCH Pitfall 2: ipmitool can exit 0 yet print a completion
+                    # code -> scan both streams so an exit-0 rejection is never a false ok.
+                    res = _scan_write_response(err) or _scan_write_response(out)
+                    if res is None:
+                        res = FanWriteResult(True, "ok", None, "")
+                worst = _worse_fan_result(worst, res)
+            return worst or FanWriteResult(True, "ok", None, "")
+
+        result = await _run_once()
+        # C2: a transient on any write retries the WHOLE list (both zones/banks), bounded.
+        attempts = 1
+        while (
+            not result.ok
+            and result.kind == "transient"
+            and attempts < _ARGV_RETRY_ATTEMPTS
+        ):
+            await asyncio.sleep(0.1 * attempts)
+            result = await _run_once()
+            attempts += 1
+        return result
+
     async def set_fan_mode(
         self, host: str, user: str, password: str, manual: bool, vendor: str = "dell"
     ) -> FanWriteResult:
-        # 04-W4-02: vendor dispatch. Default vendor="dell" keeps Plan 01's existing
-        # call sites (which pass NO vendor kwarg) valid (Decision G).
+        # 08-02 (D-09): data-driven dispatch. Default vendor="dell" keeps existing call sites
+        # (which pass NO vendor kwarg) valid (Decision G).
         vendor = (vendor or "dell").lower()
-        if vendor not in _SUPPORTED_FAN_VENDORS:
-            # P0-3 / D-P03-05: unsupported vendor can't be controlled over IPMI — no retry,
-            # no IPMI fail-safe possible. Return a structured result instead of raising so the
-            # loop/route handle it uniformly.
+        if not is_fan_capable(vendor):
+            # P0-3 / D-05: unsupported vendor can't be controlled over IPMI — no retry, no IPMI
+            # fail-safe possible. Structured result (not a raise) so loop/route handle it uniformly.
             return FanWriteResult(
                 False,
                 "unsupported",
@@ -366,34 +431,19 @@ class LocalIPMIService(IPMIService):
                 f"Fan control not supported for vendor '{vendor}' "
                 f"(supported: {sorted(_SUPPORTED_FAN_VENDORS)})",
             )
-        if vendor == "dell":
-            # 0x30 0x30 0x01 0x00 = manual; 0x01 = auto
-            val = "0x00" if manual else "0x01"
-            args = ["raw", "0x30", "0x30", "0x01", val]
-        else:  # supermicro
-            # 0x30 0x45 0x01 0x01 = Full (manual); 0x02 = Optimal (auto). Setting the
-            # profile to Full is required or Supermicro reverts to thermal-managed
-            # mode after ~5 min (RESEARCH Pitfall 5).
-            val = "0x01" if manual else "0x02"
-            args = ["raw", "0x30", "0x45", "0x01", val]
-        try:
-            out, err = await self._exec_capture(host, user, password, args)
-        except Exception as e:  # classify rejected/transient — never a false success.
-            return classify_ipmi_error(e)
-        # C1 / 05-RESEARCH Pitfall 2: ipmitool can exit 0 yet print a completion code -> scan
-        # both streams so an exit-0 rejection is never a false ok.
-        rejected = _scan_write_response(err) or _scan_write_response(out)
-        if rejected is not None:
-            return rejected
-        return FanWriteResult(True, "ok", None, "")
+        argv_list = build_fan_argv(vendor, "mode", manual=manual)
+        if not argv_list:
+            # IBM manual-mode is a no-op: manual is entered by the speed write's trailing 0x00.
+            return FanWriteResult(True, "ok", None, "")
+        return await self._run_fan_argv(host, user, password, argv_list)
 
     async def set_fan_speed(
         self, host: str, user: str, password: str, speed_pct: int, vendor: str = "dell"
     ) -> FanWriteResult:
-        # 04-W4-02: vendor dispatch. Default vendor="dell" (Decision G).
+        # 08-02 (D-09): data-driven dispatch. Default vendor="dell" (Decision G).
         vendor = (vendor or "dell").lower()
-        if vendor not in _SUPPORTED_FAN_VENDORS:
-            # P0-3 / D-P03-05: unsupported vendor — alert-only, no IPMI fail-safe possible.
+        if not is_fan_capable(vendor):
+            # P0-3 / D-05: unsupported vendor — alert-only, no IPMI fail-safe possible.
             return FanWriteResult(
                 False,
                 "unsupported",
@@ -401,24 +451,11 @@ class LocalIPMIService(IPMIService):
                 f"Fan speed not supported for vendor '{vendor}' "
                 f"(supported: {sorted(_SUPPORTED_FAN_VENDORS)})",
             )
-        speed = max(0, min(100, speed_pct))
-        hex_val = f"0x{speed:02x}"
-        if vendor == "dell":
-            # Dell: 0x30 0x30 0x02 0xff <pct_hex>
-            args = ["raw", "0x30", "0x30", "0x02", "0xff", hex_val]
-        else:  # supermicro
-            # Supermicro: 0x30 0x70 0x66 0x01 <zone=0x00> <pct_hex>; zone 0 = system fans.
-            args = ["raw", "0x30", "0x70", "0x66", "0x01", "0x00", hex_val]
-        try:
-            out, err = await self._exec_capture(host, user, password, args)
-        except Exception as e:  # classify rejected/transient — never a false success.
-            return classify_ipmi_error(e)
-        # C1 / 05-RESEARCH Pitfall 2: ipmitool can exit 0 yet print a completion code -> scan
-        # both streams so an exit-0 rejection is never a false ok.
-        rejected = _scan_write_response(err) or _scan_write_response(out)
-        if rejected is not None:
-            return rejected
-        return FanWriteResult(True, "ok", None, "")
+        argv_list = build_fan_argv(vendor, "speed", duty=speed_pct)
+        if not argv_list:
+            # Defensive: a fan-capable vendor with no speed argv (none today) is a no-op ok.
+            return FanWriteResult(True, "ok", None, "")
+        return await self._run_fan_argv(host, user, password, argv_list)
 
     async def get_sel(self, host: str, user: str, password: str) -> list[dict]:
         output = await self._exec(host, user, password, ["sel", "elist"])
