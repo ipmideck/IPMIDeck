@@ -514,3 +514,143 @@ async def test_demo_set_fan_returns_ok_result():
     mode_res = await demo.set_fan_mode("h", "u", "p", manual=True)
     assert speed_res.ok is True and speed_res.kind == "ok"
     assert mode_res.ok is True and mode_res.kind == "ok"
+
+
+# === 08-02 (D-10): boundary-complete pinned-argv per vendor × operation ===
+#
+# These PIN the exact ipmitool `raw` operands the data-driven VendorProfile dispatch emits for
+# every fan-capable vendor at the boundaries (0/100/clamp/hex), for BOTH zones (Supermicro) and
+# BOTH banks (IBM), and the honest no-spawn `unsupported` path for monitoring-only vendors. They
+# extend the same `_FakeProc` / create_subprocess_exec harness (NO real ipmitool / BMC). For a
+# multi-write vendor a single method call spawns 2+ subprocesses, so we RECORD every spawn's argv
+# (the per-write `_patch_capturing_create` recorder only keeps the LAST spawn).
+
+
+def _patch_recording_create(monkeypatch, procs) -> list:
+    """Monkeypatch create_subprocess_exec to record EVERY spawn's full argv into a list.
+
+    `procs` is either a single _FakeProc (reused for every spawn) or a list/tuple of _FakeProcs
+    consumed in spawn order (so a test can make zone 0 clean and zone 1 rejected). Returns the
+    list that collects each spawn's argv (positional args to create_subprocess_exec = the argv)."""
+    recorded: list[list[str]] = []
+    proc_iter = iter(procs) if isinstance(procs, (list, tuple)) else None
+
+    async def fake_create(*args, **kwargs):
+        recorded.append(list(args))
+        return next(proc_iter) if proc_iter is not None else procs
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create)
+    return recorded
+
+
+async def test_dell_speed_boundaries(monkeypatch):
+    """Dell duty encoding at the boundaries: 0->0x00, 100->0x64, clamp 150->0x64, -5->0x00, 50->0x32.
+
+    Each maps to the single Dell all-fans write tail `raw 0x30 0x30 0x02 0xff <hex>`."""
+    svc = LocalIPMIService()
+    for pct, expected in {0: "0x00", 100: "0x64", 150: "0x64", -5: "0x00", 50: "0x32"}.items():
+        captured = _patch_capturing_create(monkeypatch, _FakeProc(rc=0, out=b"", err=b""))
+        res = await svc.set_fan_speed("h", "u", "p", pct, vendor="dell")
+        assert res.ok is True, pct
+        assert list(captured["args"][-6:]) == ["raw", "0x30", "0x30", "0x02", "0xff", expected], pct
+
+
+async def test_dell_mode_manual_vs_auto(monkeypatch):
+    """Dell mode: manual -> raw 0x30 0x30 0x01 0x00 ; auto -> raw 0x30 0x30 0x01 0x01."""
+    svc = LocalIPMIService()
+    cap_m = _patch_capturing_create(monkeypatch, _FakeProc(rc=0, out=b"", err=b""))
+    await svc.set_fan_mode("h", "u", "p", manual=True, vendor="dell")
+    cap_a = _patch_capturing_create(monkeypatch, _FakeProc(rc=0, out=b"", err=b""))
+    await svc.set_fan_mode("h", "u", "p", manual=False, vendor="dell")
+    assert list(cap_m["args"][-5:]) == ["raw", "0x30", "0x30", "0x01", "0x00"]
+    assert list(cap_a["args"][-5:]) == ["raw", "0x30", "0x30", "0x01", "0x01"]
+
+
+async def test_supermicro_speed_writes_both_zones(monkeypatch):
+    """Supermicro speed 50 -> TWO spawns: zone 0x00 (CPU) then zone 0x01 (peripheral), tail 0x32 (D-07)."""
+    recorded = _patch_recording_create(monkeypatch, _FakeProc(rc=0, out=b"", err=b""))
+    svc = LocalIPMIService()
+    res = await svc.set_fan_speed("h", "u", "p", 50, vendor="supermicro")
+    assert res.ok is True
+    assert len(recorded) == 2
+    assert recorded[0][-7:] == ["raw", "0x30", "0x70", "0x66", "0x01", "0x00", "0x32"]
+    assert recorded[1][-7:] == ["raw", "0x30", "0x70", "0x66", "0x01", "0x01", "0x32"]
+    # Both zone bytes are present exactly once, in order 0x00 then 0x01.
+    assert recorded[0][-3:] == ["0x01", "0x00", "0x32"]
+    assert recorded[1][-3:] == ["0x01", "0x01", "0x32"]
+
+
+async def test_supermicro_mode_manual_and_restore(monkeypatch):
+    """Supermicro mode: manual (Full) -> raw 0x30 0x45 0x01 0x01 ; auto (Optimal) -> ...0x02."""
+    svc = LocalIPMIService()
+    cap_m = _patch_capturing_create(monkeypatch, _FakeProc(rc=0, out=b"", err=b""))
+    await svc.set_fan_mode("h", "u", "p", manual=True, vendor="supermicro")
+    cap_a = _patch_capturing_create(monkeypatch, _FakeProc(rc=0, out=b"", err=b""))
+    await svc.set_fan_mode("h", "u", "p", manual=False, vendor="supermicro")
+    assert list(cap_m["args"][-5:]) == ["raw", "0x30", "0x45", "0x01", "0x01"]
+    assert list(cap_a["args"][-5:]) == ["raw", "0x30", "0x45", "0x01", "0x02"]
+
+
+async def test_ibm_speed_writes_both_banks(monkeypatch):
+    """IBM speed 50 -> TWO spawns: bank 0x01 then bank 0x02, trailing 0x00 = manual, duty 0x32."""
+    recorded = _patch_recording_create(monkeypatch, _FakeProc(rc=0, out=b"", err=b""))
+    svc = LocalIPMIService()
+    res = await svc.set_fan_speed("h", "u", "p", 50, vendor="ibm")
+    assert res.ok is True
+    assert len(recorded) == 2
+    assert recorded[0][-6:] == ["raw", "0x3a", "0x07", "0x01", "0x32", "0x00"]
+    assert recorded[1][-6:] == ["raw", "0x3a", "0x07", "0x02", "0x32", "0x00"]
+
+
+async def test_ibm_restore_writes_both_banks(monkeypatch):
+    """IBM set_fan_mode(manual=False) restore -> TWO spawns: bank 0x01 then 0x02, trailing 0xff 0x01."""
+    recorded = _patch_recording_create(monkeypatch, _FakeProc(rc=0, out=b"", err=b""))
+    svc = LocalIPMIService()
+    res = await svc.set_fan_mode("h", "u", "p", manual=False, vendor="ibm")
+    assert res.ok is True
+    assert len(recorded) == 2
+    assert recorded[0][-6:] == ["raw", "0x3a", "0x07", "0x01", "0xff", "0x01"]
+    assert recorded[1][-6:] == ["raw", "0x3a", "0x07", "0x02", "0xff", "0x01"]
+
+
+async def test_ibm_manual_mode_is_noop_ok(monkeypatch):
+    """IBM set_fan_mode(manual=True) is a no-op ok (manual is applied by the speed write) — NO spawn."""
+    recorded = _patch_recording_create(monkeypatch, _FakeProc(rc=0, out=b"", err=b""))
+    svc = LocalIPMIService()
+    res = await svc.set_fan_mode("h", "u", "p", manual=True, vendor="ibm")
+    assert res.ok is True and res.kind == "ok"
+    assert recorded == []  # no subprocess spawned
+
+
+async def test_lenovo_and_generic_unsupported(monkeypatch):
+    """hpe/lenovo/generic (monitoring-only) speed & mode -> kind='unsupported', NO spawn (D-05/D-06)."""
+    recorded = _patch_recording_create(monkeypatch, _FakeProc(rc=0, out=b"", err=b""))
+    svc = LocalIPMIService()
+    for vendor in ("hpe", "lenovo", "generic"):
+        rs = await svc.set_fan_speed("h", "u", "p", 50, vendor=vendor)
+        rm = await svc.set_fan_mode("h", "u", "p", manual=True, vendor=vendor)
+        assert rs.ok is False and rs.kind == "unsupported" and rs.ccode is None, vendor
+        assert rm.ok is False and rm.kind == "unsupported" and rm.ccode is None, vendor
+    assert recorded == []  # monitoring-only vendors never spawn a fan write
+
+
+async def test_supermicro_partial_zone_reject_folds_not_ok(monkeypatch):
+    """Zone 0 clean but zone 1 carries an exit-0 rsp=0xd4 -> overall rejected/d4 (Pitfall 2 fold).
+
+    Never a false ok while the peripheral zone is uncontrolled; both zones ARE attempted."""
+    procs = [
+        _FakeProc(rc=0, out=b"", err=b""),  # zone 0x00 (CPU) accepted
+        _FakeProc(  # zone 0x01 (peripheral) rejected at exit-0 with a completion code
+            rc=0,
+            out=b"",
+            err=b"Unable to send RAW command (channel=0x0 netfn=0x30 lun=0x0 cmd=0x70 "
+            b"rsp=0xd4): Insufficient privilege level",
+        ),
+    ]
+    recorded = _patch_recording_create(monkeypatch, procs)
+    svc = LocalIPMIService()
+    res = await svc.set_fan_speed("h", "u", "p", 50, vendor="supermicro")
+    assert res.ok is False
+    assert res.kind == "rejected"
+    assert res.ccode == "d4"
+    assert len(recorded) == 2  # both zones attempted before folding to the worst-of
