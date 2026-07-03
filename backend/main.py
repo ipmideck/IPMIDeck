@@ -156,6 +156,46 @@ def print_banner_safe(text: str) -> None:
             print(APP_NAME)
 
 
+# 08-04 (D-16): one synthetic demo server per canonical vendor. RFC5737 documentation hosts
+# + synthetic throwaway creds ONLY (public repo — CLAUDE.md). Deterministic `demo-<vendor>`
+# ids make the INSERT OR IGNORE seed idempotent (re-running every restart adds no duplicates).
+# fanpilot_enabled is left at its default 0 — demo E2E toggles it per-vendor to exercise the
+# routing / monitoring-only loop-skip journeys. (id, name, host, vendor)
+_DEMO_SERVERS: list[tuple[str, str, str, str]] = [
+    ("demo-dell", "Demo Dell R720", "192.0.2.10", "dell"),
+    ("demo-supermicro", "Demo Supermicro X11", "192.0.2.11", "supermicro"),
+    ("demo-hpe", "Demo HPE ProLiant", "192.0.2.12", "hpe"),
+    ("demo-lenovo", "Demo Lenovo SR650", "192.0.2.13", "lenovo"),
+    ("demo-ibm", "Demo IBM x3650 M4", "192.0.2.14", "ibm"),
+    ("demo-generic", "Demo Generic BMC", "192.0.2.15", "generic"),
+]
+
+
+async def _seed_demo_servers(db: Database, auth: AuthManager) -> None:
+    """Seed one synthetic server per canonical vendor for demo mode (D-16, SC-6).
+
+    Idempotent: deterministic `demo-<vendor>` primary keys + `INSERT OR IGNORE` mean
+    re-seeding on every restart is a no-op (no duplicate rows, no sentinel needed). Creds
+    ("demo"/"demo") are throwaway and encrypted exactly as create_server does, so the rows
+    are usable by the (vendor-ignoring) DemoIPMIService without ever touching real hardware.
+    """
+    from backend.api.server_routes import SERVER_COLORS
+    from backend.core.crypto import encrypt
+
+    key = auth.get_encryption_key()
+    username_enc = encrypt("demo", key)
+    password_enc = encrypt("demo", key)
+    for idx, (sid, name, host, vendor) in enumerate(_DEMO_SERVERS):
+        color = SERVER_COLORS[idx % len(SERVER_COLORS)]
+        await db.execute(
+            "INSERT OR IGNORE INTO servers "
+            "(id, name, host, port, username_enc, password_enc, vendor, color) "
+            "VALUES (?, ?, ?, 623, ?, ?, ?, ?)",
+            (sid, name, host, username_enc, password_enc, vendor, color),
+        )
+    await db.commit()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup and shutdown."""
@@ -206,6 +246,14 @@ async def lifespan(app: FastAPI):
     # Initialize auth
     auth = AuthManager(db)
     await auth.initialize()
+
+    # 08-04 (D-16): in demo mode, seed one synthetic server per canonical vendor so the
+    # per-vendor journeys (tier badges, monitoring-only warnings, loop-skip, argv routing)
+    # are visible + Playwright-testable WITHOUT hardware. Runs AFTER auth.initialize() so the
+    # encryption key is ready; idempotent (INSERT OR IGNORE on deterministic demo ids) so it
+    # re-runs safely every restart. RFC5737 hosts + throwaway creds only (CLAUDE.md).
+    if config.demo:
+        await _seed_demo_servers(db, auth)
 
     # Initialize IPMI service
     if config.demo:
@@ -259,7 +307,7 @@ async def lifespan(app: FastAPI):
     effective_port = getattr(app.state, "effective_port", None) or config.server.port
     logger.info("%s started on %s:%d", APP_NAME, effective_host, effective_port)
     if config.demo:
-        logger.info("Demo mode active — 2 virtual servers with simulated data")
+        logger.info("Demo mode active — 6 virtual servers (one per vendor) with simulated data")
 
     yield
 
