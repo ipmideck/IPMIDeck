@@ -11,11 +11,127 @@ from dataclasses import dataclass
 
 logger = logging.getLogger("ipmideck.ipmi")
 
-# 04-W4-02: vendors whose fan PWM is reachable via raw ipmitool. Dell is the working
-# baseline (R720); Supermicro is documented. HPE iLO actively locks fan control against
-# raw commands (no supported byte sequence exists) and "generic" is unknown — both surface
-# kind="unsupported" so the UI can show an honest "unsupported" message.
-_SUPPORTED_FAN_VENDORS = {"dell", "supermicro"}
+# === 08-02 (D-09/D-10): data-driven per-vendor fan dispatch (VendorProfile table) ===
+#
+# The vendor-specific ipmitool `raw` operand sequences live in ONE place: VENDOR_PROFILES +
+# the pure builder build_fan_argv(). set_fan_mode/set_fan_speed look the vendor up, build the
+# argv list, then run the UNCHANGED Phase-5 classify/scan pipeline (see _run_fan_argv). Every
+# byte below is a corroborated value from 08-RESEARCH "Vendor Command Matrix" — never a guess.
+#
+# Capability + tier (08-RESEARCH matrix; D-05/D-06/D-07/D-08):
+#   dell        fan_capable=True,  tier=tested         (real R720 validation; Dell iDRAC raw 0x30 0x30)
+#   supermicro  fan_capable=True,  tier=experimental   (X10+ 0x30 0x70 0x66; BOTH zones per D-07)
+#   ibm         fan_capable=True,  tier=experimental   (canonical Sebagabones x3550-M4 0x3a 0x07 layout)
+#   hpe         fan_capable=False, tier=monitoring_only (D-05: iLO exposes NO IPMI fan control)
+#   lenovo      fan_capable=False, tier=monitoring_only (D-06 gate FAIL: no reliable in-band restore)
+#   generic     fan_capable=False, tier=monitoring_only (unknown BMC — never attempt raw writes)
+
+
+@dataclass(frozen=True)
+class VendorProfile:
+    """Static per-vendor fan-control capability descriptor (08-02, D-09).
+
+    `fan_capable` gates whether ANY raw fan write is attempted; a False vendor makes
+    set_fan_mode/set_fan_speed return FanWriteResult(kind="unsupported") without spawning.
+    `tier` is the honest support level surfaced in the UI ("tested" | "experimental" |
+    "monitoring_only") — matches the docs-site tiers (D-08).
+    """
+
+    vendor: str
+    fan_capable: bool
+    tier: str  # "tested" | "experimental" | "monitoring_only"
+
+
+VENDOR_PROFILES: dict[str, VendorProfile] = {
+    "dell": VendorProfile("dell", True, "tested"),
+    "supermicro": VendorProfile("supermicro", True, "experimental"),
+    "ibm": VendorProfile("ibm", True, "experimental"),
+    "hpe": VendorProfile("hpe", False, "monitoring_only"),
+    "lenovo": VendorProfile("lenovo", False, "monitoring_only"),
+    "generic": VendorProfile("generic", False, "monitoring_only"),
+}
+
+
+def get_vendor_profile(vendor: str) -> VendorProfile:
+    """Return the VendorProfile for `vendor` (case-insensitive); unknown -> generic.
+
+    The API enum (server_routes.py Literal) already blocks unknown strings with a 422, so the
+    generic fallback here is purely defensive (e.g. a legacy DB row that skipped migration)."""
+    return VENDOR_PROFILES.get((vendor or "").lower(), VENDOR_PROFILES["generic"])
+
+
+def is_fan_capable(vendor: str) -> bool:
+    """True iff the vendor's fan PWM is reachable via a corroborated raw ipmitool sequence."""
+    return get_vendor_profile(vendor).fan_capable
+
+
+def _duty_hex(duty: int) -> str:
+    """Clamp a 0-100 duty percent then hex-encode it as ipmitool expects: 0x00-0x64."""
+    return f"0x{max(0, min(100, duty)):02x}"
+
+
+def build_fan_argv(
+    vendor: str, op: str, *, manual: bool | None = None, duty: int | None = None
+) -> list[list[str]]:
+    """Build the ipmitool `raw ...` operand list(s) for a vendor + operation (pure; no I/O).
+
+    Returns 0..N argv operand-lists (each a `["raw", ...]` list):
+      * fan_capable=False vendor            -> []  (caller emits kind="unsupported")
+      * op="mode", manual=True/False        -> 0..N argv (IBM manual -> [] no-op; IBM restore -> 2 banks)
+      * op="speed", duty=0..100             -> 1..N argv (Supermicro -> 2 zones; IBM -> 2 banks)
+
+    Every byte is a corroborated 08-RESEARCH matrix value. Duty is clamped 0..100 then encoded
+    0x00-0x64 (`_duty_hex`). This same builder feeds the demo argv echo (D-17, plan 08-04)."""
+    profile = get_vendor_profile(vendor)
+    if not profile.fan_capable:
+        return []
+    v = profile.vendor
+    if op == "mode":
+        if manual is None:
+            raise ValueError("build_fan_argv(op='mode') requires manual=bool")
+        if v == "dell":
+            # 0x30 0x30 0x01 0x00 = manual; 0x01 = restore BMC auto.
+            return [["raw", "0x30", "0x30", "0x01", "0x00" if manual else "0x01"]]
+        if v == "supermicro":
+            # 0x30 0x45 0x01 0x01 = Full (manual); 0x02 = Optimal (auto). Mode is board-global,
+            # so a single Optimal write restores BOTH zones to BMC control (D-07).
+            return [["raw", "0x30", "0x45", "0x01", "0x01" if manual else "0x02"]]
+        if v == "ibm":
+            if manual:
+                # No standalone manual command — manual is entered by the speed write's
+                # trailing 0x00 (see the speed argv below), so mode-manual is a no-op.
+                return []
+            # Restore BMC auto on BOTH banks (trailing 0x01 = restore). Canonical x3550-M4 layout.
+            return [
+                ["raw", "0x3a", "0x07", "0x01", "0xff", "0x01"],
+                ["raw", "0x3a", "0x07", "0x02", "0xff", "0x01"],
+            ]
+    elif op == "speed":
+        if duty is None:
+            raise ValueError("build_fan_argv(op='speed') requires duty=int")
+        dh = _duty_hex(duty)
+        if v == "dell":
+            # 0x30 0x30 0x02 0xff <duty> = set all fans.
+            return [["raw", "0x30", "0x30", "0x02", "0xff", dh]]
+        if v == "supermicro":
+            # Write the SAME duty to BOTH zones each tick: 0x00 (CPU) then 0x01 (peripheral) — D-07.
+            return [
+                ["raw", "0x30", "0x70", "0x66", "0x01", "0x00", dh],
+                ["raw", "0x30", "0x70", "0x66", "0x01", "0x01", dh],
+            ]
+        if v == "ibm":
+            # Both banks, trailing 0x00 = manual (canonical Sebagabones x3550-M4 layout ONLY —
+            # never mix source layouts, per 08-RESEARCH IBM caveat).
+            return [
+                ["raw", "0x3a", "0x07", "0x01", dh, "0x00"],
+                ["raw", "0x3a", "0x07", "0x02", dh, "0x00"],
+            ]
+    raise ValueError(f"build_fan_argv: unknown op {op!r}")
+
+
+# Legacy name, now DERIVED from the table so any existing reference stays valid
+# (= {"dell", "supermicro", "ibm"} — the fan-capable vendors).
+_SUPPORTED_FAN_VENDORS = {v for v, p in VENDOR_PROFILES.items() if p.fan_capable}
 
 
 # === P0-3 (FANPILOT-READBACK): fan-write completion-code classification ===
