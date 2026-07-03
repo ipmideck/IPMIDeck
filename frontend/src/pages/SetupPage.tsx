@@ -6,6 +6,7 @@ import { useServerStore } from "@/stores/server-store";
 import { useAuthStore } from "@/stores/auth-store";
 import { LanguageSelect } from "@/components/LanguageSelect";
 import { cn } from "@/lib/utils";
+import { VENDORS, TIER_LABEL_KEY } from "@/lib/vendors";
 import {
   ServerCog,
   User,
@@ -28,16 +29,10 @@ const fieldClass =
   "placeholder:text-muted-foreground min-h-[var(--control-min)] transition-colors " +
   "hover:border-muted-foreground/40";
 
-// Step + vendor metadata: only stable keys/codes live at module load. The displayed
-// labels are resolved via t() INSIDE the component so they re-render on language change.
+// Step metadata: only stable keys/codes live at module load. The displayed labels
+// are resolved via t() INSIDE the component so they re-render on language change.
+// Vendor list + tier badges come from the single source of truth (@/lib/vendors).
 const STEP_KEYS = ["welcome", "authSetup", "addServer", "done"] as const;
-
-const VENDORS = [
-  { value: "supermicro", labelKey: "setup.vendors.supermicro" },
-  { value: "dell", labelKey: "setup.vendors.dell" },
-  { value: "hp", labelKey: "setup.vendors.hp" },
-  { value: "generic", labelKey: "setup.vendors.generic" },
-];
 
 export default function SetupPage() {
   const { t } = useTranslation();
@@ -64,7 +59,7 @@ export default function SetupPage() {
   const [serverPort, setServerPort] = useState("623");
   const [serverUser, setServerUser] = useState("ADMIN");
   const [serverPass, setServerPass] = useState("");
-  const [serverVendor, setServerVendor] = useState("supermicro");
+  const [serverVendor, setServerVendor] = useState("dell");
   const [serverError, setServerError] = useState("");
   const [serverLoading, setServerLoading] = useState(false);
   const [testResult, setTestResult] = useState<"success" | "fail" | null>(null);
@@ -518,7 +513,7 @@ export default function SetupPage() {
                 >
                   {VENDORS.map((v) => (
                     <option key={v.value} value={v.value}>
-                      {t(v.labelKey)}
+                      {`${t(v.labelKey)} — ${t(TIER_LABEL_KEY[v.tier])}`}
                     </option>
                   ))}
                 </select>

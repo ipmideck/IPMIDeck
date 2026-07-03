@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Server as ServerIcon } from "lucide-react";
+import { VENDORS, TIER_LABEL_KEY, isFanCapable, VENDOR_VALUES } from "@/lib/vendors";
 import { useSettings } from "./SettingsContext";
 import {
   SectionPanel,
@@ -21,7 +22,9 @@ interface ServersSectionProps {
   headingRef: React.Ref<HTMLHeadingElement>;
 }
 
-const VENDOR_OPTIONS = ["dell", "supermicro", "hpe", "generic"] as const;
+// Derived from the single source of truth (@/lib/vendors) so the six canonical
+// vendors + their tier/capability never drift from the Setup wizard or the backend.
+const VENDOR_OPTIONS = VENDOR_VALUES;
 
 /**
  * Servers section — BMC CRUD, credentials, test, per-server tariff (costPerKwh),
@@ -218,10 +221,12 @@ export function ServersSection({ headingRef }: ServersSectionProps) {
     try {
       await put(`/api/servers/${id}`, payload);
       toast.success(t("settings.serverUpdated"));
-      const UNSUPPORTED_VENDORS = ["hpe", "generic"];
+      // D-13 warn-but-allow: any monitoring-only (fanCapable=false) vendor warns —
+      // derived from @/lib/vendors so hpe/lenovo/generic ALL warn (fixes the old
+      // hardcoded unsupported-vendor list that missed 'hp'/'lenovo'). No hard block.
       const vendor = (editForm.vendor || "").toLowerCase();
       const savedServer = servers.find((srv) => srv.id === id);
-      if (savedServer?.fanpilot_enabled && UNSUPPORTED_VENDORS.includes(vendor)) {
+      if (savedServer?.fanpilot_enabled && !isFanCapable(vendor)) {
         toast.warning(t("settings.fanpilotVendorUnsupported", { vendor }), { duration: 6000 });
       }
       setEditingId(null);
@@ -299,10 +304,11 @@ export function ServersSection({ headingRef }: ServersSectionProps) {
       <input placeholder={t("settings.descriptionPlaceholder")} value={f.description} onChange={(e) => set({ ...f, description: e.target.value })} className={inputClass} />
       <input placeholder={t("settings.hostPlaceholder")} value={f.host} onChange={(e) => set({ ...f, host: e.target.value })} className={inputClass} />
       <select value={f.vendor} onChange={(e) => set({ ...f, vendor: e.target.value })} className={inputClass}>
-        <option value="dell">{t("settings.vendorDell")}</option>
-        <option value="supermicro">{t("settings.vendorSupermicro")}</option>
-        <option value="hpe">{t("settings.vendorHpe")}</option>
-        <option value="generic">{t("settings.vendorGeneric")}</option>
+        {VENDORS.map((v) => (
+          <option key={v.value} value={v.value}>
+            {`${t(v.labelKey)} — ${t(TIER_LABEL_KEY[v.tier])}`}
+          </option>
+        ))}
       </select>
       <input placeholder={opts.edit ? t("settings.editUsernamePlaceholder") : t("settings.usernamePlaceholder")} value={f.username} onChange={(e) => set({ ...f, username: e.target.value })} className={inputClass} />
       <input type="password" placeholder={opts.edit ? t("settings.editPasswordPlaceholder") : t("settings.passwordPlaceholder")} value={f.password} onChange={(e) => set({ ...f, password: e.target.value })} className={cn(inputClass, "font-mono")} />
