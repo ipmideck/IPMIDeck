@@ -112,7 +112,7 @@ IPMIDECK_FANPILOT_SAFETY_THRESHOLD=90
 IPMIDECK_DATA_RETENTION_DAYS=180
 ```
 
-See [`PRD.md`](PRD.md) for the full configuration reference.
+See the Configuration section above and the in-app Settings for the full reference.
 
 ---
 
@@ -133,8 +133,8 @@ See [`PRD.md`](PRD.md) for the full configuration reference.
 ### Setup
 
 ```bash
-git clone https://github.com/ipmideck/IPMIDeck.git
-cd IPMIDeck
+git clone https://github.com/dev-luigi/IPMI-FanPilot.git
+cd IPMI-FanPilot
 
 # Backend
 cd backend
@@ -183,8 +183,9 @@ ipmideck/
 │   └── vite.config.ts
 ├── Dockerfile
 ├── docker-compose.yml
-├── pyproject.toml
-└── PRD.md
+├── docker-compose.dev.yml
+├── .dockerignore
+└── pyproject.toml
 ```
 
 ---
@@ -246,10 +247,10 @@ This tool is provided as-is for managing IPMI-enabled servers. Use at your own r
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=ipmideck%2FIPMIDeck&type=date&legend=top-left">
+<a href="https://www.star-history.com/?repos=dev-luigi%2FIPMI-FanPilot&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=ipmideck/IPMIDeck&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=ipmideck/IPMIDeck&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=ipmideck/IPMIDeck&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=dev-luigi/IPMI-FanPilot&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=dev-luigi/IPMI-FanPilot&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=dev-luigi/IPMI-FanPilot&type=date&legend=top-left" />
  </picture>
 </a>
