@@ -1,12 +1,12 @@
+# Source-build variant. Usage:  docker compose -f docker-compose.dev.yml up --build
 services:
   ipmideck:
-    image: devluigi06/ipmideck:latest
+    build: .
     container_name: ipmideck
     # network_mode: host is LINUX-ONLY (reaches BMCs on UDP 623). On Windows/macOS Docker
     # Desktop, remove it and use port mapping instead:  ports: ["3000:3000"]
     network_mode: host
-    # D-26: PID-1 init so an orphaned ipmitool child (e.g. after the in-process Restart action,
-    # D-15c) is reaped instead of becoming a zombie. Belt-and-suspenders to D-16's kill+reap.
+    # D-26: PID-1 init so an orphaned ipmitool child is reaped instead of becoming a zombie.
     init: true
     volumes:
       - ipmideck-data:/data
