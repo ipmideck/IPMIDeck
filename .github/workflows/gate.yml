@@ -23,3 +23,6 @@ jobs:
       - run: node scripts/check-i18n-parity.mjs
       - run: npm run test
         working-directory: frontend
+      - run: npx tsc -b --noEmit
+        working-directory: frontend
+      - run: node scripts/check-spa-built.mjs
