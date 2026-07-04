@@ -1,0 +1,18 @@
+# STRICT ALLOWLIST. `*` ignores everything; only the paths the Dockerfile COPYs are
+# re-included. MAINTENANCE RULE: every `COPY <src>` in the Dockerfile MUST have a matching
+# `!<src>` line here, or the build fails with "file not found". Update both together.
+*
+
+# --- re-include exactly what the Dockerfile needs ---
+!pyproject.toml
+!backend
+!frontend
+
+# --- strip cruft from inside the re-included trees (last match wins) ---
+**/__pycache__
+**/*.py[cod]
+frontend/node_modules
+frontend/dist
+frontend/coverage
+# NOTE: backend/static is intentionally KEPT (do not exclude) — see RESEARCH Pitfall 6.
+# The wheel's package-data needs it; the multi-stage build overwrites the served copy anyway.
