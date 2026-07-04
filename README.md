@@ -46,23 +46,41 @@ IPMIDeck is a self-hosted dashboard that connects to your servers' BMC (Baseboar
 
 ### Docker (recommended)
 
+Pull from Docker Hub (primary registry):
+
 ```bash
-docker run -d \
-  --name ipmideck \
-  --network host \
+docker pull devluigi06/ipmideck:latest
+
+# Linux (reaches BMCs on your LAN via UDP 623):
+docker run -d --name ipmideck --network host \
   -v ipmideck-data:/data \
-  ipmideck/ipmideck:latest
+  devluigi06/ipmideck:latest
+
+# Windows / macOS (Docker Desktop has no host networking — map the port instead):
+docker run -d --name ipmideck -p 3000:3000 \
+  -v ipmideck-data:/data \
+  devluigi06/ipmideck:latest
 ```
+
+Or with Docker Compose:
+
+```bash
+docker compose up -d                                  # pull&go (docker-compose.yml)
+docker compose -f docker-compose.dev.yml up --build   # build from source
+```
+
+> GHCR mirror (alternative): `docker pull ghcr.io/dev-luigi/ipmi-fanpilot:latest`
 
 Open `http://<your-ip>:3000` and follow the setup wizard.
 
-> `--network host` is required for the container to reach BMCs on your local network via UDP 623.
+> `--network host` (Linux) lets the container reach BMCs on your local network via UDP 623.
+> On Windows/macOS use `-p 3000:3000`.
 
 ### pip
 
 ```bash
 pip install ipmideck
-ipmideck serve
+ipmideck start
 ```
 
 Requires `ipmitool` installed on the system.
