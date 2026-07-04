@@ -5,3 +5,20 @@ permissions:
 jobs:
   gate:
     uses: ./.github/workflows/gate.yml
+
+  docker-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=0.0.0-ci
+            REVISION=${{ github.sha }}
