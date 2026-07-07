@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { post } from "@/api/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { Power, PowerOff, RotateCcw, RefreshCw, Zap, Settings, LayoutGrid, LineChart as LineChartIcon } from "lucide-react";
+import { Power, PowerOff, RotateCcw, RefreshCw, Zap, Settings, LayoutGrid, LineChart as LineChartIcon, HelpCircle } from "lucide-react";
 import { useBackendOnline } from "@/stores/connection-store";
 import { useServerStore } from "@/stores/server-store";
 import { usePowerStore } from "@/stores/power-store";
@@ -80,6 +80,9 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
   const isOff = online && status === "off";
   const busy = loading !== null || !online;
   const isChart = view === "chart" && sensorName != null;
+  // D-04 (consistency with PowerStatusWidget:43): distinct icon SHAPE per state so state
+  // never rides on colour alone. Power = on, PowerOff = off, HelpCircle = unknown/offline.
+  const StateIcon = isOn ? Power : isOff ? PowerOff : HelpCircle;
 
   return (
     <div
@@ -91,11 +94,12 @@ export function PowerControlsWidget({ serverId, view = "compact", onViewChange }
       {/* Row 1: status only — chrome icons (reset, view toggle) now live in the
           widget card HEADER via PowerControlsHeaderActions (see registry). */}
       <div className="flex shrink-0 items-center gap-2">
-        <Power
+        <StateIcon
           className={cn(
-            "h-4 w-4",
+            "h-4 w-4 shrink-0",
             isOn ? "text-success" : isOff ? "text-danger" : "text-muted-foreground"
           )}
+          aria-hidden="true"
         />
         <span
           className={cn(

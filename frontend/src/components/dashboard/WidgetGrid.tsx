@@ -237,7 +237,7 @@ function WidgetCard({
           // D-06: a faintly tinted header band (--color-muted = blueprint surface-2)
           // reads as a third layer above the card body, so the title row is a real
           // header instead of dissolving into the tile.
-          "widget-drag-handle flex items-center justify-between border-b border-border bg-muted/40 px-3 py-2",
+          "widget-drag-handle flex h-[33px] items-center justify-between border-b border-border bg-muted/40 px-3",
           editMode ? "cursor-grab active:cursor-grabbing" : "cursor-default"
         )}
         // touch-action: none ONLY on the handle, ONLY in edit mode (RESEARCH Pitfall 6).

@@ -93,6 +93,13 @@ function bestFanGrid(n: number, w: number, h: number, gap = 8): { cols: number; 
   return best;
 }
 
+// Cap each fan card so a few fans don't balloon to fill the whole widget. minmax(0, MAX)
+// still lets cells SHRINK when many fans must fit (no scroll); the cap only bites when
+// there's excess space (few fans / large widget). place-content-center then centres the
+// capped grid instead of stretching it.
+const MAX_FAN_CARD_W = 190;
+const MAX_FAN_CARD_H = 160;
+
 function FanCard({ name, rpm, online, t }: { name: string; rpm: number | null; online: boolean; t: TFunction }) {
   const stopped = rpm == null || rpm <= 0;
   const band = fanBand(rpm ?? 0);
@@ -357,10 +364,10 @@ export function SensorChart({
     body = (
       <div
         ref={cardsRef}
-        className="grid h-full min-h-0 gap-2 pr-1 pt-1"
+        className="grid h-full min-h-0 place-content-center gap-2 pr-1 pt-1"
         style={{
-          gridTemplateColumns: `repeat(${cols},minmax(0,1fr))`,
-          gridTemplateRows: `repeat(${rows},minmax(0,1fr))`,
+          gridTemplateColumns: `repeat(${cols},minmax(0,${MAX_FAN_CARD_W}px))`,
+          gridTemplateRows: `repeat(${rows},minmax(0,${MAX_FAN_CARD_H}px))`,
         }}
       >
         {visibleSensors.map((name) => {
