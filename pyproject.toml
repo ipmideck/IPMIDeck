@@ -7,9 +7,14 @@ name = "ipmideck"
 dynamic = ["version"]
 description = "Web-based IPMI management platform"
 readme = "README.md"
-license = {text = "ISC"}
+license = {text = "Apache-2.0"}
 requires-python = ">=3.11"
 authors = [{name = "Luigi Tanzillo"}]
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.11",
+    "Operating System :: POSIX :: Linux",
+]
 
 dependencies = [
     "fastapi>=0.110.0",

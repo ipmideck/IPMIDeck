@@ -20,7 +20,7 @@ LABEL org.opencontainers.image.title="IPMIDeck" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}" \
       org.opencontainers.image.source="https://github.com/dev-luigi/IPMI-FanPilot" \
-      org.opencontainers.image.licenses="ISC"
+      org.opencontainers.image.licenses="Apache-2.0"
 
 # Install ipmitool
 RUN apt-get update && apt-get install -y --no-install-recommends ipmitool && \

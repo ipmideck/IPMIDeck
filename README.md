@@ -229,7 +229,7 @@ Works with any server supporting IPMI 2.0:
 
 ## License
 
-[ISC](LICENSE)
+[Apache-2.0](LICENSE)
 
 ---
 

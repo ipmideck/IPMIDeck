@@ -25,7 +25,7 @@ except PackageNotFoundError:
     VERSION = _VERSION_FALLBACK
 
 AUTHOR = "Luigi Tanzillo"
-LICENSE = "ISC"
+LICENSE = "Apache-2.0"
 URL = "https://github.com/dev-luigi/IPMI-FanPilot"
 
 
