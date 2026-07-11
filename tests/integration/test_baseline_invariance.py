@@ -10,17 +10,22 @@ FIXED commit ranges (REVIEW FIX-1 — the moving-HEAD defect, deliberately avoid
   This very test file is committed INSIDE the Phase-7 range, so any C3 assertion against
   a9d2f12..HEAD would break the instant this plan lands. ALL Phase-6 PRODUCT-diff assertions
   therefore use the FIXED range a9d2f12..b207817 — it can never see Phase-7's own additions, so
-  it stays empty forever and 07-01/07-02 remain safely parallel. A SEPARATE check on
-  b207817..HEAD enforces that the Phase-7 commits introduce ONLY verification scaffolding.
+  it stays empty forever and 07-01/07-02 remain safely parallel. A SEPARATE check on the FIXED
+  range b207817..86268dd enforces that the Phase-7 commits introduce ONLY verification scaffolding.
+
+  EVERY range in this module is now PINNED — there is ZERO use of the moving HEAD. The Phase-7
+  range END was originally left unbounded (b207817..HEAD); that made the scaffolding-scope and
+  no-weakening guards police every FUTURE commit rather than the Phase-7 window they document,
+  so Phase-8+ work (backend product python; pyproject.toml version/license metadata) tripped
+  them falsely. Both now terminate at PHASE7_TIP. Do not reintroduce HEAD into any range here.
 
   PHASE6_BASELINE = a9d2f12  pre-Phase-6 baseline (== main tip; merge-base of main and the
                              Phase-6 branch).
   PHASE6_TIP      = b207817  Phase-6 branch tip = last Phase-6 product commit.
+  PHASE7_TIP      = 86268dd  Phase-7 tip = last Phase-7 commit (HEAD just before Phase 8 began).
 
   Phase-6 PRODUCT diff  = a9d2f12..b207817  — presentation-only (frontend/ + backend/static/).
-  Phase-7 SCAFFOLDING   = b207817..HEAD      — verification artifacts only (this is the ONLY
-                                              range that references the moving HEAD, and only in
-                                              the scaffolding/no-weakening tests below).
+  Phase-7 SCAFFOLDING   = b207817..86268dd  — verification artifacts only.
 
 LOUD baseline-absent failure (REVIEW FIX-4): if either pinned commit is missing (e.g. a shallow
 clone), the tests pytest.fail() LOUDLY — they NEVER pytest.skip. A skipped invariance test is
@@ -218,11 +223,19 @@ def test_phase7_scaffolding_scope_only():
 def test_no_test_weakening():
     """Phase 6 weakened no test, and Phase 7 deletes/skips/xfails no existing test (FIX-3).
 
+    BOTH ranges are FIXED — see the module docstring's FIX-1 (moving-HEAD defect). Sub-checks (b)
+    and (c) originally ran against the unbounded `b207817..HEAD`, which made them police EVERY
+    future commit rather than the Phase-7 window they document. That is the same defect
+    test_phase7_scaffolding_scope_only already pins away via PHASE7_TIP: Phase 8+ legitimately
+    commits backend product python AND pyproject.toml (version bumps, license/classifier metadata),
+    so an open-ended range falsely flags them. Pinning the END to PHASE7_TIP restores the intent
+    and makes the guard exact forever. No assertion is relaxed — all three sub-checks stay active.
+
     Three sub-checks:
       (a) Phase 6 touched no test at all (a9d2f12..b207817 -- tests/ is empty).
-      (b) The Phase-7 range deletes no existing test (no `D` under tests/) and does NOT modify
-          pyproject.toml (so fail_under / coverage include= scope cannot be quietly relaxed).
-          Newly ADDED tests/integration/*.py appear as `A`, which is allowed.
+      (b) The Phase-7 range (b207817..86268dd) deletes no existing test (no `D` under tests/) and
+          does NOT modify pyproject.toml (so fail_under / coverage include= scope cannot be quietly
+          relaxed). Newly ADDED tests/integration/*.py appear as `A`, which is allowed.
       (c) Any EXISTING test file MODIFIED in the Phase-7 range adds no skip/xfail marker.
     """
     _require_baseline()
@@ -234,17 +247,17 @@ def test_no_test_weakening():
         f"{PHASE6_BASELINE}..{PHASE6_TIP}:\n" + "\n".join(phase6_tests)
     )
 
-    # (b) Phase-7 range: no deleted test, no pyproject.toml modification.
-    rows = _name_status(f"{PHASE6_TIP}..HEAD")
+    # (b) Phase-7 range (FIXED end — never HEAD): no deleted test, no pyproject.toml modification.
+    rows = _name_status(f"{PHASE6_TIP}..{PHASE7_TIP}")
     deleted_tests = [p for (s, p) in rows if s.startswith("D") and p.startswith("tests/")]
     assert deleted_tests == [], (
         "Phase 7 must delete no existing test, but these were deleted across "
-        f"{PHASE6_TIP}..HEAD:\n" + "\n".join(deleted_tests)
+        f"{PHASE6_TIP}..{PHASE7_TIP}:\n" + "\n".join(deleted_tests)
     )
     pyproject_mods = [p for (s, p) in rows if p == "pyproject.toml" and s.startswith(("M", "D"))]
     assert pyproject_mods == [], (
         "Phase 7 must not modify pyproject.toml (coverage scope / fail_under must not be "
-        f"relaxed), but it was changed across {PHASE6_TIP}..HEAD."
+        f"relaxed), but it was changed across {PHASE6_TIP}..{PHASE7_TIP}."
     )
 
     # (c) Existing test files modified in the Phase-7 range must add no skip/xfail.
@@ -253,7 +266,7 @@ def test_no_test_weakening():
         p for (s, p) in rows if s.startswith("M") and p.startswith("tests/") and p.endswith(".py")
     ]
     for path in modified_tests:
-        diff = _git("diff", f"{PHASE6_TIP}..HEAD", "--", path)
+        diff = _git("diff", f"{PHASE6_TIP}..{PHASE7_TIP}", "--", path)
         assert diff.returncode == 0, f"git diff failed for {path}: {diff.stderr}"
         added_lines = [
             ln for ln in diff.stdout.splitlines() if ln.startswith("+") and not ln.startswith("+++")
