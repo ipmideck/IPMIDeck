@@ -12,3 +12,5 @@ echo "[pre-commit] i18n parity"
 node scripts/check-i18n-parity.mjs
 echo "[pre-commit] frontend tests"
 ( cd frontend && npm run test )
+echo "[pre-commit] SPA freshness (backend/static == a clean build of frontend/src)"
+node scripts/check-spa-built.mjs
