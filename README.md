@@ -117,7 +117,19 @@ settings are also editable at runtime from the in-app **Settings** page.
 
 ## Screenshots
 
-*Coming soon*
+### Dashboard — live multi-server sensor monitoring
+
+![IPMIDeck dashboard showing live sensor widgets across multiple servers](https://raw.githubusercontent.com/ipmideck/IPMIDeck/main/docs/screenshots/dashboard.png)
+
+### FanPilot — visual fan curve editor
+
+![IPMIDeck FanPilot page with the drag-and-drop fan curve editor](https://raw.githubusercontent.com/ipmideck/IPMIDeck/main/docs/screenshots/fanpilot.png)
+
+### System Event Log — BMC hardware events
+
+![IPMIDeck System Event Log with severity filtering](https://raw.githubusercontent.com/ipmideck/IPMIDeck/main/docs/screenshots/sel.png)
+
+> Captured in demo mode (`--demo`) — synthetic data, no real hardware.
 
 ---
 
