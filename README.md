@@ -4,7 +4,7 @@
 
 IPMIDeck is a self-hosted dashboard that connects to your servers' BMC (Baseboard Management Controller) via IPMI. It provides real-time sensor monitoring, intelligent fan curve control (FanPilot), remote power management, and hardware event logs — no CLI required.
 
-> Looking for the legacy V1 (simple fan speed control)? See the [`v1-legacy`](../../tree/v1-legacy) branch.
+> Looking for the legacy V1 (simple fan speed control)? See the [`v1-legacy`](https://github.com/ipmideck/IPMIDeck/tree/v1-legacy) branch.
 
 ---
 
@@ -69,8 +69,6 @@ docker compose up -d                                  # pull&go (docker-compose.
 docker compose -f docker-compose.dev.yml up --build   # build from source
 ```
 
-> GHCR mirror (alternative): `docker pull ghcr.io/dev-luigi/ipmi-fanpilot:latest`
-
 Open `http://<your-ip>:3000` and follow the setup wizard.
 
 > `--network host` (Linux) lets the container reach BMCs on your local network via UDP 623.
@@ -133,8 +131,8 @@ See the Configuration section above and the in-app Settings for the full referen
 ### Setup
 
 ```bash
-git clone https://github.com/dev-luigi/IPMI-FanPilot.git
-cd IPMI-FanPilot
+git clone https://github.com/ipmideck/IPMIDeck.git
+cd IPMIDeck
 
 # Backend
 cd backend
@@ -229,7 +227,7 @@ Works with any server supporting IPMI 2.0:
 
 ## License
 
-[Apache-2.0](LICENSE)
+[Apache-2.0](https://github.com/ipmideck/IPMIDeck/blob/main/LICENSE)
 
 ---
 
@@ -247,10 +245,10 @@ This tool is provided as-is for managing IPMI-enabled servers. Use at your own r
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=dev-luigi%2FIPMI-FanPilot&type=date&legend=top-left">
+<a href="https://www.star-history.com/?repos=ipmideck%2FIPMIDeck&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=dev-luigi/IPMI-FanPilot&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=dev-luigi/IPMI-FanPilot&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=dev-luigi/IPMI-FanPilot&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=ipmideck/IPMIDeck&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=ipmideck/IPMIDeck&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=ipmideck/IPMIDeck&type=date&legend=top-left" />
  </picture>
 </a>
