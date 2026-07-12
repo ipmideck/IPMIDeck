@@ -4,7 +4,8 @@
 
 IPMIDeck enforces a **local** pre-commit gate (`.githooks/pre-commit`). It runs, in
 order: `ruff` lint → backend `pytest` (with the coverage gate) → i18n parity →
-frontend `vitest`. A commit is blocked if any step fails.
+frontend `vitest` → SPA freshness (`backend/static` must match a clean build of
+`frontend/src`). A commit is blocked if any step fails.
 
 ### One-time setup (per clone)
 
@@ -39,11 +40,22 @@ cd frontend && npm run test
 
 # i18n catalog parity (all 12 catalogs must match the English master keys)
 node scripts/check-i18n-parity.mjs
+
+# SPA freshness — is the committed backend/static bundle current with frontend/src?
+node scripts/check-spa-built.mjs
 ```
 
-### Why a local hook instead of CI?
+### The same gate runs in CI
 
-CI via **GitHub Actions is intentionally NOT configured**: this project follows a
-no-push policy, so there is no remote to run Actions against. The local
-`.githooks/pre-commit` hook is the enforced gate. Adopt GitHub Actions only
-if/when a remote push workflow is introduced.
+The local hook is the **first** gate, not the only one. GitHub Actions runs the same checks:
+
+- **`.github/workflows/ci.yml`** — on every push and pull request. It calls the reusable gate
+  (`gate.yml`) and additionally builds the Docker image with `push: false`.
+- **`.github/workflows/gate.yml`** — the reusable gate: ruff → pytest + coverage → i18n parity →
+  vitest → **`npx tsc -b --noEmit`** → SPA freshness. Note the TypeScript project typecheck: it is
+  the one step CI runs that the local hook does not.
+- **`.github/workflows/release.yml`** — publishes to PyPI and Docker Hub, but **only** on a
+  `v*.*.*` tag push and only when the gate is green. See [RELEASING.md](RELEASING.md).
+
+Keep the local hook installed anyway: it gives you the same verdict in seconds instead of after a
+round-trip through CI.
