@@ -26,7 +26,7 @@ except PackageNotFoundError:
 
 AUTHOR = "Luigi Tanzillo"
 LICENSE = "Apache-2.0"
-URL = "https://github.com/dev-luigi/IPMI-FanPilot"
+URL = "https://github.com/ipmideck/IPMIDeck"
 
 
 def banner(compact: bool = False) -> str:
