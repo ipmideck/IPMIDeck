@@ -110,7 +110,8 @@ IPMIDECK_FANPILOT_SAFETY_THRESHOLD=90
 IPMIDECK_DATA_RETENTION_DAYS=180
 ```
 
-See the Configuration section above and the in-app Settings for the full reference.
+Every key is written to that `config.yaml` on first run — read it for the full list. The same
+settings are also editable at runtime from the in-app **Settings** page.
 
 ---
 
@@ -166,19 +167,35 @@ npm run dev
 ```
 ipmideck/
 ├── backend/
-│   ├── main.py              # FastAPI app entry point
-│   ├── ipmi/                # IPMI engine + command builders
-│   ├── fanpilot/            # Fan curve engine + async loop
-│   ├── sensors/             # Sensor polling loop
-│   ├── api/                 # REST route handlers
-│   ├── ws/                  # WebSocket broadcast
-│   └── models/              # Pydantic schemas
+│   ├── main.py              # FastAPI app + lifespan + CLI entry point
+│   ├── console.py           # interactive TTY operator console
+│   ├── core/                # database, auth, crypto, config, branding, events,
+│   │                        #   websocket, modules (loader), ipmi_service, ipmi_demo
+│   ├── api/                 # auth / server / dashboard / system / module routes
+│   ├── models/              # Pydantic schemas
+│   ├── modules/             # self-contained feature modules
+│   │   │                    #   (manifest + routes + tasks + migrations each)
+│   │   ├── sensors/
+│   │   ├── fanpilot/        #   + engine.py (curve / hysteresis / safety override)
+│   │   ├── power/
+│   │   ├── sel/
+│   │   └── fru/
+│   └── static/              # compiled React SPA (build artifact — do not hand-edit)
 ├── frontend/
 │   ├── src/
-│   │   ├── pages/           # Dashboard, FanPilot, SEL, FRU, Settings
-│   │   ├── components/      # Charts, controls, layout
-│   │   └── hooks/           # WebSocket, sensors, auth
+│   │   ├── pages/           # Dashboard, FanPilot, SEL, FRU, Settings, Login, Setup
+│   │   ├── components/      # common/, dashboard/, layout/
+│   │   ├── modules/         # per-module widgets (sensors, fanpilot, power)
+│   │   ├── stores/          # Zustand stores
+│   │   ├── hooks/           # useWebSocket, useKeyboardShortcuts, …
+│   │   ├── i18n/locales/    # 12 language catalogs
+│   │   ├── api/             # HTTP client
+│   │   ├── lib/
+│   │   └── styles/
 │   └── vite.config.ts
+├── scripts/                 # rebuild-spa, check-spa-built, check-i18n-parity,
+│                            #   check-wheel, lint-workflows, smoke-docker
+├── tests/                   # unit/, integration/, fixtures/ipmi/
 ├── Dockerfile
 ├── docker-compose.yml
 ├── docker-compose.dev.yml
@@ -191,10 +208,14 @@ ipmideck/
 ## Security
 
 - Local authentication with bcrypt password hashing
-- JWT session tokens with configurable expiry
-- BMC credentials encrypted at rest (AES-256, key derived via PBKDF2)
+- Opaque session tokens, HMAC-SHA256 signed with a per-install secret, with configurable expiry
+- BMC credentials encrypted at rest with AES-256-CBC. The 32-byte key is randomly generated and
+  stored in `<data_dir>/encryption.key` — deliberately **outside** the database, so a stolen DB
+  alone decrypts nothing (back the key file up separately)
+- BMC passwords are never placed on the command line — `ipmitool` reads them from the environment
+  (`-E` / `IPMITOOL_PASSWORD`), so they never appear in `ps`
 - No external network dependencies — fully offline capable
-- ipmitool args passed as list (no shell injection possible)
+- ipmitool arguments are passed as a list, never through a shell (no shell-injection surface)
 
 ---
 
