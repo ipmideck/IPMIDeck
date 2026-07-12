@@ -221,28 +221,23 @@ ipmideck/
 
 ## Supported Hardware
 
-Works with any server supporting IPMI 2.0:
+Sensor monitoring, power control, SEL and FRU work on **any** server with an IPMI 2.0 BMC.
 
-- **Dell PowerEdge** — R620, R630, R640, R650, R720, R730, R740, R750 and more
-- **Supermicro** — All models with IPMI BMC
-- **HPE ProLiant** — Models with iLO (support coming in Phase 3)
-- **Lenovo ThinkSystem** — Models with XCC
-- **IBM System X** — Models with IMM
+**Fan control (FanPilot) is vendor-specific.** The table below is the honest support matrix — it
+mirrors the vendor profiles the app actually ships, and the same tier badges appear in the vendor
+picker when you add a server:
 
-> Fan curve control (FanPilot) currently supports Dell iDRAC raw commands. Supermicro and HPE support is on the roadmap.
+| Vendor | Fan control | Tier | Notes |
+|---|---|---|---|
+| **Dell PowerEdge** (iDRAC) | Yes | Tested | Raw iDRAC fan commands, validated on real hardware (PowerEdge R720) |
+| **Supermicro** (X10+) | Yes | Experimental | Both fan zones |
+| **IBM System x** (IMM) | Yes | Experimental | Dual fan bank |
+| **HPE ProLiant** (iLO) | No | Monitoring-only | iLO exposes no IPMI fan-control interface |
+| **Lenovo ThinkSystem** (XCC) | No | Monitoring-only | No reliable in-band restore path |
+| **Generic / unknown BMC** | No | Monitoring-only | Never issues raw vendor writes it cannot verify |
 
----
-
-## Roadmap
-
-- [x] Project scaffolding + PRD
-- [ ] Sensor polling + SQLite storage + live charts
-- [ ] FanPilot fan curve editor + autonomous loop
-- [ ] Power control
-- [ ] SEL + FRU viewer
-- [ ] Multi-server dashboard
-- [ ] Supermicro + HPE vendor support
-- [ ] Cloud edition (relay + agent + E2E encryption)
+Monitoring-only vendors still get full sensor, power, SEL and FRU support — FanPilot simply leaves
+their fans under BMC control rather than sending raw commands it cannot confirm.
 
 ---
 
