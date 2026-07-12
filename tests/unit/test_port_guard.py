@@ -1,8 +1,8 @@
 """Single-instance port-guard tests (D-17).
 
 port_in_use() must report True when a socket is already listening and False when the port is
-free, WITHOUT SO_REUSEADDR (RESEARCH Pitfall 4). Pure localhost sockets — the real R720
-(192.168.1.110) is never touched.
+free, WITHOUT SO_REUSEADDR (RESEARCH Pitfall 4). Pure localhost sockets — the real BMC
+(192.0.2.110) is never touched.
 """
 
 from __future__ import annotations
