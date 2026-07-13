@@ -22,7 +22,7 @@ IPMIDeck is a self-hosted dashboard that connects to your servers' BMC (Baseboar
 - Safety override: fans go to 100% above critical temperature
 - Autonomous loop — works independently of the dashboard
 
-![IPMIDeck FanPilot profile settings — source sensor, hysteresis, and the 85°C safety threshold that forces fans to 100%](https://raw.githubusercontent.com/ipmideck/IPMIDeck/main/docs/screenshots/safety-override.png)
+![IPMIDeck FanPilot profile settings — source sensor, hysteresis, and the 85°C safety threshold that forces fans to 100%](docs/screenshots/safety-override.png)
 
 ### Power Control
 - Power On, Soft Off, Hard Off, Reset, Power Cycle
@@ -30,7 +30,7 @@ IPMIDeck is a self-hosted dashboard that connects to your servers' BMC (Baseboar
 - Confirmation dialogs for destructive actions
 - Full command audit log
 
-![IPMIDeck power control widget — live power draw with history graph and On / Soft Off / Hard Off / Reset / Cycle actions](https://raw.githubusercontent.com/ipmideck/IPMIDeck/main/docs/screenshots/power-control.png)
+![IPMIDeck power control widget — live power draw with history graph and On / Soft Off / Hard Off / Reset / Cycle actions](docs/screenshots/power-control.png)
 
 ### System Event Log (SEL)
 - View BMC hardware event log with severity filtering
@@ -44,7 +44,7 @@ IPMIDeck is a self-hosted dashboard that connects to your servers' BMC (Baseboar
 - Manage multiple BMCs from a single instance
 - Panoramic view with status overview of all servers
 
-![IPMIDeck server switcher popover listing multiple servers across vendors from a single instance](https://raw.githubusercontent.com/ipmideck/IPMIDeck/main/docs/screenshots/server-switcher.png)
+![IPMIDeck server switcher popover listing multiple servers across vendors from a single instance](docs/screenshots/server-switcher.png)
 
 ---
 
@@ -132,7 +132,7 @@ settings are also editable at runtime from the in-app **Settings** page.
 
 Launched on a host with an attached terminal (a TTY — e.g. `ipmideck start` run directly, not under Docker, systemd, or a pipe), IPMIDeck opens an interactive operator console: a pinned header with keybindings above a live, streaming log. From it you can cycle log verbosity, inspect active sessions and configured servers, print the access URL, change the bind address, and restart or quit — without leaving the terminal.
 
-![IPMIDeck interactive operator console — pinned header with keybindings and a live log, plus the configured-servers view](https://raw.githubusercontent.com/ipmideck/IPMIDeck/main/docs/screenshots/console.png)
+![IPMIDeck interactive operator console — pinned header with keybindings and a live log, plus the configured-servers view](docs/screenshots/console.png)
 
 Keys: `[v]` verbosity · `[c]` sessions · `[s]` servers · `[u]` url · `[g]` update · `[b]` change bind · `[r]` restart · `[q]` quit · `[ESC]` back. The console is not shown when IPMIDeck runs under Docker, systemd, or with piped output — there it logs plainly to stdout.
 
@@ -146,19 +146,19 @@ See the [Interactive Console docs](https://docs.ipmideck.com/en/console) for ful
 
 ### Dashboard — live multi-server sensor monitoring
 
-![IPMIDeck dashboard showing live sensor widgets across multiple servers](https://raw.githubusercontent.com/ipmideck/IPMIDeck/main/docs/screenshots/dashboard.png)
+![IPMIDeck dashboard showing live sensor widgets across multiple servers](docs/screenshots/dashboard.png)
 
 ### FanPilot — visual fan curve editor
 
-![IPMIDeck FanPilot page with the drag-and-drop fan curve editor](https://raw.githubusercontent.com/ipmideck/IPMIDeck/main/docs/screenshots/fanpilot.png)
+![IPMIDeck FanPilot page with the drag-and-drop fan curve editor](docs/screenshots/fanpilot.png)
 
 ### System Event Log — BMC hardware events
 
-![IPMIDeck System Event Log with severity filtering](https://raw.githubusercontent.com/ipmideck/IPMIDeck/main/docs/screenshots/event-log.png)
+![IPMIDeck System Event Log with severity filtering](docs/screenshots/event-log.png)
 
 ### Hardware Inventory (FRU) — board, chassis, and product data
 
-![IPMIDeck Hardware Inventory page showing FRU board, chassis, and product identifiers](https://raw.githubusercontent.com/ipmideck/IPMIDeck/main/docs/screenshots/fru.png)
+![IPMIDeck Hardware Inventory page showing FRU board, chassis, and product identifiers](docs/screenshots/fru.png)
 
 > Hardware identifiers are synthetic and the hosts shown are RFC5737 documentation addresses.
 
@@ -261,9 +261,9 @@ ipmideck/
 - ipmitool arguments are passed as a list, never through a shell (no shell-injection surface)
 - Optional HTTPS/TLS for the dashboard, with one-click self-signed certificate generation
 
-![IPMIDeck Settings — optional HTTPS/TLS with one-click self-signed certificate generation](https://raw.githubusercontent.com/ipmideck/IPMIDeck/main/docs/screenshots/settings-https.png)
+![IPMIDeck Settings — optional HTTPS/TLS with one-click self-signed certificate generation](docs/screenshots/settings-https.png)
 
-![IPMIDeck Settings — local authentication enabled, with a confirm-with-password flow to disable it](https://raw.githubusercontent.com/ipmideck/IPMIDeck/main/docs/screenshots/settings-password.png)
+![IPMIDeck Settings — local authentication enabled, with a confirm-with-password flow to disable it](docs/screenshots/settings-password.png)
 
 ---
 
