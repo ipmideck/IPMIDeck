@@ -8,6 +8,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          # Full history: tests/integration/test_baseline_invariance.py diffs pinned
+          # commits (a9d2f12, b207817, 86268dd) and fails loudly on a shallow clone.
+          fetch-depth: 0
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"

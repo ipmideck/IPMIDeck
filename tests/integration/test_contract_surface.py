@@ -12,6 +12,15 @@ WHY the `client` fixture (post-lifespan), NOT an import-time enumeration:
   app.routes at import time would MISS all of them. The `client` conftest fixture has
   already entered the TestClient lifespan, so the full surface is present.
 
+WHY enumeration goes through app.openapi(), NOT a walk of app.routes:
+  fastapi >= 0.139 (starlette >= 1.3) no longer flattens include_router() targets into
+  app.routes — included routers appear as opaque `_IncludedRouter` entries with path=None,
+  so a routes walk sees ZERO /api paths on new versions (the app itself still serves them).
+  app.openapi() is the public, version-stable enumeration of the HTTP surface: it yields the
+  same 58 (path, method) entries on fastapi 0.135/starlette 1.0 AND fastapi 0.139/starlette
+  1.3 (both verified empirically). OpenAPI never lists WebSocket routes, so /ws is read from
+  app.routes, where APIWebSocketRoute is still a first-class flattened entry on all versions.
+
 C2 PROOF FRAMING (read before trusting this as a contract proof):
   This test pins the route SURFACE only — path + method + /ws existence. It does NOT
   prove response body / status code / error-body shape. Body/status/error-shape
@@ -96,29 +105,31 @@ EXPECTED = {
     ("/ws", ""),  # WebSocketRoute: no .methods
 }
 
-# Auto-added verbs FastAPI attaches to GET routes — excluded from the declared contract.
-_IMPLICIT_METHODS = {"HEAD", "OPTIONS"}
+# The verbs an OpenAPI path item can carry — anything else at that level (parameters,
+# summary, servers, ...) is metadata, not a route method.
+_HTTP_VERBS = {"get", "put", "post", "delete", "options", "head", "patch", "trace"}
 
 
 def _live_surface(app) -> set[tuple[str, str]]:
     """Enumerate the live (post-lifespan) /api + /ws route surface as (path, method) pairs.
 
-    For HTTP routes, iterate the declared methods and drop the auto-added HEAD/OPTIONS.
-    The /ws WebSocketRoute has no `.methods` attribute, so it is emitted as ("/ws", "").
+    HTTP surface comes from app.openapi() — version-stable where a walk of app.routes is
+    not (see module docstring). The schema cache is dropped first: module routes are mounted
+    during lifespan, so a schema generated before/within an earlier lifespan would be stale.
+    OpenAPI already excludes the auto-added HEAD/OPTIONS, matching the declared contract.
+    /ws is a WebSocket route (never in OpenAPI) and is read from app.routes as ("/ws", "").
     """
-    live: set[tuple[str, str]] = set()
+    app.openapi_schema = None  # drop any pre-lifespan cache; routes changed at mount time
+    live: set[tuple[str, str]] = {
+        (path, method.upper())
+        for path, item in app.openapi().get("paths", {}).items()
+        if path.startswith("/api")
+        for method in item
+        if method in _HTTP_VERBS
+    }
     for r in app.routes:
-        path = getattr(r, "path", "")
-        if not (path.startswith("/api") or path == "/ws"):
-            continue
-        methods = getattr(r, "methods", None)
-        if methods is None:  # WebSocketRoute — no methods
-            live.add((path, ""))
-            continue
-        for method in methods:
-            if method in _IMPLICIT_METHODS:
-                continue
-            live.add((path, method))
+        if getattr(r, "path", "") == "/ws" and getattr(r, "methods", None) is None:
+            live.add(("/ws", ""))
     return live
 
 
