@@ -85,6 +85,12 @@ Requires `ipmitool` installed on the system.
 
 ---
 
+## Documentation
+
+Full documentation lives at **[docs.ipmideck.com](https://docs.ipmideck.com/en/getting-started)** — start with the [Getting Started guide](https://docs.ipmideck.com/en/getting-started). The docs cover installation, first-run setup, per-vendor **Enable IPMI** guides (Dell iDRAC, HPE iLO, Supermicro, Lenovo XCC, IBM IMM), configuration, the CLI and interactive console, the FAQ, and troubleshooting.
+
+---
+
 ## Tech Stack
 
 | Component | Technology |
@@ -100,18 +106,33 @@ Requires `ipmitool` installed on the system.
 
 ## Configuration
 
-Configuration is auto-generated at first run in `/data/config.yaml` (Docker) or `~/.ipmideck/config.yaml` (pip).
+Configuration is auto-generated at first run at `/data/config.yaml` (Docker / Linux) or `./data/config.yaml` (Windows). Override the data directory with `IPMIDECK_DATA_DIR`.
 
-Every setting can be overridden with environment variables using the `IPMIDECK_` prefix:
+A documented subset of settings can be overridden with `IPMIDECK_`-prefixed environment variables:
 
 ```bash
 IPMIDECK_SERVER_PORT=8080
-IPMIDECK_FANPILOT_SAFETY_THRESHOLD=90
+IPMIDECK_IPMI_POLL_INTERVAL=30
+IPMIDECK_LOGGING_LEVEL=info
 IPMIDECK_DATA_RETENTION_DAYS=180
 ```
 
 Every key is written to that `config.yaml` on first run — read it for the full list. The same
 settings are also editable at runtime from the in-app **Settings** page.
+
+---
+
+## Interactive Console
+
+Launched on a host with an attached terminal (a TTY — e.g. `ipmideck start` run directly, not under Docker, systemd, or a pipe), IPMIDeck opens an interactive operator console: a pinned header with keybindings above a live, streaming log. From it you can cycle log verbosity, inspect active sessions and configured servers, print the access URL, change the bind address, and restart or quit — without leaving the terminal.
+
+![IPMIDeck interactive operator console — pinned header with keybindings and a live log, plus the configured-servers view](https://raw.githubusercontent.com/ipmideck/IPMIDeck/main/docs/screenshots/console.png)
+
+Keys: `[v]` verbosity · `[c]` sessions · `[s]` servers · `[u]` url · `[g]` update · `[b]` change bind · `[r]` restart · `[q]` quit · `[ESC]` back. The console is not shown when IPMIDeck runs under Docker, systemd, or with piped output — there it logs plainly to stdout.
+
+> The hosts shown are RFC5737 documentation addresses, not real servers.
+
+See the [Interactive Console docs](https://docs.ipmideck.com/en/console) for full details.
 
 ---
 
@@ -147,15 +168,14 @@ settings are also editable at runtime from the in-app **Settings** page.
 git clone https://github.com/ipmideck/IPMIDeck.git
 cd IPMIDeck
 
-# Backend
-cd backend
+# Backend — run from the repo root (pyproject.toml lives here)
 python -m venv .venv
 source .venv/bin/activate  # Linux/Mac
 # .venv\Scripts\activate   # Windows
 pip install -e ".[dev]"
 
 # Frontend
-cd ../frontend
+cd frontend
 npm install
 npm run dev
 ```
@@ -163,9 +183,10 @@ npm run dev
 ### Run
 
 ```bash
-# Backend (serves API + static frontend build)
-cd backend
-uvicorn main:app --reload --port 3000
+# Backend — from the repo root (serves API + static frontend build)
+uvicorn backend.main:app --reload --port 3000
+# or:  python -m backend.main --reload
+# or:  ipmideck start --reload   (after `pip install -e ".[dev]"`)
 
 # Frontend dev server (with HMR, proxies API to backend)
 cd frontend
