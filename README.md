@@ -4,7 +4,7 @@
 
 IPMIDeck is a self-hosted dashboard that connects to your servers' BMC (Baseboard Management Controller) via IPMI. It provides real-time sensor monitoring, intelligent fan curve control (FanPilot), remote power management, and hardware event logs — no CLI required.
 
-> Looking for the legacy V1 (simple fan speed control)? See the [`v1-legacy`](https://github.com/ipmideck/IPMIDeck/tree/v1-legacy) branch.
+![IPMIDeck dashboard home — live multi-server sensor monitoring with temperature, fan, power and energy widgets](docs/screenshots/dashboard.png)
 
 ---
 
@@ -143,10 +143,6 @@ See the [Interactive Console docs](https://docs.ipmideck.com/en/console) for ful
 ---
 
 ## Screenshots
-
-### Dashboard — live multi-server sensor monitoring
-
-![IPMIDeck dashboard showing live sensor widgets across multiple servers](docs/screenshots/dashboard.png)
 
 ### FanPilot — visual fan curve editor
 
