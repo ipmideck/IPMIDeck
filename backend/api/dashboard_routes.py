@@ -82,15 +82,27 @@ async def get_available_widgets():
 
 
 def _default_layout() -> list[dict]:
-    """Default dashboard layout for first-time users."""
+    """Default dashboard layout for first-time users (server-agnostic, demo-compatible).
+
+    Mirrors the maintainer's reference layout on the 6-column grid: a top metric/status row,
+    a wide temperature chart + fan tiles row, and a power-controls + voltages + energy-cost
+    bottom row. No server_id binding — sensors resolve against the context server using demo
+    sensor names ("CPU Temp" / "Inlet Temp" / "Exhaust Temp"). Per-widget view modes are seeded
+    in config: fan chart in tile view ("view": "cards"), power controls in chart view
+    ("view": "chart"); energy cost uses its cost-only summary view, driven by the 2x2 size.
+    """
     return [
+        # Row 0 (y=0, h=1) — five metric/status widgets across the 6-col top row
         {"i": "cpu-temp", "widget_id": "sensors-metric", "module_id": "sensors", "x": 0, "y": 0, "w": 1, "h": 1, "config": {"sensor": "CPU Temp"}},
         {"i": "inlet-temp", "widget_id": "sensors-metric", "module_id": "sensors", "x": 1, "y": 0, "w": 1, "h": 1, "config": {"sensor": "Inlet Temp"}},
         {"i": "fan-speed", "widget_id": "fanpilot-status", "module_id": "fanpilot", "x": 2, "y": 0, "w": 2, "h": 1},
-        {"i": "power-draw", "widget_id": "sensors-metric", "module_id": "sensors", "x": 4, "y": 0, "w": 1, "h": 1, "config": {"sensor": "Power"}},
+        {"i": "exhaust-temp", "widget_id": "sensors-metric", "module_id": "sensors", "x": 4, "y": 0, "w": 1, "h": 1, "config": {"sensor": "Exhaust Temp"}},
         {"i": "power-status", "widget_id": "power-status", "module_id": "power", "x": 5, "y": 0, "w": 1, "h": 1},
+        # Row 1 (y=1, h=2) — wide temperature chart + fan chart in tile/grid view
         {"i": "temp-chart", "widget_id": "sensors-chart", "module_id": "sensors", "x": 0, "y": 1, "w": 4, "h": 2, "config": {"type": "temperature"}},
-        {"i": "fan-rpm", "widget_id": "sensors-chart", "module_id": "sensors", "x": 4, "y": 1, "w": 2, "h": 2, "config": {"type": "fan"}},
-        {"i": "power-ctrl", "widget_id": "power-controls", "module_id": "power", "x": 0, "y": 3, "w": 3, "h": 2},
-        {"i": "voltages", "widget_id": "sensors-voltages", "module_id": "sensors", "x": 3, "y": 3, "w": 3, "h": 2},
+        {"i": "fan-rpm", "widget_id": "sensors-chart", "module_id": "sensors", "x": 4, "y": 1, "w": 2, "h": 2, "config": {"type": "fan", "view": "cards", "hiddenSensors": []}},
+        # Row 3 (y=3, h=2) — power controls (chart view) + voltages + energy cost (cost summary)
+        {"i": "power-ctrl", "widget_id": "power-controls", "module_id": "power", "x": 0, "y": 3, "w": 3, "h": 2, "config": {"view": "chart"}},
+        {"i": "voltages", "widget_id": "sensors-voltages", "module_id": "sensors", "x": 3, "y": 3, "w": 1, "h": 2},
+        {"i": "energy-cost", "widget_id": "power-energy-cost", "module_id": "power", "x": 4, "y": 3, "w": 2, "h": 2},
     ]
