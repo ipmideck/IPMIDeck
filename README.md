@@ -22,11 +22,15 @@ IPMIDeck is a self-hosted dashboard that connects to your servers' BMC (Baseboar
 - Safety override: fans go to 100% above critical temperature
 - Autonomous loop — works independently of the dashboard
 
+![IPMIDeck FanPilot profile settings — source sensor, hysteresis, and the 85°C safety threshold that forces fans to 100%](https://raw.githubusercontent.com/ipmideck/IPMIDeck/main/docs/screenshots/safety-override.png)
+
 ### Power Control
 - Power On, Soft Off, Hard Off, Reset, Power Cycle
 - Real-time power status indicator
 - Confirmation dialogs for destructive actions
 - Full command audit log
+
+![IPMIDeck power control widget — live power draw with history graph and On / Soft Off / Hard Off / Reset / Cycle actions](https://raw.githubusercontent.com/ipmideck/IPMIDeck/main/docs/screenshots/power-control.png)
 
 ### System Event Log (SEL)
 - View BMC hardware event log with severity filtering
@@ -39,6 +43,8 @@ IPMIDeck is a self-hosted dashboard that connects to your servers' BMC (Baseboar
 ### Multi-Server Dashboard
 - Manage multiple BMCs from a single instance
 - Panoramic view with status overview of all servers
+
+![IPMIDeck server switcher popover listing multiple servers across vendors from a single instance](https://raw.githubusercontent.com/ipmideck/IPMIDeck/main/docs/screenshots/server-switcher.png)
 
 ---
 
@@ -148,9 +154,13 @@ See the [Interactive Console docs](https://docs.ipmideck.com/en/console) for ful
 
 ### System Event Log — BMC hardware events
 
-![IPMIDeck System Event Log with severity filtering](https://raw.githubusercontent.com/ipmideck/IPMIDeck/main/docs/screenshots/sel.png)
+![IPMIDeck System Event Log with severity filtering](https://raw.githubusercontent.com/ipmideck/IPMIDeck/main/docs/screenshots/event-log.png)
 
-> Captured in demo mode (`--demo`) — synthetic data, no real hardware.
+### Hardware Inventory (FRU) — board, chassis, and product data
+
+![IPMIDeck Hardware Inventory page showing FRU board, chassis, and product identifiers](https://raw.githubusercontent.com/ipmideck/IPMIDeck/main/docs/screenshots/fru.png)
+
+> Hardware identifiers are synthetic and the hosts shown are RFC5737 documentation addresses.
 
 ---
 
@@ -249,6 +259,11 @@ ipmideck/
   (`-E` / `IPMITOOL_PASSWORD`), so they never appear in `ps`
 - No external network dependencies — fully offline capable
 - ipmitool arguments are passed as a list, never through a shell (no shell-injection surface)
+- Optional HTTPS/TLS for the dashboard, with one-click self-signed certificate generation
+
+![IPMIDeck Settings — optional HTTPS/TLS with one-click self-signed certificate generation](https://raw.githubusercontent.com/ipmideck/IPMIDeck/main/docs/screenshots/settings-https.png)
+
+![IPMIDeck Settings — local authentication enabled, with a confirm-with-password flow to disable it](https://raw.githubusercontent.com/ipmideck/IPMIDeck/main/docs/screenshots/settings-password.png)
 
 ---
 
