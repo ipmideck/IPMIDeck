@@ -1,10 +1,30 @@
-# IPMIDeck
+<h1 align="center">🖥️ IPMIDeck</h1>
 
-**Web-based IPMI management platform — monitor sensors, control fans, manage power, all from your browser.**
+<p align="center"><strong>Web-based IPMI management platform — monitor sensors, control fans, manage power, all from your browser.</strong></p>
+
+<p align="center">
+  <img alt="IPMIDeck dashboard home — live multi-server sensor monitoring with temperature, fan, power and energy widgets" src="docs/screenshots/dashboard.png">
+</p>
+
+<p align="center">
+  <a href="https://www.python.org/"><img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white"></a>
+  <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/License-Apache%202.0-blue"></a>
+  <a href="https://hub.docker.com/r/devluigi06/ipmideck"><img alt="Docker Hub pulls" src="https://img.shields.io/docker/pulls/devluigi06/ipmideck?logo=docker&logoColor=white"></a>
+  <a href="https://pypi.org/project/ipmideck/"><img alt="PyPI version" src="https://img.shields.io/pypi/v/ipmideck?logo=pypi&logoColor=white"></a>
+  <img alt="Supported BMCs: Dell, Supermicro, IBM, HPE, Lenovo" src="https://img.shields.io/badge/BMC-Dell%20%7C%20Supermicro%20%7C%20IBM%20%7C%20HPE%20%7C%20Lenovo-4b5563">
+</p>
+
+<p align="center"><strong>Documentation:</strong> <a href="https://docs.ipmideck.com">docs.ipmideck.com</a></p>
+
+<p align="center">
+  <a href="#features">Features</a> •
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#documentation">Documentation</a> •
+  <a href="#configuration">Configuration</a> •
+  <a href="#supported-hardware">Supported Hardware</a>
+</p>
 
 IPMIDeck is a self-hosted dashboard that connects to your servers' BMC (Baseboard Management Controller) via IPMI. It provides real-time sensor monitoring, intelligent fan curve control (FanPilot), remote power management, and hardware event logs — no CLI required.
-
-![IPMIDeck dashboard home — live multi-server sensor monitoring with temperature, fan, power and energy widgets](docs/screenshots/dashboard.png)
 
 ---
 
