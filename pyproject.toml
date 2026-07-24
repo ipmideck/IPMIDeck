@@ -70,6 +70,13 @@ include = ["backend*"]
 target-version = "py311"
 line-length = 100
 
+# Explicit rule selection = ruff's historical default set. ruff 0.16.0 changed the
+# default `select`, which broke the CI gate (122 new DTZ/BLE/... findings) while local
+# dev on 0.15.x stayed green — declaring the intended set keeps lint results identical
+# regardless of which ruff version pip resolves (dev deps are `>=`, not pinned).
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
 [tool.ruff.lint.per-file-ignores]
 # Intentional deferred imports placed after route definitions to preserve
 # Starlette route ordering (SPA catch-all must register after module routes).
