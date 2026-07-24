@@ -8,10 +8,10 @@
 
 <p align="center">
   <a href="https://www.python.org/"><img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white"></a>
-  <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/License-Apache%202.0-blue"></a>
-  <a href="https://hub.docker.com/r/devluigi06/ipmideck"><img alt="Docker Hub pulls" src="https://img.shields.io/docker/pulls/devluigi06/ipmideck?logo=docker&logoColor=white"></a>
-  <a href="https://pypi.org/project/ipmideck/"><img alt="PyPI version" src="https://img.shields.io/pypi/v/ipmideck?logo=pypi&logoColor=white"></a>
-  <img alt="Supported BMCs: Dell, Supermicro, IBM, HPE, Lenovo" src="https://img.shields.io/badge/BMC-Dell%20%7C%20Supermicro%20%7C%20IBM%20%7C%20HPE%20%7C%20Lenovo-4b5563">
+  <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/License-Apache%202.0-D22128?logo=apache&logoColor=white"></a>
+  <a href="https://hub.docker.com/r/devluigi06/ipmideck"><img alt="Docker Hub pulls" src="https://img.shields.io/docker/pulls/devluigi06/ipmideck?logo=docker&logoColor=white&label=Docker%20pulls&color=2496ED"></a>
+  <a href="https://pypi.org/project/ipmideck/"><img alt="PyPI version" src="https://img.shields.io/pypi/v/ipmideck?logo=pypi&logoColor=white&label=PyPI&color=FFD43B"></a>
+  <img alt="Supported BMCs: Dell, Supermicro, IBM, HPE, Lenovo" src="https://img.shields.io/badge/BMC-Dell%20%7C%20Supermicro%20%7C%20IBM%20%7C%20HPE%20%7C%20Lenovo-06B6D4">
 </p>
 
 <p align="center"><strong>Documentation:</strong> <a href="https://docs.ipmideck.com">docs.ipmideck.com</a></p>
