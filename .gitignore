@@ -84,3 +84,6 @@ frontend/coverage/
 
 # Personal scratch notes (local-only)
 TODO.md
+
+# Knowledge-graph output (graphify — local-only, may embed absolute paths)
+graphify-out/
