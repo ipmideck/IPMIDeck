@@ -124,6 +124,10 @@ update_service = None  # UpdateService — set during startup
 # exactly what it added (see _sync_update_network_routes).
 _update_network_entries: list = []
 
+# The single-page-app catch-all registered by the most recent startup, kept for the same reason
+# (see _mount_spa).
+_spa_catch_all = None
+
 
 def _setup_logging(level: str) -> None:
     logging.basicConfig(
@@ -481,7 +485,19 @@ def _mount_spa(app: FastAPI) -> None:
     dynamically mounted module routes) are registered. The catch-all
     /{full_path:path} route must be last — any route registered after it is
     unreachable because FastAPI matches routes in registration order.
+
+    Startup runs again on an in-process restart, against the same application object, so the
+    catch-all registered by the previous startup is dropped first. Only the earliest match ever
+    runs, which means a duplicate is unreachable dead weight that closes over the PREVIOUS
+    startup's web root — and it is not free: route matching walks the list, so leaving copies
+    behind deepens the call stack on every request until it reaches the interpreter's limit.
     """
+    global _spa_catch_all
+
+    if _spa_catch_all is not None and _spa_catch_all in app.router.routes:
+        app.router.routes.remove(_spa_catch_all)
+    _spa_catch_all = None
+
     static_dir = Path(__file__).parent / "static"
     if not static_dir.exists():
         return
@@ -516,6 +532,9 @@ def _mount_spa(app: FastAPI) -> None:
             return FileResponse(file_path)
         # Otherwise return index.html for React Router
         return FileResponse(spa_root / "index.html")
+
+    # Remember the entry just added so the next startup removes exactly this one.
+    _spa_catch_all = app.router.routes[-1]
 
 
 # === CLI entry point ===

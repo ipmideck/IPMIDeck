@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 
 import pytest
 from fastapi.testclient import TestClient
@@ -23,28 +24,98 @@ def _run(coro):
     return loop.run_until_complete(coro)
 
 
-def _booted(tmp_path, monkeypatch, *, updates_enabled=True):
-    monkeypatch.setenv("IPMIDECK_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("IPMIDECK_DEMO", "true")
-    monkeypatch.setenv("IPMIDECK_DATA_DB_PATH", str(tmp_path / "ipmideck.db"))
-    monkeypatch.setenv("IPMIDECK_UPDATES_ENABLED", "true" if updates_enabled else "false")
+# Booting the application is deliberately NOT done once per test.
+#
+# Two facts force this. Entering the lifespan re-runs the module-route mount and the
+# single-page-app fallback mount, and neither is removed on exit, so every boot leaves routes
+# behind on the shared application object — enough boots in one session and request handling
+# recurses past the interpreter's limit, which this file would otherwise walk the whole suite
+# into. And backend.main keeps its database, config and services in module-level globals, so two
+# live instances cannot coexist: the second boot's globals are the ones every route handler sees.
+#
+# So there is exactly ONE live instance at a time, rebooted only when a test needs the other
+# configuration. Tests are grouped by configuration below, which makes that two boots in
+# practice. Per-test isolation is restored by clearing the stored rows and the in-memory
+# rate-limit state before each test.
+class _Instance:
+    """The single live application instance, rebooted only when the configuration must change."""
+
+    def __init__(self) -> None:
+        self.client: TestClient | None = None
+        self.enabled: bool | None = None
+        self._ctx = None
+        self._dir = None
+
+    def get(self, tmp_path_factory, enabled: bool):
+        if self.enabled == enabled and self.client is not None:
+            return self.client
+        self.close()
+        self._dir = tmp_path_factory.mktemp("updates-on" if enabled else "updates-off")
+        os.environ["IPMIDECK_DATA_DIR"] = str(self._dir)
+        os.environ["IPMIDECK_DEMO"] = "true"
+        os.environ["IPMIDECK_DATA_DB_PATH"] = str(self._dir / "ipmideck.db")
+        os.environ["IPMIDECK_UPDATES_ENABLED"] = "true" if enabled else "false"
+        import backend.main as bm
+
+        self._ctx = TestClient(bm.app)
+        self.client = self._ctx.__enter__()
+        _run(bm.auth.set_auth_enabled(False))
+        self.enabled = enabled
+        return self.client
+
+    def close(self) -> None:
+        if self._ctx is not None:
+            self._ctx.__exit__(None, None, None)
+        self._ctx = None
+        self.client = None
+        self.enabled = None
+
+
+@pytest.fixture(scope="module")
+def _instance():
+    inst = _Instance()
+    yield inst
+    inst.close()
+    for key in (
+        "IPMIDECK_DATA_DIR",
+        "IPMIDECK_DEMO",
+        "IPMIDECK_DATA_DB_PATH",
+        "IPMIDECK_UPDATES_ENABLED",
+    ):
+        os.environ.pop(key, None)
+
+
+@pytest.fixture
+def open_client(_instance, tmp_path_factory):
+    """The live instance with the configuration switch on."""
     import backend.main as bm
 
-    with TestClient(bm.app) as client:
-        _run(bm.auth.set_auth_enabled(False))
-        yield client, bm
+    client = _instance.get(tmp_path_factory, True)
+    _reset_update_state(bm)
+    return client, bm
 
 
 @pytest.fixture
-def open_client(tmp_path, monkeypatch):
-    """A booted instance with the configuration switch on and no answer recorded yet."""
-    yield from _booted(tmp_path, monkeypatch)
+def suppressed_client(_instance, tmp_path_factory):
+    """The live instance with the configuration switch off."""
+    import backend.main as bm
+
+    client = _instance.get(tmp_path_factory, False)
+    _reset_update_state(bm)
+    return client, bm
 
 
-@pytest.fixture
-def suppressed_client(tmp_path, monkeypatch):
-    """A booted instance with the configuration switch off."""
-    yield from _booted(tmp_path, monkeypatch, updates_enabled=False)
+def _reset_update_state(bm) -> None:
+    """Back to "nothing recorded, nothing cached, no rate limit held".
+
+    Without this a stored answer or a cached result from one test would decide another's
+    outcome, and the rate limit from a check would silently turn the next check into a cache read.
+    """
+    _run(bm.db.set_config("updates.check_enabled", "false"))
+    _run(bm.db.set_config("updates.last_result", ""))
+    _run(bm.update_service.stop())
+    bm.update_service._last_attempt = None
+    bm.update_service._backoff = 60
 
 
 # --- the offline routes -------------------------------------------------------------------------
