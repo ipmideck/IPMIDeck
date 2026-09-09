@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { post, get } from "@/api/client";
+import { post, get, put } from "@/api/client";
 import { useServerStore } from "@/stores/server-store";
 import { useAuthStore } from "@/stores/auth-store";
 import { LanguageSelect } from "@/components/LanguageSelect";
@@ -52,6 +52,9 @@ export default function SetupPage() {
   const [passwordConfirm, setPasswordConfirm] = useState("");
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
+  // Pre-ticked: most operators want to know when a fix ships, and the choice is presented rather
+  // than assumed. Unticking it means the app never contacts anything on its own.
+  const [allowUpdateChecks, setAllowUpdateChecks] = useState(true);
 
   // Server state
   const [serverName, setServerName] = useState("");
@@ -105,6 +108,15 @@ export default function SetupPage() {
           hasUser: false,
           username: null,
         });
+      }
+      // The operator's answer to the update question, recorded once the account decision has
+      // gone through. Deliberately not allowed to block the wizard: a preference write that
+      // fails must not trap someone on this step, and the default it falls back to is the same
+      // value the box was showing.
+      try {
+        await put("/api/updates/consent", { enabled: allowUpdateChecks });
+      } catch {
+        // Adjustable at any time in Settings.
       }
       setStep(2);
     } catch (e: any) {
@@ -395,6 +407,37 @@ export default function SetupPage() {
                   )}
                 </div>
               )}
+
+              {/* The one question about the network, asked once, answered by default. It sits
+                  here rather than on a step of its own: this step is already about how the
+                  instance is exposed, and an extra screen for a single checkbox is a worse
+                  trade than one more line on a screen the operator is already reading. */}
+              <div className="rounded-xl border border-border/60 bg-muted/20 p-4">
+                <div className="flex items-start gap-3">
+                  <input
+                    id="setup-update-checks"
+                    type="checkbox"
+                    checked={allowUpdateChecks}
+                    onChange={(e) => setAllowUpdateChecks(e.target.checked)}
+                    aria-describedby="setup-update-checks-hint"
+                    className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-[var(--color-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                  />
+                  <div className="min-w-0">
+                    <label
+                      htmlFor="setup-update-checks"
+                      className="cursor-pointer text-sm font-medium text-foreground"
+                    >
+                      {t("setup.auth.updateChecksLabel")}
+                    </label>
+                    <p
+                      id="setup-update-checks-hint"
+                      className="mt-1 text-xs leading-relaxed text-muted-foreground"
+                    >
+                      {t("setup.auth.updateChecksHint")}
+                    </p>
+                  </div>
+                </div>
+              </div>
 
               {/* Error: triple-encoded (D-04) — danger token + AlertCircle companion
                * + text, on a tinted callout, announced via role="alert". */}
