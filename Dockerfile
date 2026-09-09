@@ -57,9 +57,10 @@ VOLUME ["/data"]
 STOPSIGNAL SIGTERM
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:3000/api/health')"
+    CMD python /usr/local/bin/docker-healthcheck.py
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY docker-healthcheck.py /usr/local/bin/docker-healthcheck.py
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "3000"]
+CMD ["ipmideck", "--host", "0.0.0.0", "--port", "3000", "start"]

@@ -351,6 +351,12 @@ Settings) and restart. If no certificate is configured, one is generated for you
 `<data_dir>/certs/server.crt` and used automatically. It covers `localhost`, this machine's
 hostname and its addresses, so it works whether you reach the dashboard by name or by IP.
 
+This works in Docker too — the image starts through the `ipmideck` command, which is what
+resolves the certificate. A certificate can only be given to the web server as it starts, so a
+container whose `command:` is overridden to run `uvicorn` directly serves cleartext however the
+configuration reads. The startup log always states the scheme it actually came up on, and says
+so explicitly when `https` is on but no certificate reached the server.
+
 **Your browser will show a security warning the first time.** Nobody signed the certificate —
 there is no certificate authority involved — so the browser cannot vouch for *who* you are
 talking to. The traffic is encrypted either way; only the identity is unverified. On a LAN

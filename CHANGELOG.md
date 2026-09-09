@@ -148,6 +148,13 @@ into a new dated `## [<version>] - YYYY-MM-DD` section.
 
 ### Fixed
 
+- **The container can serve HTTPS.** The image started the web server directly, and a
+  certificate can only be supplied as that server is built, so `https` was silently ignored in
+  Docker while the startup log still announced `https://`. The image now starts through the
+  `ipmideck` command, which resolves the certificate, and its health check follows whichever
+  scheme is live. The startup line reports the scheme actually served, and says so explicitly
+  when `https` is configured but no certificate reached the server. Overriding the container's
+  `command:` to invoke `uvicorn` directly still serves cleartext.
 - **A malformed fan curve no longer stops FanPilot from controlling other servers.** Curve
   points are stored as free-form JSON, and one unreadable curve aborted every control pass at
   the same server, leaving every server after it with no curve evaluation, no fail-safe and no
