@@ -371,6 +371,21 @@ _pending_readback: dict[str, dict] = {}
 # a down-command whose RPM drifts up is not mislabeled 'confirmed'. Observability only — NO
 # thermal-safety change (read-back still never trips recovery). Cleared in fanpilot_shutdown().
 _last_commanded_speed: dict[str, int] = {}
+
+
+def forget_server(server_id: str) -> None:
+    """Drop every per-server tracker a deleted server left behind.
+
+    All of these are keyed by server id and were only ever cleared at shutdown, so a
+    deleted server kept a controller, a curve state and several counters alive for the
+    lifetime of the process.
+    """
+    for tracker in (
+        _controllers, _last_state, _last_online_state, _monitoring_only_alerted,
+        _garbage_counts, _source_last_seen, _pending_readback, _last_commanded_speed,
+    ):
+        tracker.pop(server_id, None)
+
 # Read-back dead-band: ignore RPM changes smaller than this fraction of baseline OR this
 # many absolute RPM (sensor jitter is not movement). 05-RESEARCH §"P0-3 RPM Read-Back".
 _READBACK_DEADBAND_FRAC = 0.05

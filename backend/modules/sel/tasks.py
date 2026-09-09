@@ -15,6 +15,12 @@ logger = logging.getLogger("ipmideck.modules.sel")
 # replay of old criticals on every restart).
 _last_seen_sel_id: dict[str, int] = {}
 
+
+def forget_server(server_id: str) -> None:
+    """Drop a deleted server's event-log bookmark."""
+    _last_seen_sel_id.pop(server_id, None)
+
+
 # Severity classification — map raw SEL severity text to a broadcast severity.
 CRITICAL = {"critical", "non-recoverable", "upper non-recoverable", "lower non-recoverable"}
 WARNING = {"warning", "non-critical", "upper non-critical", "lower non-critical"}

@@ -6,6 +6,9 @@ let onUnauthorized: (() => void) | null = null;
 export function setUnauthorizedHandler(fn: () => void) {
   onUnauthorized = fn;
 }
+export function notifyUnauthorized() {
+  if (onUnauthorized) onUnauthorized();
+}
 // REVIEWS #6: exempt ONLY the boot/login auth calls. A 401 on /api/auth/toggle,
 // /api/auth/configure, or /api/auth/logout (session expiry mid-Settings) MUST still
 // redirect to /login per D-12 — so do NOT exempt all of /api/auth/*.

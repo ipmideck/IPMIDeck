@@ -15,6 +15,22 @@ router = APIRouter()
 # Rate limiting: track last power command per server
 _last_command: dict[str, float] = {}
 RATE_LIMIT_SECONDS = 5
+# Entries older than the interval are meaningless — they can only permit a command, never
+# block one — so they are swept once the table grows past this.
+_MAX_TRACKED_COMMANDS = 512
+
+
+def _note_command(server_id: str, now: float) -> None:
+    """Record a command against a server that is known to exist."""
+    if server_id not in _last_command and len(_last_command) >= _MAX_TRACKED_COMMANDS:
+        for stale in [s for s, t in _last_command.items() if now - t >= RATE_LIMIT_SECONDS]:
+            del _last_command[stale]
+    _last_command[server_id] = now
+
+
+def forget_server(server_id: str) -> None:
+    """Drop a deleted server's rate-limit entry."""
+    _last_command.pop(server_id, None)
 
 
 class PowerAction(BaseModel):
@@ -49,12 +65,14 @@ async def power_command(server_id: str, body: PowerAction, lang: str = Depends(g
     from backend.main import auth  # AuthManager not in ModuleContext — kept (Decision J)
 
     ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
-    # Rate limit
+    # Rate limit. The key is a raw path segment, so recording it before confirming the
+    # server exists let a caller leave a permanent entry per made-up id; the check below
+    # runs first now, and expired entries are swept because a stale one can only ever let
+    # a command through, never block one.
     now = time.time()
     last = _last_command.get(server_id, 0)
     if now - last < RATE_LIMIT_SECONDS:
         return {"success": False, "error": f"Rate limited — wait {RATE_LIMIT_SECONDS}s between commands"}
-    _last_command[server_id] = now
 
     valid_actions = {"on", "soft", "off", "reset", "cycle"}
     if body.action not in valid_actions:
@@ -68,10 +86,12 @@ async def power_command(server_id: str, body: PowerAction, lang: str = Depends(g
 
     key = auth.get_encryption_key()
     host = server["host"]
-    user = decrypt(server["username_enc"], key)
-    pwd = decrypt(server["password_enc"], key)
+
+    _note_command(server_id, now)
 
     try:
+        user = decrypt(server["username_enc"], key)
+        pwd = decrypt(server["password_enc"], key)
         result = await ctx.ipmi.power_command(host, user, pwd, body.action)
 
         # Log command

@@ -173,18 +173,69 @@ def test_login_correct_password_accepted_after_failed_attempts(client_auth):
     )
     assert setup_resp.status_code == 200
 
-    for _ in range(6):
+    for _ in range(5):
         bad = client_auth.post(
             "/api/auth/login", json={"username": "admin", "password": "wrong"}
         )
         assert bad.status_code == 401
         assert bad.json()["success"] is False
 
+    # The sixth request from this address is refused by the per-source rate cap before the
+    # password is even looked at, so it is the cap — not the account — answering here.
+    capped = client_auth.post(
+        "/api/auth/login", json={"username": "admin", "password": "wrong"}
+    )
+    assert capped.status_code == 401
+    assert capped.json()["error"] == t("too_many_attempts", "en")
+
+    # The operator arrives from their own address, which the attacker's attempts never
+    # touched: the rate cap is keyed on the source, so their budget is untouched. Cleared
+    # directly because TestClient reports one fixed client address for every request.
+    bm.auth._attempt_window.clear()
+
     good = client_auth.post(
         "/api/auth/login", json={"username": "admin", "password": "correcthorse"}
     )
     assert good.status_code == 200, good.text
     assert good.json()["success"] is True
+
+
+def test_the_source_rate_cap_refuses_the_sixth_attempt_in_a_window(client_auth):
+    """Five credential checks a minute per address, and the sixth is refused unread.
+
+    The cap answers exactly as the account lockout does, status and message alike: telling
+    the two apart would say whether the username is a real account.
+    """
+    client_auth.post("/api/auth/setup", json={"username": "admin", "password": "correcthorse"})
+    bm.auth._attempt_window.clear()
+
+    for _ in range(5):
+        assert client_auth.post(
+            "/api/auth/login", json={"username": "admin", "password": "wrong"}
+        ).status_code == 401
+
+    sixth = client_auth.post(
+        "/api/auth/login", json={"username": "admin", "password": "wrong"}
+    )
+    assert sixth.status_code == 401
+    assert sixth.json()["error"] == t("too_many_attempts", "en")
+
+
+def test_a_correct_password_still_consumes_a_slot(client_auth):
+    """Otherwise anyone holding one valid credential would face no limit at all."""
+    client_auth.post("/api/auth/setup", json={"username": "admin", "password": "correcthorse"})
+    bm.auth._attempt_window.clear()
+
+    for _ in range(5):
+        assert client_auth.post(
+            "/api/auth/login", json={"username": "admin", "password": "correcthorse"}
+        ).status_code == 200
+
+    sixth = client_auth.post(
+        "/api/auth/login", json={"username": "admin", "password": "correcthorse"}
+    )
+    assert sixth.status_code == 401
+    assert sixth.json()["error"] == t("too_many_attempts", "en")
 
 
 # --- quick-260625-rw5: host-field validation on create + update -----------------------------

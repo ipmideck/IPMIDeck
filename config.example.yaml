@@ -1,6 +1,11 @@
 server:
   host: 0.0.0.0
   port: 3000
+  # Serve over HTTPS. With no cert_file/key_file set, a self-signed certificate is
+  # created under <data_dir>/certs/ on the first start and used automatically.
+  # Browsers will warn that the issuer is unknown — see the README for how to import
+  # it, or point the two settings below at your own certificate.
+  # Env: IPMIDECK_SERVER_HTTPS / IPMIDECK_SERVER_CERT_FILE / IPMIDECK_SERVER_KEY_FILE
   https: false
   # cert_file: /path/to/cert.pem
   # key_file: /path/to/key.pem

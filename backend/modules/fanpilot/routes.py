@@ -200,8 +200,14 @@ async def set_fanpilot_mode(server_id: str, body: FanMode, lang: str = Depends(g
 
     key = auth.get_encryption_key()
     host = server["host"]
-    user = decrypt(server["username_enc"], key)
-    pwd = decrypt(server["password_enc"], key)
+    try:
+        user = decrypt(server["username_enc"], key)
+        pwd = decrypt(server["password_enc"], key)
+    except Exception:
+        # Answering with the same shape as any other failure keeps an unreadable
+        # credential from being distinguishable by status code from a BMC that simply
+        # refused the write.
+        return {"success": False, "error": t("credentials_unreadable", lang)}
     # 04-W4-02: vendor-aware dispatch (default 'dell' if NULL/empty — Decision G).
     vendor = server["vendor"] or "dell"
 

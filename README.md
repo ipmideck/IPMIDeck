@@ -145,6 +145,7 @@ A documented subset of settings can be overridden with `IPMIDECK_`-prefixed envi
 
 ```bash
 IPMIDECK_SERVER_PORT=8080
+IPMIDECK_SERVER_HTTPS=true
 IPMIDECK_IPMI_POLL_INTERVAL=30
 IPMIDECK_LOGGING_LEVEL=info
 IPMIDECK_DATA_RETENTION_DAYS=180
@@ -283,16 +284,23 @@ ipmideck/
   expiry (`IPMIDECK_AUTH_SESSION_EXPIRY` / the `auth.session_expiry` config key — e.g. `24h`,
   `90m`, `1h`; default `24h`). The signature is what makes a token trustworthy: the payload
   itself is base64url-encoded JSON, so treat the cookie as readable by whoever holds it
-- BMC credentials encrypted at rest with AES-256-CBC. The 32-byte key is randomly generated and
-  stored in `<data_dir>/encryption.key` — deliberately **outside** the database, so in normal
-  operation a stolen DB alone decrypts nothing (back the key file up separately). The one
-  exception is an installation upgraded from a version that kept the key in the database and
-  whose migration was interrupted: until it completes, the in-database key is still usable
+- BMC credentials encrypted at rest with AES-256-GCM, which detects tampering as well as
+  concealing the value. The 32-byte key is randomly generated and stored in
+  `<data_dir>/encryption.key` — deliberately **outside** the database, so in normal operation
+  a stolen DB alone decrypts nothing (back the key file up separately). Credentials written by
+  earlier versions (AES-256-CBC, unauthenticated) are converted automatically on the first
+  start after upgrading; see the changelog for the copies it leaves behind. The one exception
+  is an installation upgraded from a version that kept the key in the database and whose
+  migration was interrupted: until it completes, the in-database key is still usable
 - BMC passwords are never placed on the command line — `ipmitool` reads them from the environment
   (`-E` / `IPMITOOL_PASSWORD`), so they never appear in `ps`
 - No external network dependencies — fully offline capable
 - ipmitool arguments are passed as a list, never through a shell (no shell-injection surface)
 - Optional HTTPS/TLS for the dashboard, with one-click self-signed certificate generation
+- Credential checks are capped at 5 per minute per source address
+  (`IPMIDECK_ATTEMPT_LIMIT`, `IPMIDECK_ATTEMPT_WINDOW` in seconds). A slot is consumed whether
+  or not the password turns out to be right, and the cap deliberately does not touch the
+  per-account failure counter, so traffic from one address cannot lock the operator out
 - State-changing requests (`POST`/`PUT`/`PATCH`/`DELETE`) are refused when the browser reports
   an origin other than the one the dashboard is served from, including a different port on the
   same host. Requests with no `Origin` and no `Referer` — the CLI, the container health check,
@@ -331,6 +339,51 @@ comma-separated).
 ![IPMIDeck Settings — optional HTTPS/TLS with one-click self-signed certificate generation](docs/screenshots/settings-https.png)
 
 ![IPMIDeck Settings — local authentication enabled, with a confirm-with-password flow to disable it](docs/screenshots/settings-password.png)
+
+### HTTPS
+
+Over plain HTTP the session cookie and every BMC password typed into the dashboard cross the
+network in the clear. On a trusted LAN that may be an acceptable trade, and it stays the
+default so nothing changes under you — but it is worth turning off.
+
+Set `https: true` in `config.yaml` (or `IPMIDECK_SERVER_HTTPS=true`, or the Network card in
+Settings) and restart. If no certificate is configured, one is generated for you at
+`<data_dir>/certs/server.crt` and used automatically. It covers `localhost`, this machine's
+hostname and its addresses, so it works whether you reach the dashboard by name or by IP.
+
+**Your browser will show a security warning the first time.** Nobody signed the certificate —
+there is no certificate authority involved — so the browser cannot vouch for *who* you are
+talking to. The traffic is encrypted either way; only the identity is unverified. On a LAN
+you can click through ("Advanced" → "Proceed"), or remove the warning for good by importing
+the certificate:
+
+| Platform | How |
+|---|---|
+| Windows | `certutil -addstore -f Root <data_dir>\certs\server.crt` (as administrator) |
+| macOS | Open `server.crt` in Keychain Access → System → set it to **Always Trust** |
+| Linux | Copy to `/usr/local/share/ca-certificates/` and run `sudo update-ca-certificates` |
+| Firefox | Keeps its own store: Settings → Privacy & Security → Certificates → Import |
+
+**To use your own certificate instead** — from your internal CA, or Let's Encrypt — point
+`cert_file` and `key_file` at the PEM pair. Files you supply are never overwritten.
+
+```yaml
+server:
+  https: true
+  cert_file: /etc/ssl/ipmideck/fullchain.pem
+  key_file: /etc/ssl/ipmideck/privkey.pem
+```
+
+**Or terminate TLS at a reverse proxy** (Caddy, nginx, Traefik) and leave IPMIDeck on HTTP
+bound to `127.0.0.1`. If you do, make sure the proxy forwards the original scheme, otherwise
+the session cookie is not marked secure.
+
+To regenerate, delete `<data_dir>/certs/` and restart, or run `ipmideck --gen-cert`.
+`server.key` is as sensitive as `encryption.key` — protect and back it up the same way.
+
+If a certificate cannot be set up at all, IPMIDeck logs the reason and starts over plain HTTP
+rather than refusing to start: being locked out of your own dashboard is worse than the
+warning you were already living with.
 
 ---
 

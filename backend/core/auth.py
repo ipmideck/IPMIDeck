@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import secrets
 import time
 from pathlib import Path
@@ -35,6 +36,30 @@ def _check_password_length(password: str) -> None:
         raise ValueError(f"Password must be at most {MAX_PASSWORD_BYTES} bytes")
 
 
+def _positive_int_env(name: str, default: int) -> int:
+    """Read a tuning knob from the environment, ignoring anything unusable."""
+    try:
+        value = int(os.environ.get(name, ""))
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+# Ceiling on credential-verifying requests from one source. Five in a minute is far above
+# anything a person types and far below anything a guessing script needs.
+ATTEMPT_LIMIT = _positive_int_env("IPMIDECK_ATTEMPT_LIMIT", 5)
+ATTEMPT_WINDOW_SECONDS = _positive_int_env("IPMIDECK_ATTEMPT_WINDOW", 60)
+# Sources tracked before expired entries are swept. Every distinct address creates a key,
+# so without a ceiling a caller cycling addresses is a memory-growth lever.
+_MAX_TRACKED_SOURCES = 1024
+# A submitted username is used as a dictionary key; the field itself has no length bound.
+_MAX_TRACKED_USERNAME_CHARS = 128
+
+# A real bcrypt hash to compare against when the username has no row, so both outcomes cost
+# the same. Computed once at import — doing it per request would be its own timing signal.
+_TIMING_EQUALISER_HASH = bcrypt.hashpw(b"timing-equaliser", bcrypt.gensalt())
+
+
 class AuthManager:
     def __init__(self, db: Database):
         self.db = db
@@ -57,6 +82,15 @@ class AuthManager:
         # Times are time.monotonic() seconds — do NOT mix with time.time().
         self._fail_state: dict[str, dict] = {}
         self._fail_lock = asyncio.Lock()
+        # Per-source fixed window over credential-verifying requests. Separate from the
+        # per-account state above and deliberately so: that one backs off a named account
+        # after repeated FAILURES and clears on success, which lets a caller who already
+        # knows the password retry without limit. This one counts every ATTEMPT from an
+        # address, successful or not, so the rate is capped regardless of the outcome.
+        # Instance state, never module-level: two app instances (and two tests) must not
+        # share a window.
+        # Format: {source: [count, window_start_monotonic]}
+        self._attempt_window: dict[str, list] = {}
 
     @staticmethod
     def _derive_old_key(db_secret: str) -> bytes:
@@ -356,6 +390,12 @@ class AuthManager:
             "SELECT password_hash FROM users WHERE username = ?", (username,)
         )
         if not row:
+            # Do the comparison anyway and throw the answer away. bcrypt is deliberately
+            # slow, so returning early here made an unknown username answer in well under
+            # a millisecond while a known one took tens of milliseconds — enough of a gap
+            # to read off the wire and learn the single valid username without ever
+            # guessing a password.
+            bcrypt.checkpw(password.encode(), _TIMING_EQUALISER_HASH)
             return False
         return bcrypt.checkpw(password.encode(), row["password_hash"].encode())
 
@@ -406,6 +446,49 @@ class AuthManager:
             raise
         logger.info("User credentials replaced: %s", username)
 
+    async def consume_attempt_slot(self, source: str) -> bool:
+        """Claim one credential-verification attempt for a source. False when over the rate.
+
+        A fixed window, not a rolling one: cheap, and the reset boundary is not something
+        an attacker gains anything from knowing.
+
+        A slot is consumed even when the attempt goes on to succeed. Otherwise a caller
+        holding a valid password would face no limit at all, and the difference in
+        response between "consumed then verified" and "rejected at the door" would itself
+        be a signal worth measuring.
+
+        Deliberately does NOT touch the per-account failure state: if a throttled request
+        also counted as an account failure, six requests from one address would lock the
+        operator out of their own account.
+        """
+        async with self._fail_lock:
+            now = time.monotonic()
+            entry = self._attempt_window.get(source)
+            if entry is None or now - entry[1] >= ATTEMPT_WINDOW_SECONDS:
+                if len(self._attempt_window) >= _MAX_TRACKED_SOURCES:
+                    self._sweep_attempt_window(now)
+                self._attempt_window[source] = [1, now]
+                return True
+            if entry[0] >= ATTEMPT_LIMIT:
+                return False
+            entry[0] += 1
+            return True
+
+    def _sweep_attempt_window(self, now: float) -> None:
+        """Drop windows that have already expired. Caller must hold the lock."""
+        expired = [
+            source for source, (_, started) in self._attempt_window.items()
+            if now - started >= ATTEMPT_WINDOW_SECONDS
+        ]
+        for source in expired:
+            del self._attempt_window[source]
+        if len(self._attempt_window) >= _MAX_TRACKED_SOURCES:
+            # Still full of live windows: drop the oldest to keep the table bounded. The
+            # cost is that one source gets its allowance back early, which is a far better
+            # failure than growing without limit.
+            oldest = min(self._attempt_window, key=lambda s: self._attempt_window[s][1])
+            del self._attempt_window[oldest]
+
     # === SEC-03: Brute-force lockout (per-username, in-memory) ===
 
     async def check_lockout(self, username: str) -> bool:
@@ -414,14 +497,15 @@ class AuthManager:
         Per D-03: counter resets if last failure is > 1h ago.
         Lock is held only for the dict R/M/W (no awaits inside) per RESEARCH lines 199-209.
         """
+        key = username[:_MAX_TRACKED_USERNAME_CHARS]
         async with self._fail_lock:
-            state = self._fail_state.get(username)
+            state = self._fail_state.get(key)
             if not state:
                 return False
             now = time.monotonic()
             # Reset stale entries (> 1h since last failure)
             if now - state["last_failure"] > 3600:
-                self._fail_state.pop(username, None)
+                self._fail_state.pop(key, None)
                 return False
             return state["locked_until"] > now
 
@@ -431,10 +515,17 @@ class AuthManager:
         Per D-03: first 5 failures are silent (counter only). From the 6th failure onward,
         lock for `min(60 * 2**(count-6), 3600)` seconds.
         """
+        # The key is whatever was submitted, and login is reachable without a session, so
+        # both the number of entries and the length of each key are attacker-chosen. Cap
+        # the key and sweep the table; the lockout is advisory, so a truncated key that
+        # collides with another only means two long names share a counter.
+        key = username[:_MAX_TRACKED_USERNAME_CHARS]
         async with self._fail_lock:
             now = time.monotonic()
+            if key not in self._fail_state and len(self._fail_state) >= _MAX_TRACKED_SOURCES:
+                self._sweep_fail_state(now)
             state = self._fail_state.setdefault(
-                username, {"count": 0, "last_failure": 0.0, "locked_until": 0.0}
+                key, {"count": 0, "last_failure": 0.0, "locked_until": 0.0}
             )
             state["count"] += 1
             state["last_failure"] = now
@@ -444,13 +535,25 @@ class AuthManager:
                 state["locked_until"] = now + duration
                 logger.warning(
                     "Account '%s' locked for %ds after %d failures",
-                    username, duration, state["count"],
+                    key, duration, state["count"],
                 )
+
+    def _sweep_fail_state(self, now: float) -> None:
+        """Drop entries whose counter has already lapsed. Caller must hold the lock."""
+        lapsed = [
+            name for name, state in self._fail_state.items()
+            if now - state["last_failure"] > 3600
+        ]
+        for name in lapsed:
+            del self._fail_state[name]
+        if len(self._fail_state) >= _MAX_TRACKED_SOURCES:
+            oldest = min(self._fail_state, key=lambda n: self._fail_state[n]["last_failure"])
+            del self._fail_state[oldest]
 
     async def reset_failures(self, username: str) -> None:
         """Clear failure state for a username (called after successful login)."""
         async with self._fail_lock:
-            self._fail_state.pop(username, None)
+            self._fail_state.pop(username[:_MAX_TRACKED_USERNAME_CHARS], None)
 
     async def _credential_fingerprint(self, username: str) -> str | None:
         """SEC-03 (F7): a short, stable digest of the user's stored password hash.

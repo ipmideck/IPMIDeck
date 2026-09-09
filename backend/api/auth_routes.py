@@ -77,6 +77,20 @@ async def _require_session_if_active(request: Request, auth) -> None:
             raise HTTPException(status_code=401, detail={"error": "unauthorized"})
 
 
+def _request_source(request: Request) -> str:
+    """Identify the caller for rate-limiting purposes.
+
+    `request.client` can be absent under some transports, in which case everything
+    collapses into one bucket — the conservative direction.
+    """
+    return getattr(getattr(request, "client", None), "host", None) or "unknown"
+
+
+async def _within_attempt_rate(request: Request, auth) -> bool:
+    """Claim a slot for a request that is about to verify a password."""
+    return await auth.consume_attempt_slot(_request_source(request))
+
+
 @router.get("/me")
 async def get_me(request: Request):
     from backend.main import auth
@@ -105,9 +119,10 @@ async def login(body: LoginRequest, request: Request, response: Response, lang: 
     path. Checking the lockout before verifying would let anyone lock the operator
     out of their own instance: the counter is keyed on a username supplied by the
     caller, so burning a handful of attempts on a guessed name was enough to have
-    the CORRECT password refused for the whole lockout window. Verifying first costs
-    the attacker a bcrypt comparison per attempt (the actual throttle) while a valid
-    credential is never rejected.
+    the CORRECT password refused for the whole lockout window. A valid credential is
+    therefore never rejected, and the throttle is the per-source attempt cap applied
+    above — which nothing the caller supplies can aim at somebody else — with the
+    bcrypt comparison as its floor.
 
     A failed attempt answers HTTP 401 rather than 200, so caches, proxies and
     scripted clients can tell an authentication failure from a success without
@@ -121,6 +136,19 @@ async def login(body: LoginRequest, request: Request, response: Response, lang: 
 
     if not await auth.is_auth_enabled():
         return {"success": True, "message": "Auth disabled"}
+
+    # Cap the rate from this source before anything else. Deliberately the SAME answer the
+    # account lockout gives — status AND message: a distinct one would tell an observer which
+    # of the two fired, and "that account is locked" reveals the account exists. 401 rather
+    # than 200 because a throttled attempt is a refused one, and this endpoint's contract is
+    # that a caller can tell success from failure by the status code alone. The other two
+    # rate-capped paths keep their 200 + success:false shape, which is what their own
+    # neighbouring failures return.
+    if not await _within_attempt_rate(request, auth):
+        return JSONResponse(
+            status_code=401,
+            content={"success": False, "error": t("too_many_attempts", lang)},
+        )
 
     if not await auth.verify_password(body.username, body.password):
         await auth.record_failure(body.username)
@@ -174,7 +202,12 @@ async def setup(body: SetupRequest, request: Request, response: Response, lang: 
 
 
 @router.post("/configure")
-async def configure_auth(body: ConfigureRequest, request: Request, response: Response):
+async def configure_auth(
+    body: ConfigureRequest,
+    request: Request,
+    response: Response,
+    lang: str = Depends(get_lang),
+):
     """D-09/D-13: set fresh credentials AND enable auth atomically (overwrite-on-enable).
 
     REVIEWS #1: callable without a session only at bootstrap (auth disabled OR no user
@@ -202,6 +235,10 @@ async def configure_auth(body: ConfigureRequest, request: Request, response: Res
     if await auth.has_user():
         if not body.current_password:
             return {"success": False, "error": "Current password is required"}
+        # Same unlimited-oracle shape as the disable path: this verifies a password with
+        # no per-account counter behind it, so the source rate is what bounds it.
+        if not await _within_attempt_rate(request, auth):
+            return {"success": False, "error": t("too_many_attempts", lang)}
         # On an auth-disabled instance there is no session to name the current user,
         # so fall back to the single stored account row (the users table is single-user).
         token = request.cookies.get("session")
@@ -263,6 +300,10 @@ async def toggle_auth(body: ToggleRequest, request: Request, lang: str = Depends
                 "success": False,
                 "error": "Current password is required to disable authentication",
             }
+        # This path verifies a password, and until now did so with no rate limit and no
+        # per-account counter — an unlimited oracle for anyone holding a session.
+        if not await _within_attempt_rate(request, auth):
+            return {"success": False, "error": t("too_many_attempts", lang)}
         token = request.cookies.get("session")
         username = await auth.verify_session_token_async(token) if token else None
         if not username or not await auth.verify_password(username, body.current_password):

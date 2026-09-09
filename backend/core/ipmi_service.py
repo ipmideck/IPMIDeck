@@ -11,6 +11,44 @@ from dataclasses import dataclass
 
 logger = logging.getLogger("ipmideck.ipmi")
 
+# === Bounds on what a BMC can hand back ===
+#
+# Every one of these is far above what real hardware produces and exists only so that a
+# BMC which is broken, hostile, or answering with something other than what was asked
+# cannot turn a poll cycle into unbounded memory. Each cap logs when it bites, naming the
+# limit, because silently dropping a sensor could make a fan curve's source disappear and
+# trip the fail-safe on a perfectly healthy machine.
+
+# The largest realistic sensor dump is tens of kilobytes; this is roughly fifty times the
+# worst legitimate case. Applied after the read completes: the read itself is bounded by
+# the command timeout, not by this.
+MAX_OUTPUT_BYTES = 4 * 1024 * 1024
+# A reference two-socket server reports around 150 sensor entries; a large four-socket or
+# blade chassis with expanders peaks near 500.
+MAX_SENSOR_ENTRIES = 2000
+# The event log is a fixed-size ring in hardware — 512 entries on the common controllers.
+MAX_EVENT_ENTRIES = 5000
+# Inventory dumps are tens of fields across a handful of devices.
+MAX_INVENTORY_ENTRIES = 2000
+# The event-log summary is a short key/value block.
+MAX_SUMMARY_KEYS = 200
+# Error text reaches an HTTP response body and a database column.
+MAX_ERROR_MESSAGE_CHARS = 2000
+# Semaphores kept for hosts that have been talked to. The credential-test endpoint accepts
+# a free-form host, so this set is caller-influenced.
+MAX_HOST_LOCKS = 256
+
+
+def _cap_stream(raw: bytes, host: str, stream: str) -> str:
+    """Decode subprocess output, refusing to carry more than the cap downstream."""
+    if len(raw) > MAX_OUTPUT_BYTES:
+        logger.warning(
+            "Discarded output past %d bytes from %s (%s) — a BMC should never send this much",
+            MAX_OUTPUT_BYTES, host, stream,
+        )
+        raw = raw[:MAX_OUTPUT_BYTES]
+    return raw.decode(errors="replace")
+
 # === 08-02 (D-09/D-10): data-driven per-vendor fan dispatch (VendorProfile table) ===
 #
 # The vendor-specific ipmitool `raw` operand sequences live in ONE place: VENDOR_PROFILES +
@@ -232,6 +270,12 @@ def _worse_fan_result(current: FanWriteResult | None, new: FanWriteResult) -> Fa
 class IPMIService(ABC):
     """Abstract IPMI interface. Implementations: Local (ipmitool) or Demo (mock)."""
 
+    def forget_host(self, host: str) -> None:
+        """Release any per-host state for an address that is no longer configured.
+
+        No-op by default; implementations that keep per-host state override it.
+        """
+
     @abstractmethod
     async def get_sensor_readings(self, host: str, user: str, password: str) -> list[dict]:
         ...
@@ -287,8 +331,28 @@ class LocalIPMIService(IPMIService):
     def _get_host_lock(self, host: str) -> asyncio.Semaphore:
         """Return a per-host semaphore (max 1 concurrent call per BMC)."""
         if host not in self._host_locks:
+            if len(self._host_locks) >= MAX_HOST_LOCKS:
+                self._evict_idle_host_locks()
             self._host_locks[host] = asyncio.Semaphore(1)
         return self._host_locks[host]
+
+    def _evict_idle_host_locks(self) -> None:
+        """Drop semaphores nobody is holding.
+
+        A held semaphore is never dropped: it is the only thing keeping two commands from
+        reaching the same BMC at once, and BMCs handle that badly.
+        """
+        idle = [host for host, sem in self._host_locks.items() if not sem.locked()]
+        for host in idle:
+            del self._host_locks[host]
+        if idle:
+            logger.debug("Released %d idle per-host locks", len(idle))
+
+    def forget_host(self, host: str) -> None:
+        """Drop the lock for a host that is no longer configured."""
+        sem = self._host_locks.get(host)
+        if sem is not None and not sem.locked():
+            del self._host_locks[host]
 
     async def _exec_capture(
         self, host: str, user: str, password: str, args: list[str]
@@ -345,8 +409,16 @@ class LocalIPMIService(IPMIService):
             if proc.returncode != 0:
                 # D-18: stderr OR stdout so code 255 (BMC session exhaustion) is legible.
                 msg = stderr.decode().strip() or stdout.decode().strip() or "(no output)"
+                # This string reaches an HTTP response body and a log column, so a BMC
+                # answering with megabytes of noise on a failure would carry all of it
+                # into the database.
+                if len(msg) > MAX_ERROR_MESSAGE_CHARS:
+                    msg = msg[:MAX_ERROR_MESSAGE_CHARS] + " … (truncated)"
                 raise RuntimeError(f"ipmitool error (code {proc.returncode}): {msg}")
-            return stdout.decode(), stderr.decode()
+            return (
+                _cap_stream(stdout, host, "stdout"),
+                _cap_stream(stderr, host, "stderr"),
+            )
 
     async def _exec(self, host: str, user: str, password: str, args: list[str]) -> str:
         # Thin delegator: preserves the historical contract (returns stdout str, raises on rc!=0)
@@ -509,6 +581,13 @@ def _parse_sdr_elist(output: str) -> list[dict]:
     sensors = []
     name_counts: dict[str, int] = {}
     for line in output.strip().splitlines():
+        if len(sensors) >= MAX_SENSOR_ENTRIES:
+            logger.warning(
+                "Stopped reading sensors at %d entries — no server reports this many; "
+                "raise MAX_SENSOR_ENTRIES if yours genuinely does",
+                MAX_SENSOR_ENTRIES,
+            )
+            break
         parts = [p.strip() for p in line.split("|")]
         if len(parts) < 5:
             continue
@@ -578,6 +657,13 @@ def _parse_sel(output: str) -> list[dict]:
     """Parse `ipmitool sel elist` output."""
     events = []
     for line in output.strip().splitlines():
+        if len(events) >= MAX_EVENT_ENTRIES:
+            logger.warning(
+                "Stopped reading the event log at %d entries — the hardware ring holds "
+                "far fewer, so anything past this is not a real log",
+                MAX_EVENT_ENTRIES,
+            )
+            break
         parts = [p.strip() for p in line.split("|")]
         if len(parts) < 4:
             continue
@@ -605,6 +691,11 @@ def _infer_severity(parts: list[str]) -> str:
 def _parse_sel_info(output: str) -> dict:
     info = {}
     for line in output.strip().splitlines():
+        if len(info) >= MAX_SUMMARY_KEYS:
+            logger.warning(
+                "Stopped reading the event-log summary at %d keys", MAX_SUMMARY_KEYS
+            )
+            break
         if ":" in line:
             key, _, val = line.partition(":")
             info[key.strip().lower().replace(" ", "_")] = val.strip()
@@ -616,6 +707,11 @@ def _parse_fru(output: str) -> list[dict]:
     entries = []
     current_section = ""
     for line in output.strip().splitlines():
+        if len(entries) >= MAX_INVENTORY_ENTRIES:
+            logger.warning(
+                "Stopped reading inventory at %d entries", MAX_INVENTORY_ENTRIES
+            )
+            break
         line = line.strip()
         if not line:
             continue

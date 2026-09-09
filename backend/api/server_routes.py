@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import importlib
 import ipaddress
+import logging
 import re
 import uuid
 from typing import Literal
@@ -11,6 +13,8 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from backend.core.i18n import get_lang, t
+
+logger = logging.getLogger("ipmideck.servers")
 
 router = APIRouter()
 
@@ -244,16 +248,73 @@ async def update_server(server_id: str, body: ServerUpdate, lang: str = Depends(
 
     updates.append("updated_at = CURRENT_TIMESTAMP")
     params.append(server_id)
+    if "host" in payload:
+        # Read the address being replaced before the update overwrites it: the per-BMC
+        # command lock is keyed by address, so moving a server to a different BMC would
+        # otherwise strand the old one's semaphore for the process lifetime.
+        previous = await db.fetchone("SELECT host FROM servers WHERE id = ?", (server_id,))
+        previous_host = previous["host"] if previous else None
+    else:
+        previous_host = None
     await db.execute(f"UPDATE servers SET {', '.join(updates)} WHERE id = ?", tuple(params))
     await db.commit()
+    if previous_host and previous_host != payload.get("host"):
+        try:
+            from backend.main import ipmi_service
+            ipmi_service.forget_host(previous_host)
+        except Exception:
+            logger.debug("Could not release the lock for %s", previous_host, exc_info=True)
     return {"success": True}
+
+
+def _purge_server_state(server_id: str, host: str | None) -> None:
+    """Forget everything a deleted server left in memory.
+
+    The database rows go with the delete, but a dozen module-level trackers keyed by
+    server id did not: a deleted server kept a fan controller, poll timers and counters
+    alive for the process lifetime. The cached telemetry mattered most — it was still
+    replayed to every newly connected client, so a server the operator removed kept
+    appearing on their dashboard.
+
+    Each module is cleared independently: a disabled or failed module must never be the
+    reason a delete fails.
+    """
+    from backend.main import ipmi_service, ws_manager
+
+    def _try(action) -> None:
+        try:
+            action()
+        except Exception:
+            logger.debug("Could not clear state for %s", server_id, exc_info=True)
+
+    _try(lambda: ws_manager.clear_server(server_id))
+    for module in ("sensors", "power", "sel", "fanpilot"):
+        def _clear(module=module):
+            mod = importlib.import_module(f"backend.modules.{module}.tasks")
+            mod.forget_server(server_id)
+        _try(_clear)
+
+    def _clear_power_routes():
+        from backend.modules.power.routes import forget_server
+        forget_server(server_id)
+    _try(_clear_power_routes)
+
+    if host:
+        _try(lambda: ipmi_service.forget_host(host))
 
 
 @router.delete("/{server_id}")
 async def delete_server(server_id: str):
     from backend.main import db
+    # Read the host before the row is gone — it keys the per-BMC command lock.
+    row = await db.fetchone("SELECT host FROM servers WHERE id = ?", (server_id,))
     await db.execute("DELETE FROM servers WHERE id = ?", (server_id,))
+    # The event-log bookmark has no foreign key, so the cascade does not reach it.
+    await db.execute(
+        "DELETE FROM app_config WHERE key = ?", (f"sel:last_seen_id:{server_id}",)
+    )
     await db.commit()
+    _purge_server_state(server_id, row["host"] if row else None)
     return {"success": True}
 
 
@@ -300,10 +361,14 @@ async def test_connection(server_id: str, lang: str = Depends(get_lang)):
 
     key = auth.get_encryption_key()
     host = server["host"]
-    user = decrypt(server["username_enc"], key)
-    pwd = decrypt(server["password_enc"], key)
 
     try:
+        # Decrypting inside the guard matters: a credential that cannot be decrypted
+        # used to escape as an unhandled error and a 500, while a working credential
+        # against an unreachable BMC returned 200. That difference told an observer
+        # which of the two had happened.
+        user = decrypt(server["username_enc"], key)
+        pwd = decrypt(server["password_enc"], key)
         status = await ipmi_service.get_power_status(host, user, pwd)
         await db.execute(
             "UPDATE servers SET is_online = 1, last_seen = CURRENT_TIMESTAMP WHERE id = ?",

@@ -107,6 +107,45 @@ into a new dated `## [<version>] - YYYY-MM-DD` section.
 - **The session cookie's `Secure` flag is now correct behind a TLS-terminating proxy**, via the
   new `server.forwarded_allow_ips` setting (`IPMIDECK_SERVER_FORWARDED_ALLOW_IPS`).
 
+- **Stored BMC credentials now use authenticated encryption (AES-256-GCM).** The previous
+  format concealed the value but did not detect modification, so anyone who could write to the
+  database could alter a stored credential undetectably. Stored values now carry a version
+  marker, and **the first start after upgrading converts existing credentials automatically** —
+  no action required, nothing is re-entered.
+
+  Before it changes anything the conversion copies `ipmideck.db` and `encryption.key` next to
+  themselves as `*.pre-authenc-<timestamp>.bak`. **Those copies are credential-grade** — they
+  contain your BMC passwords and the key that decrypts them. Keep them until you are satisfied
+  the upgrade went well, then delete them. They are never included in a backup archive.
+
+  Downgrading afterwards is possible: stop the app, move the two `.bak` files back over the
+  live names, install the older version. If you are not downgrading you do not need them —
+  the new version reads both formats, so an unconverted database keeps working.
+- **A credential that cannot be decrypted no longer answers differently from a BMC that is
+  simply unreachable.** The connection-test and fan-mode endpoints used to fail with a server
+  error in the first case and an ordinary failure in the second, which distinguished the two
+  for anyone probing.
+- **Credential checks are capped at 5 per minute per source address**
+  (`IPMIDECK_ATTEMPT_LIMIT`, `IPMIDECK_ATTEMPT_WINDOW`). A slot is consumed whether or not the
+  password turns out to be right, so holding a valid one is not a way around the limit, and the
+  cap deliberately leaves the per-account failure counter alone — otherwise traffic from a
+  single address would lock the operator out of their own account.
+- **The telemetry WebSocket now refuses a handshake from another site**, ends the socket when
+  the session behind it expires or is revoked (re-checked every 60 seconds) rather than
+  streaming to it until the browser goes away, and applies the same `server.trusted_origins`
+  setting as the HTTP guard for proxied deployments.
+- **A misbehaving BMC can no longer make the application allocate without bound** — responses
+  are size-limited before they are parsed.
+
+### Added
+
+- **HTTPS with no manual certificate step.** Set `https: true` (or `IPMIDECK_SERVER_HTTPS=true`,
+  or use the Network card in Settings) and restart: if no certificate is configured, one is
+  generated at `<data_dir>/certs/` covering `localhost`, this machine's hostname and its
+  addresses. Browsers still warn that the issuer is unknown — the traffic is encrypted, only the
+  identity is unverified; the README lists how to import it. If a certificate cannot be set up
+  the app starts over plain HTTP rather than refusing to start, and logs that it did.
+
 ### Fixed
 
 - **A malformed fan curve no longer stops FanPilot from controlling other servers.** Curve
