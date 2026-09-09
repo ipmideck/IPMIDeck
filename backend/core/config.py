@@ -71,6 +71,21 @@ class ServerConfig:
     # forwarded scheme is discarded, and the session cookie silently loses its Secure
     # flag. Set this to the proxy's address to make the cookie correct behind it.
     forwarded_allow_ips: str | None = None
+    # External addresses the dashboard is reached at, for deployments behind a reverse proxy
+    # that does NOT preserve the browser's Host header (nginx does not by default: it sends
+    # the upstream's own name instead). The cross-origin guard compares the browser's Origin
+    # against Host, so with a rewritten Host every state-changing request would be refused.
+    # Listing the real external origin here restores writes without weakening the guard for
+    # anyone else: an origin that is neither this server's own authority nor on this list is
+    # still rejected. Empty by default — a direct deployment needs nothing here.
+    trusted_origins: list[str] = field(default_factory=list)
+
+    def __post_init__(self):
+        # YAML lets an operator write a single origin without list syntax. Iterating a bare
+        # string would compare the guard against its individual characters and silently
+        # trust nothing, so accept both shapes rather than failing at request time.
+        if isinstance(self.trusted_origins, str):
+            self.trusted_origins = _split_origins(self.trusted_origins)
 
 
 @dataclass
@@ -124,12 +139,18 @@ class AppConfig:
     modules: dict[str, ModuleConfig] = field(default_factory=dict)
 
 
+def _split_origins(value: str) -> list[str]:
+    """Split a comma-separated origin list, dropping blanks from trailing separators."""
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
 def _apply_env_overrides(config: AppConfig) -> None:
     """Apply IPMIDECK_ prefixed env vars to config."""
     env_map = {
         "IPMIDECK_SERVER_HOST": ("server", "host"),
         "IPMIDECK_SERVER_PORT": ("server", "port", int),
         "IPMIDECK_SERVER_FORWARDED_ALLOW_IPS": ("server", "forwarded_allow_ips"),
+        "IPMIDECK_SERVER_TRUSTED_ORIGINS": ("server", "trusted_origins", _split_origins),
         "IPMIDECK_AUTH_SESSION_EXPIRY": ("auth", "session_expiry"),
         "IPMIDECK_IPMI_POLL_INTERVAL": ("ipmi", "poll_interval", int),
         "IPMIDECK_IPMI_POWER_POLL_INTERVAL": ("ipmi", "power_poll_interval", int),

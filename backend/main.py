@@ -404,6 +404,36 @@ def _same_authority(candidate: str, host_header: str, request_scheme: str) -> bo
     return parsed.netloc.lower() == host_header.lower()
 
 
+def _is_trusted_origin(candidate: str, trusted: list[str]) -> bool:
+    """Return True if ``candidate`` matches an origin the operator declared as this server's.
+
+    Behind a reverse proxy that rewrites Host — nginx does not preserve it unless told to —
+    the browser's Origin can never equal the Host this app sees, so the authority comparison
+    alone would refuse every state-changing request in an otherwise correct deployment. This
+    list is the operator's statement of the address the dashboard is really served at.
+
+    It narrows nothing else: an origin that is neither this server's own authority nor on the
+    list is still rejected. An entry written without a scheme matches on authority alone; an
+    entry with one requires the scheme to match too, so listing an https origin does not also
+    trust its cleartext twin.
+    """
+    if not trusted:
+        return False
+    parsed = urlsplit(candidate)
+    if not parsed.netloc:
+        return False
+    for entry in trusted:
+        # A bare "host:port" has no scheme, and urlsplit would read the host as one. Forcing
+        # the netloc form first makes both spellings parse the same way.
+        allowed = urlsplit(entry if "//" in entry else f"//{entry}")
+        if not allowed.netloc or allowed.netloc.lower() != parsed.netloc.lower():
+            continue
+        if allowed.scheme and allowed.scheme.lower() != parsed.scheme.lower():
+            continue
+        return True
+    return False
+
+
 @app.middleware("http")
 async def _origin_guard(request, call_next):
     """Reject state-changing requests a foreign origin caused the browser to send.
@@ -417,12 +447,18 @@ async def _origin_guard(request, call_next):
     and rejecting them would break every non-browser integration to stop an attack only
     a browser can mount. Browsers always attach Origin to a cross-origin state-changing
     request, so "present and pointing elsewhere" is the signal worth acting on.
+
+    Deployments behind a proxy that rewrites Host must list their external address in
+    ``server.trusted_origins``; without it the comparison below can never succeed there.
     """
     if request.method in _STATE_CHANGING_METHODS:
         stated = request.headers.get("origin") or request.headers.get("referer")
         host_header = request.headers.get("host")
-        if stated and host_header and not _same_authority(
-            stated, host_header, request.url.scheme
+        if (
+            stated
+            and host_header
+            and not _same_authority(stated, host_header, request.url.scheme)
+            and not _is_trusted_origin(stated, config.server.trusted_origins)
         ):
             return JSONResponse(
                 status_code=403,

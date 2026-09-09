@@ -5,6 +5,21 @@ server:
   # cert_file: /path/to/cert.pem
   # key_file: /path/to/key.pem
 
+  # --- only needed behind a reverse proxy ---
+  # Which peers may set X-Forwarded-Proto / X-Forwarded-For. Only 127.0.0.1 is trusted by
+  # default, so a TLS proxy in another container is ignored and the session cookie loses its
+  # Secure flag. Set it to the proxy's address.
+  # forwarded_allow_ips: "172.18.0.0/16"
+  #
+  # The external addresses the dashboard is reached at. Only needed when the proxy does not
+  # pass the browser's Host through — nginx does not unless you add
+  # `proxy_set_header Host $host;`. Without this the cross-origin guard sees an Origin that
+  # can never match the Host it was given and refuses every save, with
+  # "Cross-origin request rejected". Listing the real address here fixes that and still
+  # rejects every other origin.
+  # trusted_origins:
+  #   - https://ipmi.example.com
+
 auth:
   # Whether authentication is on, and the lockout thresholds, are NOT configured here.
   # Authentication is switched on or off from the Security settings and the answer is kept

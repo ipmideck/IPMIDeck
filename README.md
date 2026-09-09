@@ -293,6 +293,40 @@ ipmideck/
 - No external network dependencies — fully offline capable
 - ipmitool arguments are passed as a list, never through a shell (no shell-injection surface)
 - Optional HTTPS/TLS for the dashboard, with one-click self-signed certificate generation
+- State-changing requests (`POST`/`PUT`/`PATCH`/`DELETE`) are refused when the browser reports
+  an origin other than the one the dashboard is served from, including a different port on the
+  same host. Requests with no `Origin` and no `Referer` — the CLI, the container health check,
+  scripted integrations — are unaffected
+- Defensive response headers on everything served: `frame-ancestors 'none'` (plus
+  `X-Frame-Options: DENY`) to keep the dashboard out of a hostile iframe, `nosniff`,
+  `Referrer-Policy: no-referrer`, and HSTS when the request itself arrived over TLS
+
+### Behind a reverse proxy
+
+Two settings exist for proxied deployments, both under `server:` in `config.yaml`:
+
+| Setting | When you need it |
+|---------|------------------|
+| `forwarded_allow_ips` | Your TLS proxy is not on `127.0.0.1`. Without it the forwarded scheme is discarded and the session cookie loses its `Secure` flag. |
+| `trusted_origins` | Your proxy does not pass the browser's `Host` through. |
+
+`trusted_origins` is the one that bites. nginx does **not** forward the original `Host` unless
+you add `proxy_set_header Host $host;`, so the guard above compares the browser's
+`https://ipmi.example.com` against the `localhost:3000` it was handed, and every save fails with
+`Cross-origin request rejected`. Either fix the proxy header or name the real address:
+
+```yaml
+server:
+  trusted_origins:
+    - https://ipmi.example.com
+```
+
+An entry with a scheme requires that scheme to match, so listing an `https` origin does not
+also trust its cleartext twin. Origins that are neither this server's own nor on the list are
+still rejected. Both settings also take an environment variable
+(`IPMIDECK_SERVER_FORWARDED_ALLOW_IPS`, `IPMIDECK_SERVER_TRUSTED_ORIGINS` — the latter
+comma-separated).
+
 
 ![IPMIDeck Settings — optional HTTPS/TLS with one-click self-signed certificate generation](docs/screenshots/settings-https.png)
 

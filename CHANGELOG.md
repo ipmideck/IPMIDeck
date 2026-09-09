@@ -26,6 +26,24 @@ into a new dated `## [<version>] - YYYY-MM-DD` section.
 > `ipmideck rotate-session-secret` command: it replaces the session signing secret, so cookies
 > minted offline from a copied or stolen database stop working. Stop the app, run it, restart.
 
+> ### Behind a reverse proxy: check `trusted_origins` before upgrading
+>
+> State-changing requests are now refused when the browser reports an origin other than the one
+> the dashboard is served from. If your proxy does not pass the browser's `Host` through — nginx
+> does not, unless you added `proxy_set_header Host $host;` — every save will fail with
+> `Cross-origin request rejected` and the dashboard will look loaded but inert.
+>
+> Either fix the proxy header, or name the external address:
+>
+> ```yaml
+> server:
+>   trusted_origins:
+>     - https://ipmi.example.com
+> ```
+>
+> Direct deployments and Docker port mappings need nothing. See **Behind a reverse proxy** in
+> the README for the companion `forwarded_allow_ips` setting.
+
 ### Security
 
 - **Fixed a pre-authentication path traversal in the SPA catch-all (SEC-01).** An unauthenticated
@@ -77,8 +95,14 @@ into a new dated `## [<version>] - YYYY-MM-DD` section.
 - **Interactive API documentation (`/docs`, `/redoc`) is disabled outside demo and debug mode**,
   and `/api/health` no longer discloses the build version or connection counts to anonymous
   callers.
-- **Security headers are sent on every response**, state-changing requests from a foreign origin
-  are rejected, and the session cookie is `SameSite=Strict`.
+- **Security headers are sent on every response** — `frame-ancestors 'none'` and
+  `X-Frame-Options: DENY` against clickjacking, `nosniff`, `Referrer-Policy: no-referrer`, and
+  HSTS on TLS requests only — and the session cookie is `SameSite=Strict`.
+- **State-changing requests from a foreign origin are rejected**, including from another port on
+  the same host, which cookies alone do not separate. Requests carrying neither `Origin` nor
+  `Referer` — the CLI, the container health check, scripted integrations — are unaffected.
+  Deployments behind a proxy that rewrites `Host` must declare their external address in the new
+  `server.trusted_origins` setting (`IPMIDECK_SERVER_TRUSTED_ORIGINS`); see the upgrade note above.
 - **The session cookie's `Secure` flag is now correct behind a TLS-terminating proxy**, via the
   new `server.forwarded_allow_ips` setting (`IPMIDECK_SERVER_FORWARDED_ALLOW_IPS`).
 
