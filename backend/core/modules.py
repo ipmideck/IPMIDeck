@@ -47,6 +47,11 @@ class ModuleLoader:
 
     BUILTIN_MODULES = ["sensors", "fanpilot", "power", "sel", "fru"]
 
+    # Router entries this class has mounted on an application object. Deliberately CLASS-level:
+    # startup builds a fresh loader each time, so an instance attribute would always start empty
+    # and the previous startup's entries could never be found, let alone removed.
+    _mounted_entries: list = []
+
     def __init__(self, db: Database):
         self.db = db
         self._modules: dict[str, ModuleManifest] = {}
@@ -135,12 +140,29 @@ class ModuleLoader:
 
         `dependencies` is forwarded to FastAPI's include_router for auth gating
         (typically [Depends(require_auth)] from main.py lifespan).
+
+        Entries mounted by a previous startup are removed first. Startup runs again on an
+        in-process restart, against the same application object, and only the earliest match for
+        a path is ever served — so a second copy is unreachable and merely lengthens the list
+        that route matching walks on every request, which deepens the call stack until it reaches
+        the interpreter's recursion limit. Removal is by object identity against what this
+        loader mounted: including a router appends a wrapper entry that exposes no path of its
+        own, so matching on paths would remove nothing.
         """
+        for entry in self._mounted_entries:
+            if entry in app.router.routes:
+                app.router.routes.remove(entry)
+        ModuleLoader._mounted_entries = []
+
         deps = dependencies or []
         for mod in self.get_enabled_modules():
             if mod.router:
                 prefix = f"/api/modules/{mod.id}"
+                before = list(app.router.routes)
                 app.include_router(mod.router, prefix=prefix, tags=[mod.name], dependencies=deps)
+                ModuleLoader._mounted_entries.extend(
+                    r for r in app.router.routes if r not in before
+                )
                 logger.info("Mounted routes: %s -> %s", mod.name, prefix)
 
     async def start_background_tasks(self) -> None:

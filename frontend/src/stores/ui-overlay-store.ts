@@ -10,6 +10,9 @@ import { create } from "zustand";
 interface UIOverlayState {
   helpOpen: boolean;
   tourOpen: boolean; // set by the onboarding tour (03-05); guard reads it now
+  // The version history, opened from the sidebar version or from Settings. Session-only like
+  // the rest of these: the history is a reference the operator opens, not a state to restore.
+  changelogOpen: boolean;
   commandOpen: boolean; // mirrored from CommandPalette local useState (REVIEWS MED #9)
   // Inward "request open" flag the onboarding tour sets to DRIVE the cmdk palette
   // open/closed during its command-palette step (260608-7kj). CommandPalette
@@ -20,6 +23,7 @@ interface UIOverlayState {
   commandOpenRequest: boolean;
   setHelpOpen: (v: boolean) => void;
   setTourOpen: (v: boolean) => void;
+  setChangelogOpen: (v: boolean) => void;
   setCommandOpen: (v: boolean) => void;
   requestCommandOpen: (v: boolean) => void;
   anyOverlayOpen: () => boolean;
@@ -28,11 +32,16 @@ interface UIOverlayState {
 export const useUIOverlayStore = create<UIOverlayState>((set, get) => ({
   helpOpen: false,
   tourOpen: false,
+  changelogOpen: false,
   commandOpen: false,
   commandOpenRequest: false,
   setHelpOpen: (v) => set({ helpOpen: v }),
   setTourOpen: (v) => set({ tourOpen: v }),
+  setChangelogOpen: (v) => set({ changelogOpen: v }),
   setCommandOpen: (v) => set({ commandOpen: v }),
   requestCommandOpen: (v) => set({ commandOpenRequest: v }),
-  anyOverlayOpen: () => get().helpOpen || get().tourOpen || get().commandOpen,
+  // The changelog counts: while it is open, a bare "d" or "1" must scroll or type, not navigate
+  // the page underneath it.
+  anyOverlayOpen: () =>
+    get().helpOpen || get().tourOpen || get().commandOpen || get().changelogOpen,
 }));

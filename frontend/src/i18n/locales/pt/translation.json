@@ -14,7 +14,8 @@
     "add": "Adicionar",
     "refresh": "Atualizar",
     "reset": "Redefinir",
-    "done": "Concluído"
+    "done": "Concluído",
+    "retry": "Tentar novamente"
   },
   "language": {
     "label": "Idioma"
@@ -420,7 +421,9 @@
       "confirmPasswordPlaceholder": "Confirmar senha",
       "passwordsDoNotMatch": "As senhas não coincidem.",
       "credentialsRequired": "Usuário e senha são obrigatórios.",
-      "applyFailed": "Falha ao aplicar a configuração de autenticação."
+      "applyFailed": "Falha ao aplicar a configuração de autenticação.",
+      "updateChecksLabel": "Permitir que o IPMIDeck procure novas versões",
+      "updateChecksHint": "Uma vez por dia o IPMIDeck pergunta ao índice público de versões se existe uma mais recente. O pedido leva apenas o nome do produto e a versão em uso: nenhum identificador, nada sobre os seus servidores. Pode desligar isto quando quiser nas Definições."
     },
     "server": {
       "title": "Adicione seu primeiro servidor",
@@ -665,5 +668,39 @@
     "tested": "Testado",
     "experimental": "Experimental",
     "monitoringOnly": "Apenas monitorização"
+  },
+  "updates": {
+    "unreleased": "Por publicar",
+    "installed": "Instalada",
+    "securityRelease": "Segurança",
+    "changelogTitle": "O que mudou",
+    "changelogSubtitle": "O histórico completo de versões desta instalação.",
+    "changelogSubtitleWithVersion": "Está a usar a versão {{version}}.",
+    "changelogError": "Não foi possível ler o histórico de versões.",
+    "changelogEmpty": "Esta compilação não inclui histórico de versões.",
+    "viewRelease": "Notas da versão",
+    "viewAllReleases": "Todas as versões",
+    "updateAvailable": "A versão {{version}} está disponível",
+    "securityUpdateAvailable": "A versão {{version}} é uma versão de segurança",
+    "new": "nova",
+    "openChangelog": "Abrir o histórico de versões",
+    "openChangelogFor": "Versão {{version}} — abrir o histórico de versões",
+    "releaseNotes": "Notas da versão",
+    "settingsTitle": "Atualizações",
+    "settingsDescription": "Se o IPMIDeck pode consultar as versões publicadas e o que encontrou.",
+    "suppressedByConfig": "A verificação de atualizações está desligada no ficheiro de configuração (updates.enabled). Enquanto isso não mudar, nada aqui pode contactar a rede.",
+    "consentLabel": "Procurar novas versões automaticamente",
+    "consentHint": "No arranque e uma vez por dia. São enviados apenas o nome do produto e a sua versão. Enquanto estiver atualizado não aparece nada.",
+    "consentFailed": "Não foi possível guardar a definição.",
+    "checkNow": "Verificar agora",
+    "checking": "A verificar…",
+    "lastChecked": "Última verificação {{when}}",
+    "upToDate": "A versão {{version}} é a mais recente",
+    "checkFailed": "Não foi possível concluir a verificação.",
+    "installMethod": "As atualizações são lidas de: {{method}}",
+    "methodDocker": "Registo Docker",
+    "methodPip": "Índice de pacotes Python",
+    "methodGit": "Versões publicadas",
+    "methodUnknown": "Versões publicadas"
   }
 }

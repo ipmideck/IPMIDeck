@@ -31,6 +31,8 @@ from backend.core.config import (
 from backend.core.logging_util import suppress_noisy_loggers
 from backend.core.database import Database
 from backend.core.modules import ModuleLoader
+from backend.core.update_service import UpdateService
+from backend.core.updates import CHANGELOG_URL
 from backend.core.websocket import WebSocketManager
 
 logger = logging.getLogger("ipmideck")
@@ -116,6 +118,15 @@ auth: AuthManager = AuthManager(db)
 ws_manager: WebSocketManager = WebSocketManager()
 module_loader: ModuleLoader = ModuleLoader(db)
 ipmi_service = None  # Set during startup based on config.demo
+update_service = None  # UpdateService — set during startup
+
+# The router entries added when the update check is permitted, kept so a later startup can remove
+# exactly what it added (see _sync_update_network_routes).
+_update_network_entries: list = []
+
+# The single-page-app catch-all registered by the most recent startup, kept for the same reason
+# (see _mount_spa).
+_spa_catch_all = None
 
 
 def _setup_logging(level: str) -> None:
@@ -202,10 +213,35 @@ async def _seed_demo_servers(db: Database, auth: AuthManager) -> None:
     await db.commit()
 
 
+def _sync_update_network_routes(app: FastAPI, enabled: bool) -> None:
+    """Make the presence of the network-capable update routes match the configuration.
+
+    The application object outlives a single startup: it is built at import time and startup runs
+    again on an in-process restart. Registering conditionally without also being able to remove
+    would let the routes stack up across restarts and, worse, let a socket-capable endpoint
+    survive a restart that switched the check off — an instance whose configuration forbids the
+    lookup would still be serving the endpoint that performs it.
+
+    Removal is by object identity, not by path: including a router appends one wrapper entry that
+    exposes no path of its own, so matching on paths silently removes nothing.
+    """
+    global _update_network_entries
+
+    for entry in _update_network_entries:
+        if entry in app.router.routes:
+            app.router.routes.remove(entry)
+    _update_network_entries = []
+
+    if enabled:
+        before = list(app.router.routes)
+        app.include_router(update_network_router, prefix="/api/updates", tags=["Updates"])
+        _update_network_entries = [r for r in app.router.routes if r not in before]
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup and shutdown."""
-    global config, db, auth, ws_manager, module_loader, ipmi_service
+    global config, db, auth, ws_manager, module_loader, ipmi_service, update_service
 
     # Load config
     config = load_config()
@@ -304,6 +340,16 @@ async def lifespan(app: FastAPI):
     # routes module paths correctly (catch-all "/{full_path:path}" would shadow them).
     module_loader.mount_routes(app, dependencies=[Depends(require_auth)])
 
+    # The update service always exists, so the version history and the cached state are readable
+    # in every configuration. Only the routes that can open a socket are conditional: with the
+    # config switch off, /api/updates/check and /api/updates/consent are never registered, and
+    # nothing in this process can start a request. Registered here, alongside the module routes,
+    # because the SPA catch-all below shadows anything mounted after it.
+    update_service = UpdateService(db, config)
+    _sync_update_network_routes(app, config.updates.enabled)
+    if not config.updates.enabled:
+        logger.info("Update checks are switched off in the configuration")
+
     # Register SPA fallback AFTER all API routes (including dynamically mounted modules).
     # The catch-all /{full_path:path} must come last or it shadows module routes.
     _mount_spa(app)
@@ -311,12 +357,18 @@ async def lifespan(app: FastAPI):
     # Start module background tasks
     await module_loader.start_background_tasks()
 
+    # Only starts when the switch is on AND the operator opted in; a no-op otherwise.
+    await update_service.start()
+
     # Prefer effective bind values stashed by cli() (which applies CLI precedence
     # over config). Fall back to config values when uvicorn is launched directly
     # (e.g. from a test harness) without going through cli().
     effective_host = getattr(app.state, "effective_host", None) or config.server.host
     effective_port = getattr(app.state, "effective_port", None) or config.server.port
     logger.info("%s started on %s:%d", APP_NAME, effective_host, effective_port)
+    # The running version and where to read what changed, in front of anyone who reads the log —
+    # including through `docker logs`, where there is no console header. Sends nothing.
+    logger.info("Version %s — changelog: %s", VERSION, CHANGELOG_URL)
     if config.demo:
         logger.info("Demo mode active — 6 virtual servers (one per vendor) with simulated data")
 
@@ -324,6 +376,7 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down...")
+    await update_service.stop()
     await module_loader.stop_background_tasks()
     await db.close()
     logger.info("Shutdown complete")
@@ -383,12 +436,18 @@ from backend.api.server_routes import router as server_router
 from backend.api.system_routes import router as system_router
 from backend.api.dashboard_routes import router as dashboard_router
 from backend.api.module_routes import router as module_router
+from backend.api.update_routes import network_router as update_network_router
+from backend.api.update_routes import router as update_router
 
 app.include_router(auth_router, prefix="/api/auth", tags=["Auth"])
 app.include_router(server_router, prefix="/api/servers", tags=["Servers"], dependencies=[Depends(require_auth)])
 app.include_router(system_router, prefix="/api", tags=["System"])
 app.include_router(dashboard_router, prefix="/api/dashboard", tags=["Dashboard"], dependencies=[Depends(require_auth)])
 app.include_router(module_router, prefix="/api/admin/modules", tags=["Modules"], dependencies=[Depends(require_auth)])
+# Version history and cached state only — neither route can reach the network, so both are
+# available unconditionally. The routes that CAN open a socket are registered in lifespan, and
+# only when the configuration allows it.
+app.include_router(update_router, prefix="/api/updates", tags=["Updates"])
 
 
 def _resolve_spa_file(full_path: str, root: Path) -> Path | None:
@@ -426,7 +485,19 @@ def _mount_spa(app: FastAPI) -> None:
     dynamically mounted module routes) are registered. The catch-all
     /{full_path:path} route must be last — any route registered after it is
     unreachable because FastAPI matches routes in registration order.
+
+    Startup runs again on an in-process restart, against the same application object, so the
+    catch-all registered by the previous startup is dropped first. Only the earliest match ever
+    runs, which means a duplicate is unreachable dead weight that closes over the PREVIOUS
+    startup's web root — and it is not free: route matching walks the list, so leaving copies
+    behind deepens the call stack on every request until it reaches the interpreter's limit.
     """
+    global _spa_catch_all
+
+    if _spa_catch_all is not None and _spa_catch_all in app.router.routes:
+        app.router.routes.remove(_spa_catch_all)
+    _spa_catch_all = None
+
     static_dir = Path(__file__).parent / "static"
     if not static_dir.exists():
         return
@@ -461,6 +532,9 @@ def _mount_spa(app: FastAPI) -> None:
             return FileResponse(file_path)
         # Otherwise return index.html for React Router
         return FileResponse(spa_root / "index.html")
+
+    # Remember the entry just added so the next startup removes exactly this one.
+    _spa_catch_all = app.router.routes[-1]
 
 
 # === CLI entry point ===
@@ -867,8 +941,38 @@ def cli():
             if srv is not None:
                 srv.should_exit = True
 
+        def _on_check_updates() -> None:
+            """Run a real update check off the console's key thread and report the outcome.
+
+            The console calls this from the key thread, which must never block, so the work is
+            marshalled onto the event loop and the result is emitted as an ordinary log record —
+            the console renders log records in its body, so that is how the answer reaches the
+            operator with no extra plumbing.
+            """
+
+            async def _check() -> None:
+                try:
+                    status = await update_service.check_now()
+                except Exception:
+                    logger.warning("The update check could not be completed")
+                    return
+                if status.error:
+                    logger.warning("Update check did not complete: %s", status.error)
+                elif status.update_available:
+                    kind = "security release" if status.is_security else "release"
+                    logger.warning(
+                        "Version %s is available (%s) — %s",
+                        status.latest_version,
+                        kind,
+                        status.release_url,
+                    )
+                else:
+                    logger.info("Version %s is the latest published release", VERSION)
+
+            loop.call_soon_threadsafe(lambda: asyncio.ensure_future(_check()))
+
         def _on_set_verbosity(level: str) -> None:
-            # D-11/D-25: apply at runtime (basicConfig is a no-op once handlers exist) AND
+            # Apply at runtime (basicConfig is a no-op once handlers exist) AND
             # persist to config.yaml's logging.level. IPMIDECK_LOGGING_LEVEL still wins next
             # boot (env > yaml — see config._apply_env_overrides), documented above.
             from backend.core.logging_util import apply_log_level
@@ -907,6 +1011,9 @@ def cli():
 
             cur_level = (early_cfg.logging.level.upper() if early_cfg is not None else "INFO")
             scheme = "https" if (early_cfg is not None and early_cfg.server.https) else "http"
+            # Whether the update key can do anything at all. Read from the same config the app
+            # will load, so the console and the routes agree about what is permitted.
+            early_updates_enabled = early_cfg is None or early_cfg.updates.enabled
 
             # D-04/D-11 (04.1-04 gap-closure r4): ACTUALLY apply the initial verbosity on the
             # interactive path BEFORE the render thread starts. lifespan() does _setup_logging +
@@ -937,6 +1044,9 @@ def cli():
                 # being edited. A change-bind+restart starts a new session that recomputes
                 # effective_host/port, so this naturally reflects the current bind each run.
                 get_bind=lambda: (effective_host, effective_port),
+                # None when the configuration forbids the lookup, so the key reports that
+                # instead of scheduling work that would be refused anyway.
+                on_check_updates=_on_check_updates if early_updates_enabled else None,
             )
             # Render loop on a DEDICATED (non-daemon) thread; key listener on a DAEMON
             # thread that marshals each key onto the loop via call_soon_threadsafe.

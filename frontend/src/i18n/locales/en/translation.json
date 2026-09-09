@@ -14,7 +14,8 @@
     "add": "Add",
     "refresh": "Refresh",
     "reset": "Reset",
-    "done": "Done"
+    "done": "Done",
+    "retry": "Retry"
   },
   "language": {
     "label": "Language"
@@ -420,7 +421,9 @@
       "confirmPasswordPlaceholder": "Confirm password",
       "passwordsDoNotMatch": "Passwords do not match.",
       "credentialsRequired": "Username and password are required.",
-      "applyFailed": "Failed to apply authentication setting."
+      "applyFailed": "Failed to apply authentication setting.",
+      "updateChecksLabel": "Let IPMIDeck check for new versions",
+      "updateChecksHint": "Once a day, IPMIDeck asks the public release index whether a newer version exists. The request carries only the product name and the version you are running — no identifier, nothing about your servers. You can turn this off at any time in Settings."
     },
     "server": {
       "title": "Add Your First Server",
@@ -665,5 +668,39 @@
     "tested": "Tested",
     "experimental": "Experimental",
     "monitoringOnly": "Monitoring-only"
+  },
+  "updates": {
+    "unreleased": "Unreleased",
+    "installed": "Installed",
+    "securityRelease": "Security",
+    "changelogTitle": "What's changed",
+    "changelogSubtitle": "The full version history of this installation.",
+    "changelogSubtitleWithVersion": "You are running version {{version}}.",
+    "changelogError": "The version history could not be read.",
+    "changelogEmpty": "No version history is recorded in this build.",
+    "viewRelease": "Release notes",
+    "viewAllReleases": "All releases",
+    "updateAvailable": "Version {{version}} is available",
+    "securityUpdateAvailable": "Version {{version}} is a security release",
+    "new": "new",
+    "openChangelog": "Open the version history",
+    "openChangelogFor": "Version {{version}} — open the version history",
+    "releaseNotes": "Release notes",
+    "settingsTitle": "Updates",
+    "settingsDescription": "Whether IPMIDeck may look up published versions, and what it found.",
+    "suppressedByConfig": "Update checks are switched off in the configuration file (updates.enabled). Nothing here can contact the network until that is changed.",
+    "consentLabel": "Check for new versions automatically",
+    "consentHint": "At start-up and once a day. Only the product name and your version are sent. Nothing is shown while you are up to date.",
+    "consentFailed": "The setting could not be saved.",
+    "checkNow": "Check now",
+    "checking": "Checking…",
+    "lastChecked": "Last checked {{when}}",
+    "upToDate": "Version {{version}} is the latest release",
+    "checkFailed": "The check could not be completed.",
+    "installMethod": "Updates are read from: {{method}}",
+    "methodDocker": "Docker registry",
+    "methodPip": "Python package index",
+    "methodGit": "Published releases",
+    "methodUnknown": "Published releases"
   }
 }
