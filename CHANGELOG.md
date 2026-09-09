@@ -74,8 +74,9 @@ into a new dated `## [<version>] - YYYY-MM-DD` section.
   CIFS with a fixed uid/gid) the container still starts and logs a warning.
 - **The database and `config.yaml` are now created readable only by their owner.** They were
   written with the default umask, so on a typical host every local account could read the stored
-  BMC credentials. Existing installations are repaired automatically on the next start, and
-  restoring a backup no longer widens the permissions of the restored files.
+  BMC credentials. Existing installations are repaired automatically on the next start — the
+  database and its write-ahead sidecars every time it is opened, `config.yaml` once during
+  startup — and restoring a backup no longer widens the permissions of the restored files.
 - **A failed login now answers HTTP 401** instead of 200, and a correct password is never
   refused because of the brute-force counter. That counter is keyed on a username supplied by
   the caller, so burning the attempt budget on a guessed name previously locked the real

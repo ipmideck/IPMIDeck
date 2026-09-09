@@ -30,6 +30,7 @@ from backend.core.config import (
     save_default_config,
     update_server_yaml,
 )
+from backend.core.crypto import _set_secure_permissions
 from backend.core.logging_util import suppress_noisy_loggers
 from backend.core.database import Database
 from backend.core.modules import ModuleLoader
@@ -239,6 +240,16 @@ async def lifespan(app: FastAPI):
     # Save default config if missing
     data_dir = Path(config.data.db_path).parent
     save_default_config(data_dir / "config.yaml")
+
+    # An already-deployed config.yaml was written under the default umask and holds the
+    # session secret, so on a typical host every local account could read it. Writing it
+    # owner-only only helps files this version creates; existing ones are repaired here, the
+    # same way Database.connect() repairs the database on every start. Restricted to the
+    # resolved data dir so a config passed by path — the example file in the test suite —
+    # is never chmod'ed.
+    _existing_config = data_dir / "config.yaml"
+    if _existing_config.exists():
+        _set_secure_permissions(_existing_config)
 
     # 04-W6-03: apply a pending restore (staged by POST /api/system/restore) BEFORE
     # connecting the DB, so the swapped-in ipmideck.db + encryption.key + config.yaml
