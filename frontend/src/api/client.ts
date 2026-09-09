@@ -29,6 +29,11 @@ export async function api<T = unknown>(
   if (res.status === 401) {
     const exempt = NO_REDIRECT_PATHS.includes(path);
     if (!exempt && onUnauthorized) onUnauthorized();
+    // The exempt boot/login calls answer 401 with a meaningful, already-localized
+    // body (e.g. the invalid-credentials or lockout text). Throwing here would
+    // discard it and the caller would only be able to show a generic retry
+    // message, so the parsed body is returned to them instead.
+    if (exempt) return res.json();
     throw new Error("API error: 401 Unauthorized");
   }
   if (!res.ok) {

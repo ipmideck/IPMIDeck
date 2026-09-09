@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ipaddress
+import re
 import uuid
 from typing import Literal
 
@@ -22,37 +24,55 @@ Vendor = Literal["dell", "supermicro", "hpe", "lenovo", "ibm", "generic"]
 
 SERVER_COLORS = ["#2563eb", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899", "#6366f1"]
 
+# The only IPMI port the backend actually talks to. The port column exists and the UI shows
+# it, but nothing ever passes it to ipmitool, so a stored value other than 623 is a silent
+# lie: the connection goes to 623 anyway. Refusing it with an explanation is honest; quietly
+# accepting it is not.
+IPMI_PORT = 623
+
+# Maximum total length of a DNS name. A host longer than this cannot resolve, and an
+# unbounded string here ends up in a subprocess argument list.
+MAX_HOST_LENGTH = 253
+
+# One DNS label: alphanumeric, inner hyphens allowed, 1-63 characters. The full host is a
+# dot-separated series of these, with an optional trailing dot.
+_HOSTNAME_LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+_HOSTNAME_RE = re.compile(rf"^{_HOSTNAME_LABEL}(?:\.{_HOSTNAME_LABEL})*\.?$")
+
 
 def _validate_host(host: str) -> bool:
-    """Return True if `host` is a bare hostname or IP literal usable as ipmitool's -H arg.
+    """Return True if `host` is an IP literal or DNS hostname usable as ipmitool's -H arg.
 
-    Catches the URL / garbage class of mistake (scheme, embedded :port, path/slash,
-    whitespace) — NOT a full RFC validator. ipmitool's -H wants a bare host, so anything
-    a user would paste as a URL is rejected here instead of failing later in the poll loop.
+    This is an ALLOW-LIST, deliberately: the value is placed directly in the argument
+    vector of an ipmitool subprocess, and a denylist of known-bad shapes cannot enumerate
+    what a subprocess argument may mean. A leading-dash value such as "-C0" is not a host
+    at all — ipmitool reads it as the cipher-suite flag, and suite 0 disables authentication
+    entirely. Only what matches an address or a name is allowed through; everything else,
+    including empty strings, whitespace, URLs, paths, NUL bytes, shell metacharacters and
+    over-long values, is refused.
 
-    IPv6 DECISION: only the BRACKETED form `[..::..]` is accepted (the standard way to
-    write an IPv6 literal where a port could follow). A bare unbracketed IPv6 (with its
-    internal colons) is rejected by the colon rule below — bracket it to use IPv6.
+    IPv6 must be written in the BRACKETED form `[..::..]`, the standard notation where a
+    port could follow. A bare unbracketed IPv6 is rejected: its internal colons are
+    indistinguishable from an embedded `host:port`, which belongs in the separate field.
     """
     h = host.strip()
-    if not h:
+    if not h or len(h) > MAX_HOST_LENGTH:
         return False
-    # Whitespace anywhere -> invalid.
-    if any(ch.isspace() for ch in h):
-        return False
-    # URL scheme (http://, https://, anything with "://").
-    if "://" in h:
-        return False
-    # Path / slash.
-    if "/" in h or "\\" in h:
-        return False
-    # Bracketed IPv6 literal: accept `[...]` outright (do NOT trip the colon rule).
-    if h.startswith("[") and h.endswith("]") and ":" in h[1:-1]:
+    # Bracketed IPv6 literal — validate the address inside the brackets.
+    if h.startswith("[") and h.endswith("]"):
+        try:
+            ipaddress.IPv6Address(h[1:-1])
+        except ValueError:
+            return False
         return True
-    # Embedded port or stray colon (host:623 belongs in the separate `port` field).
-    if ":" in h:
-        return False
-    return True
+    # Bare IP literal (v4, or a v6 the user forgot to bracket — the latter is refused above
+    # by the bracket rule only if bracketed, so check v4 explicitly here).
+    try:
+        ipaddress.IPv4Address(h)
+        return True
+    except ValueError:
+        pass
+    return bool(_HOSTNAME_RE.match(h))
 
 
 class ServerCreate(BaseModel):
@@ -100,10 +120,13 @@ async def create_server(body: ServerCreate, lang: str = Depends(get_lang)):
     from backend.main import db, auth
     from backend.core.crypto import encrypt
 
-    # Reject a URL / garbage host (scheme, embedded :port, path/slash, whitespace) BEFORE
-    # the INSERT so it never reaches ipmitool's -H flag in the background poll loops.
+    # Reject a host that is not an address or a name BEFORE the INSERT, so it never reaches
+    # ipmitool's -H flag in the background poll loops.
     if not _validate_host(body.host):
         return {"success": False, "error": t("invalid_host", lang)}
+
+    if body.port != IPMI_PORT:
+        return {"success": False, "error": t("unsupported_port", lang)}
 
     # 04-W2-02: light validation on the tariff field. Negative values are nonsense;
     # 0.0 is allowed (hypothetical free electricity); null = not configured.
@@ -168,6 +191,28 @@ async def update_server(server_id: str, body: ServerUpdate, lang: str = Depends(
     if "host" in payload and not _validate_host(payload["host"]):
         return {"success": False, "error": t("invalid_host", lang)}
 
+    if "port" in payload and payload["port"] is not None and payload["port"] != IPMI_PORT:
+        return {"success": False, "error": t("unsupported_port", lang)}
+
+    # Re-point stored credentials only when the caller can supply them again.
+    #
+    # The stored BMC username and password are root-equivalent on the hardware and are never
+    # returned by the API. Changing only the host therefore aimed credentials the caller
+    # could not read at a machine of their choosing, and the next poll delivered them there.
+    # Requiring both to be re-sent in the same request makes the ability to redirect them
+    # depend on already knowing them, which a stolen session alone does not provide.
+    #
+    # The comparison is against the STORED host, not against whether the field was sent: the
+    # edit form submits the host on every save, so testing for its presence would reject
+    # ordinary renames.
+    existing = await db.fetchone("SELECT host FROM servers WHERE id = ?", (server_id,))
+    if existing and "host" in payload and payload["host"] != existing["host"]:
+        if not body.username or not body.password:
+            return {
+                "success": False,
+                "error": t("credentials_required_for_host_change", lang),
+            }
+
     updates = []
     params = []
     for field in ["name", "description", "host", "port", "vendor", "color"]:
@@ -220,9 +265,20 @@ class TestCredentials(BaseModel):
 
 
 @router.post("/test")
-async def test_raw_connection(body: TestCredentials):
-    """Test IPMI connection with raw credentials (no saved server needed)."""
+async def test_raw_connection(body: TestCredentials, lang: str = Depends(get_lang)):
+    """Test IPMI connection with raw credentials (no saved server needed).
+
+    The host is validated here too: this endpoint hands its argument straight to
+    ipmitool without ever touching the database, so it is the shortest path from an
+    unvalidated request field to a subprocess argument vector.
+    """
     from backend.main import ipmi_service
+
+    if not _validate_host(body.host):
+        return {"success": False, "error": t("invalid_host", lang)}
+
+    if body.port != IPMI_PORT:
+        return {"success": False, "error": t("unsupported_port", lang)}
 
     try:
         status = await ipmi_service.get_power_status(body.host, body.username, body.password)

@@ -55,6 +55,23 @@ def test_parse_duration_respects_custom_default():
     assert parse_duration_seconds("nonsense", default=1234) == 1234
 
 
+def test_parse_duration_clamps_absurd_values():
+    """A typo cannot grant a session a lifetime measured in years."""
+    from backend.core.config import MAX_DURATION_SECONDS
+
+    assert parse_duration_seconds("9999d") == MAX_DURATION_SECONDS
+    assert parse_duration_seconds(10**12) == MAX_DURATION_SECONDS
+    # A legitimate value below the cap is untouched.
+    assert parse_duration_seconds("7d") == 604800
+
+
+def test_parse_duration_logs_the_fallback(caplog):
+    """The operator can discover that the configured value was never in effect."""
+    with caplog.at_level("WARNING", logger="ipmideck.config"):
+        assert parse_duration_seconds("not-a-duration", default=86400) == 86400
+    assert any("not-a-duration" in r.getMessage() for r in caplog.records)
+
+
 # === 2. token exp reflects the instance session_expiry_seconds ===
 
 

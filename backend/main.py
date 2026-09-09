@@ -14,9 +14,11 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from typing import Annotated
+from urllib.parse import urlsplit
 
 import uvicorn
 from fastapi import Cookie, Depends, FastAPI, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.core.auth import AuthManager, require_auth
@@ -298,6 +300,18 @@ async def lifespan(app: FastAPI):
         ctx, config.modules, persisted_enabled=persisted_enabled
     )
 
+    # Turn the OpenAPI pages back on for a demo instance or a debug-level run. This MUST
+    # happen before the module routes and the SPA catch-all are registered below: the
+    # catch-all swallows every path registered after it, so a later setup() would produce
+    # routes that never match. The None check is required — lifespan re-enters for every
+    # app instance a test builds, and re-running setup() unguarded appends a duplicate set
+    # of routes each time.
+    if (config.demo or config.logging.level.lower() == "debug") and app.openapi_url is None:
+        app.openapi_url = "/openapi.json"
+        app.docs_url = "/docs"
+        app.redoc_url = "/redoc"
+        app.setup()
+
     # FIX-04: dynamically mount only enabled modules' routes (with auth guard).
     # Disabled modules will never have their routes registered → 404 instead of 200.
     # IMPORTANT: must happen BEFORE the SPA fallback route is registered so FastAPI
@@ -317,6 +331,26 @@ async def lifespan(app: FastAPI):
     effective_host = getattr(app.state, "effective_host", None) or config.server.host
     effective_port = getattr(app.state, "effective_port", None) or config.server.port
     logger.info("%s started on %s:%d", APP_NAME, effective_host, effective_port)
+    # A bind reachable from the network without TLS puts the session cookie and every BMC
+    # password typed into the UI on the wire in clear text. Refusing to start is not right
+    # (a trusted LAN is a legitimate choice), but the operator should be told rather than
+    # have to infer it.
+    if effective_host not in ("127.0.0.1", "::1", "localhost") and not config.server.https:
+        logger.warning(
+            "Listening on %s without TLS — session cookies and BMC credentials are sent "
+            "in cleartext. Enable https in config.yaml or terminate TLS at a proxy.",
+            effective_host,
+        )
+    # Until first-run setup completes there is no account, and nothing over HTTP distinguishes
+    # the operator from anyone else who can reach the port: whoever answers the setup wizard
+    # first owns the instance. The window closes on its own the moment setup is completed, so
+    # the fix is to make sure the operator knows it is open rather than to add a mechanism.
+    if not await auth.has_user():
+        logger.warning(
+            "No account configured yet — anyone who can reach %s:%d can complete the setup "
+            "wizard and claim this instance. Finish first-run setup now.",
+            effective_host, effective_port,
+        )
     if config.demo:
         logger.info("Demo mode active — 6 virtual servers (one per vendor) with simulated data")
 
@@ -331,11 +365,93 @@ async def lifespan(app: FastAPI):
 
 # === FastAPI App ===
 
+# The interactive OpenAPI pages are constructed disabled and re-enabled inside lifespan()
+# for a demo instance or a debug-level run. They map every route in the app for an
+# anonymous caller, which is reconnaissance we don't owe a stranger; in a demo the API is
+# the thing being shown, and at debug level the operator asked for the detail.
 app = FastAPI(
     title=APP_NAME,
     version=VERSION,
     lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
+
+
+# Methods that can change state. Safe methods are never blocked: a cross-origin GET
+# cannot be turned into a write, and blocking them would break ordinary links.
+_STATE_CHANGING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+def _same_authority(candidate: str, host_header: str, request_scheme: str) -> bool:
+    """Return True if ``candidate`` (an Origin/Referer URL) targets this exact server.
+
+    The comparison is on the AUTHORITY — host AND port. Cookie same-site rules treat
+    every port on a host as one site, so another service listening on a different port
+    of the same machine can drive authenticated requests here; comparing the port is
+    exactly what closes that.
+
+    The scheme is only enforced when the request itself arrived over TLS. Behind a
+    TLS-terminating proxy the app sees plain http and cannot know its external scheme,
+    so demanding an exact scheme match would reject every proxied deployment.
+    """
+    parsed = urlsplit(candidate)
+    if not parsed.netloc:
+        return False
+    if request_scheme == "https" and parsed.scheme and parsed.scheme != "https":
+        return False
+    return parsed.netloc.lower() == host_header.lower()
+
+
+@app.middleware("http")
+async def _origin_guard(request, call_next):
+    """Reject state-changing requests a foreign origin caused the browser to send.
+
+    Several endpoints take no request body, so a browser can submit them cross-origin
+    as a simple request — no preflight, cookies attached — and the app had no way to
+    tell that apart from a click in its own UI.
+
+    A request with NO Origin and NO Referer is allowed through: command-line clients,
+    the container health check and server-to-server callers legitimately send neither,
+    and rejecting them would break every non-browser integration to stop an attack only
+    a browser can mount. Browsers always attach Origin to a cross-origin state-changing
+    request, so "present and pointing elsewhere" is the signal worth acting on.
+    """
+    if request.method in _STATE_CHANGING_METHODS:
+        stated = request.headers.get("origin") or request.headers.get("referer")
+        host_header = request.headers.get("host")
+        if stated and host_header and not _same_authority(
+            stated, host_header, request.url.scheme
+        ):
+            return JSONResponse(
+                status_code=403,
+                content={"success": False, "error": "Cross-origin request rejected"},
+            )
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def _security_headers(request, call_next):
+    """Attach defensive response headers to everything the app serves.
+
+    frame-ancestors (plus the legacy X-Frame-Options) keeps the dashboard out of a
+    hostile iframe, which is what turns a stolen click into a power-off. nosniff stops a
+    stored sensor string from being re-interpreted as script. no-referrer keeps LAN
+    hostnames out of Referer headers sent to third parties.
+
+    HSTS is emitted ONLY over an https request: sent over plain http it is ignored by
+    browsers, but if it ever were honoured on a LAN name it would strand the operator
+    with no way back to http.
+    """
+    response = await call_next(request)
+    response.headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    if request.url.scheme == "https":
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    return response
 
 
 # === WebSocket endpoint ===
@@ -722,6 +838,8 @@ def cli():
             else:
                 uvicorn_kwargs["ssl_certfile"] = early_cfg.server.cert_file
                 uvicorn_kwargs["ssl_keyfile"] = early_cfg.server.key_file
+        if early_cfg is not None and early_cfg.server.forwarded_allow_ips:
+            uvicorn_kwargs["forwarded_allow_ips"] = early_cfg.server.forwarded_allow_ips
         uvicorn.run("backend.main:app", **uvicorn_kwargs)
         return
 
@@ -983,6 +1101,8 @@ def cli():
                 if iter_cfg.server.https and iter_cfg.server.cert_file and iter_cfg.server.key_file:
                     cfg_kwargs["ssl_certfile"] = iter_cfg.server.cert_file
                     cfg_kwargs["ssl_keyfile"] = iter_cfg.server.key_file
+                if iter_cfg.server.forwarded_allow_ips:
+                    cfg_kwargs["forwarded_allow_ips"] = iter_cfg.server.forwarded_allow_ips
 
                 uconfig = uvicorn.Config(
                     "backend.main:app",

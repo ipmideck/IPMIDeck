@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from dataclasses import dataclass, field
@@ -9,23 +10,49 @@ from pathlib import Path
 
 import yaml
 
+from backend.core.crypto import _set_secure_permissions
+
 _DURATION_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 _DURATION_RE = re.compile(r"^(\d+)([smhd]?)$")
+
+# Upper bound for any configured duration. A session lifetime of "9999d" is a typo, not an
+# intention, and silently honouring it would leave a session valid for centuries. Well above
+# any legitimate setting, so a real configuration is never clamped.
+MAX_DURATION_SECONDS = 30 * 86400
+
+logger = logging.getLogger("ipmideck.config")
 
 
 def parse_duration_seconds(value: str | int | None, default: int = 86400) -> int:
     """Parse a duration like '24h', '90m', '1d', '45s', or a bare integer (seconds) into
-    seconds. Invalid / non-positive input returns ``default`` (never raises)."""
+    seconds.
+
+    Never raises: this runs during startup, where a malformed value in the configuration
+    file must not stop the application from booting. Invalid or non-positive input falls
+    back to ``default``, but the fallback is LOGGED — silently substituting a different
+    lifetime than the one written in the file left the operator with no way to discover
+    that their setting was never in effect. Values above the maximum are clamped rather
+    than rejected, so an obvious typo cannot grant a session an unbounded lifetime.
+    """
     if value is None or isinstance(value, bool):
         # bool is an int subclass — reject it explicitly so True/False can't slip through.
+        if value is not None:
+            logger.warning("Invalid duration %r — using %ds instead", value, default)
         return default
     if isinstance(value, int):
-        return value if value > 0 else default
+        if value <= 0:
+            logger.warning("Invalid duration %r — using %ds instead", value, default)
+            return default
+        return min(value, MAX_DURATION_SECONDS)
     match = _DURATION_RE.match(value.strip().lower())
     if not match:
+        logger.warning("Invalid duration %r — using %ds instead", value, default)
         return default
     seconds = int(match.group(1)) * _DURATION_UNITS[match.group(2) or "s"]
-    return seconds if seconds > 0 else default
+    if seconds <= 0:
+        logger.warning("Invalid duration %r — using %ds instead", value, default)
+        return default
+    return min(seconds, MAX_DURATION_SECONDS)
 
 
 def _data_dir() -> Path:
@@ -39,14 +66,21 @@ class ServerConfig:
     https: bool = False
     cert_file: str | None = None
     key_file: str | None = None
+    # Which peers are allowed to set X-Forwarded-Proto/For. Only 127.0.0.1 is trusted by
+    # default, so a TLS proxy in another container reaches us from a bridge address, its
+    # forwarded scheme is discarded, and the session cookie silently loses its Secure
+    # flag. Set this to the proxy's address to make the cookie correct behind it.
+    forwarded_allow_ips: str | None = None
 
 
 @dataclass
 class AuthConfig:
-    enabled: bool = True
+    # Only the session lifetime is configurable here. Whether authentication is enabled, and
+    # the brute-force lockout thresholds, are deliberately NOT: the enabled flag lives in the
+    # database so that write access to this file cannot be used to turn the login off, and the
+    # lockout thresholds are fixed in the login path. Keys that do nothing are worse than
+    # absent ones — they read as promises the code does not keep.
     session_expiry: str = "24h"
-    max_login_attempts: int = 5
-    lockout_duration: str = "15m"
 
 
 @dataclass
@@ -95,7 +129,7 @@ def _apply_env_overrides(config: AppConfig) -> None:
     env_map = {
         "IPMIDECK_SERVER_HOST": ("server", "host"),
         "IPMIDECK_SERVER_PORT": ("server", "port", int),
-        "IPMIDECK_AUTH_ENABLED": ("auth", "enabled", lambda v: v.lower() in ("true", "1", "yes")),
+        "IPMIDECK_SERVER_FORWARDED_ALLOW_IPS": ("server", "forwarded_allow_ips"),
         "IPMIDECK_AUTH_SESSION_EXPIRY": ("auth", "session_expiry"),
         "IPMIDECK_IPMI_POLL_INTERVAL": ("ipmi", "poll_interval", int),
         "IPMIDECK_IPMI_POWER_POLL_INTERVAL": ("ipmi", "power_poll_interval", int),
@@ -182,6 +216,7 @@ def update_server_yaml(updates: dict, config_path: str | Path | None = None) -> 
     raw["server"] = server
     with open(path, "w", encoding="utf-8") as f:
         yaml.dump(raw, f, default_flow_style=False, sort_keys=False)
+    _set_secure_permissions(path)
     return path
 
 
@@ -193,7 +228,7 @@ def save_default_config(config_path: str | Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     default = {
         "server": {"host": "0.0.0.0", "port": 3000, "https": False},
-        "auth": {"enabled": True, "session_expiry": "24h", "max_login_attempts": 5},
+        "auth": {"session_expiry": "24h"},
         "ipmi": {"poll_interval": 30, "power_poll_interval": 30, "command_timeout": 30},
         "data": {"retention_days": 365, "cleanup_interval": "24h"},
         "logging": {"level": "info"},
@@ -207,3 +242,4 @@ def save_default_config(config_path: str | Path) -> None:
     }
     with open(path, "w") as f:
         yaml.dump(default, f, default_flow_style=False, sort_keys=False)
+    _set_secure_permissions(path)

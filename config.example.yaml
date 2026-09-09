@@ -6,14 +6,15 @@ server:
   # key_file: /path/to/key.pem
 
 auth:
-  enabled: true
+  # Whether authentication is on, and the lockout thresholds, are NOT configured here.
+  # Authentication is switched on or off from the Security settings and the answer is kept
+  # in the database, so a file with write access cannot be used to turn the login off.
   session_expiry: 24h
-  max_login_attempts: 5
 
 ipmi:
-  poll_interval: 5            # seconds
-  power_poll_interval: 10     # seconds
-  command_timeout: 10         # seconds
+  poll_interval: 30           # seconds
+  power_poll_interval: 30     # seconds
+  command_timeout: 30         # seconds
 
 data:
   retention_days: 365

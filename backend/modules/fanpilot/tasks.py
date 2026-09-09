@@ -936,8 +936,6 @@ async def fanpilot_loop():
                     )
                     continue
 
-                target_speed = ctrl.compute_fan_speed(curve_points, current_temp)
-
                 # Apply fan speed via IPMI. P0-3: _apply_fan_write consumes the
                 # FanWriteResult (transient retries / hard-reject immediate fall-back /
                 # recovery+alert) and returns whether the write was ACCEPTED. A rejected
@@ -945,7 +943,16 @@ async def fanpilot_loop():
                 # broadcast a false 'fanpilot active'. The classified rejection is handled
                 # INSIDE _apply_fan_write, not swallowed by this try/except (which now only
                 # guards genuine unexpected errors — e.g. a malformed credential blob).
+                #
+                # Computing the target speed is inside this guard too: the loop walks the
+                # servers in a fixed order, so an exception raised while evaluating one
+                # server's curve used to abort the whole pass and permanently starve every
+                # server after it — no curve evaluation, no fail-safe, no recovery, fans
+                # left at their last commanded speed. Failing one server at a time keeps
+                # the rest of the fleet under control.
                 try:
+                    target_speed = ctrl.compute_fan_speed(curve_points, current_temp)
+
                     accepted = await _apply_fan_write(ctx, server, target_speed)
                     if not accepted:
                         continue  # fail-safe fired; do NOT broadcast active

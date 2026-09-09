@@ -97,6 +97,13 @@ docker compose -f docker-compose.dev.yml up --build   # build from source
 
 Open `http://<your-ip>:3000` and follow the setup wizard.
 
+> The container runs as an unprivileged user (uid/gid 1000), not root. A named volume or an
+> existing data directory created by an earlier version is adopted automatically on first
+> start — no manual `chown`. The only case needing a one-time host-side
+> `chown -R 1000:1000 <dir>` is a bind mount on a filesystem that refuses to change ownership
+> (a read-only mount, NFS without `no_root_squash`, or CIFS with a fixed uid/gid). The
+> container still starts in that case and logs a warning rather than failing.
+
 > `--network host` (Linux) lets the container reach BMCs on your local network via UDP 623.
 > On Windows/macOS use `-p 3000:3000`.
 
@@ -143,8 +150,13 @@ IPMIDECK_LOGGING_LEVEL=info
 IPMIDECK_DATA_RETENTION_DAYS=180
 ```
 
-Every key is written to that `config.yaml` on first run — read it for the full list. The same
-settings are also editable at runtime from the in-app **Settings** page.
+The `config.yaml` written on first run covers the common settings, not every key — read it for
+what it contains, and add the rest by hand if you need them. The same settings are also
+editable at runtime from the in-app **Settings** page.
+
+Note that whether authentication is enabled is **not** a config-file setting. It is stored in
+the database and changed from the Security settings, so write access to `config.yaml` cannot be
+used to turn the login off.
 
 ---
 
@@ -267,12 +279,15 @@ ipmideck/
 ## Security
 
 - Local authentication with bcrypt password hashing
-- Opaque session tokens, HMAC-SHA256 signed with a per-install secret, with configurable
+- Session tokens signed with HMAC-SHA256 using a per-install secret, with configurable
   expiry (`IPMIDECK_AUTH_SESSION_EXPIRY` / the `auth.session_expiry` config key — e.g. `24h`,
-  `90m`, `1h`; default `24h`)
+  `90m`, `1h`; default `24h`). The signature is what makes a token trustworthy: the payload
+  itself is base64url-encoded JSON, so treat the cookie as readable by whoever holds it
 - BMC credentials encrypted at rest with AES-256-CBC. The 32-byte key is randomly generated and
-  stored in `<data_dir>/encryption.key` — deliberately **outside** the database, so a stolen DB
-  alone decrypts nothing (back the key file up separately)
+  stored in `<data_dir>/encryption.key` — deliberately **outside** the database, so in normal
+  operation a stolen DB alone decrypts nothing (back the key file up separately). The one
+  exception is an installation upgraded from a version that kept the key in the database and
+  whose migration was interrupted: until it completes, the in-database key is still usable
 - BMC passwords are never placed on the command line — `ipmitool` reads them from the environment
   (`-E` / `IPMITOOL_PASSWORD`), so they never appear in `ps`
 - No external network dependencies — fully offline capable

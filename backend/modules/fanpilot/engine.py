@@ -8,11 +8,26 @@ logger = logging.getLogger("ipmideck.modules.fanpilot")
 
 
 def interpolate_curve(curve_points: list[dict], temperature: float) -> int:
-    """Linear interpolation on a fan curve. Returns fan speed percentage (0-100)."""
+    """Linear interpolation on a fan curve. Returns fan speed percentage (0-100).
+
+    Total by construction: any curve this function cannot read resolves to 100%. Curve
+    points are stored as free-form JSON with no element schema, so a point missing a key,
+    carrying a non-numeric value, or not being a mapping at all reaches this function
+    intact. Raising here would abort the control loop mid-pass and leave the fans of every
+    server evaluated later in the same pass pinned at their last commanded speed while
+    temperatures climb. Full speed is loud but safe, and it matches what an empty curve
+    already does.
+    """
     if not curve_points:
         return 100  # safety: full speed if no curve
 
-    points = sorted(curve_points, key=lambda p: p["temp"])
+    try:
+        points = sorted(
+            ({"temp": float(p["temp"]), "speed": float(p["speed"])} for p in curve_points),
+            key=lambda p: p["temp"],
+        )
+    except (KeyError, TypeError, ValueError, IndexError):
+        return 100  # safety: an unreadable curve is treated as no curve
 
     # Below minimum point
     if temperature <= points[0]["temp"]:

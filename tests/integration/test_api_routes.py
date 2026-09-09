@@ -6,8 +6,8 @@ They use the conftest harness fixtures (03-01):
 
   * client_auth — auth ENABLED (DB default auth_enabled="true"): the genuine guarded-route
     fixture used for the 401 -> setup -> 200 flow AND the localized login-failure test.
-  * client      — auth DISABLED via bm.auth.set_auth_enabled(False) AFTER lifespan (REVIEWS
-    HIGH #1: IPMIDECK_AUTH_ENABLED is INERT for the runtime gate, which reads the DB). With
+  * client      — auth DISABLED via bm.auth.set_auth_enabled(False) AFTER lifespan (whether auth
+    is on lives in the DB and has no config/env override). With
     this fixture the guarded /api/servers routes are OPEN (200, not 401).
 
 REVIEWS-driven choices (03-REVIEWS.md):
@@ -139,7 +139,7 @@ def test_login_failure_localized(client_auth):
         json={"username": "admin", "password": "wrong"},
         headers={"Accept-Language": "it"},
     )
-    assert it_resp.status_code == 200
+    assert it_resp.status_code == 401
     it_body = it_resp.json()
     assert it_body["success"] is False
     assert it_body["error"] == t("invalid_credentials", "it")
@@ -151,7 +151,7 @@ def test_login_failure_localized(client_auth):
         json={"username": "admin", "password": "wrong"},
         headers={"Accept-Language": "en"},
     )
-    assert en_resp.status_code == 200
+    assert en_resp.status_code == 401
     en_body = en_resp.json()
     assert en_body["success"] is False
     assert en_body["error"] == t("invalid_credentials", "en")
@@ -159,6 +159,32 @@ def test_login_failure_localized(client_auth):
 
     # Resolver actually switched languages between the two requests.
     assert it_body["error"] != en_body["error"]
+
+
+def test_login_correct_password_accepted_after_failed_attempts(client_auth):
+    """A valid credential still works once the failure counter is past the threshold.
+
+    The failure counter is keyed on a caller-supplied username, so anyone able to
+    reach the login form could otherwise burn attempts on a guessed name and have
+    the real operator's correct password refused for the whole lockout window.
+    """
+    setup_resp = client_auth.post(
+        "/api/auth/setup", json={"username": "admin", "password": "correcthorse"}
+    )
+    assert setup_resp.status_code == 200
+
+    for _ in range(6):
+        bad = client_auth.post(
+            "/api/auth/login", json={"username": "admin", "password": "wrong"}
+        )
+        assert bad.status_code == 401
+        assert bad.json()["success"] is False
+
+    good = client_auth.post(
+        "/api/auth/login", json={"username": "admin", "password": "correcthorse"}
+    )
+    assert good.status_code == 200, good.text
+    assert good.json()["success"] is True
 
 
 # --- quick-260625-rw5: host-field validation on create + update -----------------------------
@@ -306,6 +332,196 @@ def test_update_server_without_host_succeeds(client):
     assert len(match) == 1
     assert match[0]["name"] == "Renamed"
     assert match[0]["host"] == "192.0.2.42"
+
+
+def test_create_server_rejects_option_like_host(client):
+    """A host that ipmitool would read as a flag is refused and never stored.
+
+    "-C0" lands in the argument vector as the cipher-suite flag and suite 0 turns
+    authentication off entirely, so this string must not survive to the poll loop.
+    """
+    for bad_host in ["-C0", "--", ".", "..", "$(id)", "host;ls", "a" * 300]:
+        resp = client.post(
+            "/api/servers",
+            json={
+                "name": "Bad host",
+                "host": bad_host,
+                "username": "root",
+                "password": "calvin",
+                "vendor": "dell",
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["success"] is False, f"{bad_host!r} was accepted"
+        assert body["error"] == t("invalid_host", "en")
+
+    hosts = [s["host"] for s in client.get("/api/servers").json()["servers"]]
+    assert "-C0" not in hosts
+
+
+def test_test_endpoint_rejects_option_like_host(client):
+    """The credential-test endpoint validates the host it hands to ipmitool."""
+    resp = client.post(
+        "/api/servers/test",
+        json={"host": "-C0", "username": "root", "password": "calvin"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["success"] is False
+    assert body["error"] == t("invalid_host", "en")
+
+
+def test_create_server_rejects_non_ipmi_port(client):
+    """A port other than 623 is refused rather than stored and silently ignored."""
+    resp = client.post(
+        "/api/servers",
+        json={
+            "name": "Odd port",
+            "host": "192.0.2.43",
+            "port": 6230,
+            "username": "root",
+            "password": "calvin",
+            "vendor": "dell",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["success"] is False
+    assert body["error"] == t("unsupported_port", "en")
+
+    hosts = [s["host"] for s in client.get("/api/servers").json()["servers"]]
+    assert "192.0.2.43" not in hosts
+
+
+def test_history_csv_rejects_unknown_range(client):
+    """An unrecognised range is a 422 rather than a silent fallback to 24 hours.
+
+    The value was previously reflected into the download filename while the data
+    came from a different window, so the file's name disagreed with its contents.
+    """
+    resp = client.get(
+        "/api/system/history-csv",
+        params={"server_id": "s1", "sensor_name": "CPU Temp", "range": 'BOGUS"'},
+    )
+    assert resp.status_code == 422, resp.text
+
+
+def test_history_csv_filename_cannot_break_the_header(client):
+    """A quote in the sensor name cannot escape the quoted filename."""
+    resp = client.get(
+        "/api/system/history-csv",
+        params={"server_id": "s1", "sensor_name": 'evil";x=y'},
+    )
+    assert resp.status_code == 200, resp.text
+    disposition = resp.headers["content-disposition"]
+    assert disposition.count('"') == 2, disposition
+    assert ";x=y" not in disposition
+
+
+def test_setup_rejects_over_long_password_without_crashing(client_auth):
+    """A password past bcrypt's limit is a clear error, not an internal server error."""
+    resp = client_auth.post(
+        "/api/auth/setup", json={"username": "admin", "password": "x" * 100}
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["success"] is False
+    assert "72" in body["error"]
+
+
+def test_login_with_over_long_password_is_rejected_not_crashed(client_auth):
+    """An over-long password cannot match any hash, so it fails auth instead of raising."""
+    setup = client_auth.post(
+        "/api/auth/setup", json={"username": "admin", "password": "correcthorse"}
+    )
+    assert setup.json()["success"] is True
+
+    resp = client_auth.post(
+        "/api/auth/login", json={"username": "admin", "password": "x" * 100}
+    )
+    assert resp.status_code == 401, resp.text
+    assert resp.json()["success"] is False
+
+
+def test_setup_rejects_multibyte_password_over_the_byte_limit(client_auth):
+    """The limit is bytes, not characters: 72 multi-byte characters still exceed it."""
+    resp = client_auth.post(
+        "/api/auth/setup", json={"username": "admin", "password": "é" * 72}
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["success"] is False
+
+
+def _create_host_guard_server(client, host="192.0.2.70", name="Original"):
+    resp = client.post(
+        "/api/servers",
+        json={
+            "name": name,
+            "host": host,
+            "username": "root",
+            "password": "calvin",
+            "vendor": "dell",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()["server_id"]
+
+
+def test_host_change_without_credentials_is_refused(client):
+    """Stored BMC credentials cannot be re-pointed by someone who cannot supply them."""
+    server_id = _create_host_guard_server(client)
+
+    resp = client.put(f"/api/servers/{server_id}", json={"host": "192.0.2.99"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["success"] is False
+    assert body["error"] == t("credentials_required_for_host_change", "en")
+
+    stored = client.get(f"/api/servers/{server_id}").json()["server"]
+    assert stored["host"] == "192.0.2.70", "the host must not have changed"
+
+
+def test_host_change_with_credentials_succeeds(client):
+    """Re-supplying the credentials is the authorization, so the change goes through."""
+    server_id = _create_host_guard_server(client)
+
+    resp = client.put(
+        f"/api/servers/{server_id}",
+        json={"host": "192.0.2.99", "username": "root", "password": "calvin"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["success"] is True
+
+    stored = client.get(f"/api/servers/{server_id}").json()["server"]
+    assert stored["host"] == "192.0.2.99"
+
+
+def test_rename_resending_the_same_host_is_not_blocked(client):
+    """The edit form always sends the host, so an unchanged one must not trip the guard."""
+    server_id = _create_host_guard_server(client, name="Before")
+
+    resp = client.put(
+        f"/api/servers/{server_id}",
+        json={"name": "After", "host": "192.0.2.70"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["success"] is True
+
+    stored = client.get(f"/api/servers/{server_id}").json()["server"]
+    assert stored["name"] == "After"
+    assert stored["host"] == "192.0.2.70"
+
+
+def test_host_change_with_only_a_username_is_refused(client):
+    """Both credentials are required — a username alone proves nothing."""
+    server_id = _create_host_guard_server(client)
+    resp = client.put(
+        f"/api/servers/{server_id}",
+        json={"host": "192.0.2.99", "username": "root"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["success"] is False
 
 
 # --- 08-01 (D-12): strict vendor enum -> automatic 422 at the parse layer -------------------

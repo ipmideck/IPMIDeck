@@ -8,12 +8,15 @@ import shutil
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from backend.core.auth import require_auth
+from backend.core.crypto import _set_secure_permissions
+from backend.core.csv_export import csv_safe, safe_filename_part
 
 router = APIRouter()
 
@@ -341,6 +344,14 @@ async def restore(request: Request):
     """
     from backend.main import config
 
+    # The archive arrives as the raw request body, so the content type is the only
+    # declaration of intent available. Requiring it stops a cross-origin form POST —
+    # which can only ever carry a form or text content type — from reaching the
+    # extractor at all.
+    content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
+    if content_type != "application/zip":
+        return {"success": False, "error": "Expected a zip archive (Content-Type: application/zip)"}
+
     data_dir = Path(config.data.db_path).parent
     staging = data_dir / "staging"
     if staging.exists():
@@ -411,6 +422,11 @@ async def _apply_staging_if_present(config) -> bool:
                     if sc.exists():
                         sc.unlink()
             shutil.move(str(src), str(dest))
+            # Restored files arrive with the mode zipfile gave them on extraction, which
+            # is world-readable, and shutil.move preserves it. Every file a backup carries
+            # is sensitive — the database and the encryption key hold BMC credentials — so
+            # restoring one would otherwise quietly widen its permissions.
+            _set_secure_permissions(dest)
     shutil.rmtree(staging, ignore_errors=True)
     return True
 
@@ -431,12 +447,20 @@ _RANGE_OFFSETS = {
 
 
 @router.get("/system/history-csv", dependencies=[Depends(require_auth)])
-async def history_csv(server_id: str, sensor_name: str, range: str = "24h"):
-    """Export sensor history as CSV. server_id is str (Decision C); range matches
-    useRangeStore ("live" | "1h" | "24h" | "7d")."""
+async def history_csv(
+    server_id: str,
+    sensor_name: str,
+    range: Literal["live", "1h", "24h", "7d"] = "24h",
+):
+    """Export sensor history as CSV.
+
+    `range` is a closed set: an unrecognised value used to fall back to 24 hours while
+    still being reflected verbatim into the response filename, so the caller was handed a
+    file whose name disagreed with its contents.
+    """
     from backend.main import db
 
-    offset = _RANGE_OFFSETS.get(range, _RANGE_OFFSETS["24h"])
+    offset = _RANGE_OFFSETS[range]
     rows = await db.fetchall(
         "SELECT timestamp, sensor_name, value FROM sensor_readings "
         "WHERE server_id = ? AND sensor_name = ? AND timestamp > datetime('now', ?) "
@@ -447,8 +471,10 @@ async def history_csv(server_id: str, sensor_name: str, range: str = "24h"):
     writer = csv.writer(buf)
     writer.writerow(["timestamp", "sensor_name", "value"])
     for r in rows:
-        writer.writerow([r["timestamp"], r["sensor_name"], r["value"]])
-    safe = sensor_name.replace(" ", "_").replace("/", "_")
+        writer.writerow(
+            [csv_safe(r["timestamp"]), csv_safe(r["sensor_name"]), csv_safe(r["value"])]
+        )
+    safe = safe_filename_part(sensor_name)
     return StreamingResponse(
         iter([buf.getvalue()]),
         media_type="text/csv",
@@ -458,26 +484,27 @@ async def history_csv(server_id: str, sensor_name: str, range: str = "24h"):
 
 @router.get("/health")
 async def health():
-    from backend.core.branding import VERSION
-    from backend.main import config, ws_manager, module_loader
-    return {
-        "status": "ok",
-        "version": VERSION,
-        "demo": config.demo,
-        "websocket_connections": ws_manager.connection_count,
-        "modules_loaded": len(module_loader.get_enabled_modules()),
-        "time": datetime.utcnow().isoformat() + "Z",
-    }
+    """Liveness only.
+
+    This endpoint is unauthenticated so a container orchestrator can reach it, which
+    means everything it returns is public. The build version, module count and live
+    connection count told an anonymous scanner which release to look up exploits for and
+    whether anyone was watching; the authenticated config endpoint carries that same
+    detail for the UI.
+    """
+    return {"status": "ok"}
 
 
 @router.get("/config", dependencies=[Depends(require_auth)])
 async def get_config():
+    from backend.core.branding import VERSION
     from backend.main import config
     return {
         "server": {"host": config.server.host, "port": config.server.port},
         "ipmi": {"poll_interval": config.ipmi.poll_interval},
         "data": {"retention_days": config.data.retention_days},
         "demo": config.demo,
+        "version": VERSION,
     }
 
 

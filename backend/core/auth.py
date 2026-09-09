@@ -23,6 +23,17 @@ logger = logging.getLogger("ipmideck.auth")
 
 SESSION_EXPIRY_SECONDS = 86400  # 24h — fallback default when config supplies no/invalid value
 
+# bcrypt hashes at most 72 bytes and raises on anything longer rather than truncating, so a
+# password past this length reaches the hashing call as an unhandled exception and surfaces
+# as a 500. The limit is in BYTES, not characters: 72 multi-byte characters are well over it.
+MAX_PASSWORD_BYTES = 72
+
+
+def _check_password_length(password: str) -> None:
+    """Reject a password bcrypt cannot hash, with a message the caller can show."""
+    if len(password.encode()) > MAX_PASSWORD_BYTES:
+        raise ValueError(f"Password must be at most {MAX_PASSWORD_BYTES} bytes")
+
 
 class AuthManager:
     def __init__(self, db: Database):
@@ -326,6 +337,7 @@ class AuthManager:
         return row is not None
 
     async def create_user(self, username: str, password: str) -> None:
+        _check_password_length(password)
         pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
         await self.db.execute(
             "INSERT INTO users (username, password_hash) VALUES (?, ?)",
@@ -335,6 +347,11 @@ class AuthManager:
         logger.info("User created: %s", username)
 
     async def verify_password(self, username: str, password: str) -> bool:
+        # An over-long password cannot match any stored hash, so answering False is the
+        # correct result. Letting it reach bcrypt would raise and turn a failed login
+        # into a 500 — a way to crash the endpoint with an ordinary request body.
+        if len(password.encode()) > MAX_PASSWORD_BYTES:
+            return False
         row = await self.db.fetchone(
             "SELECT password_hash FROM users WHERE username = ?", (username,)
         )
@@ -351,6 +368,7 @@ class AuthManager:
         when it had not. The rowcount is returned rather than raised so callers
         stay simple and decide their own reporting.
         """
+        _check_password_length(new_password)
         pw_hash = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode()
         cursor = await self.db.execute(
             "UPDATE users SET password_hash = ? WHERE username = ?",
@@ -374,6 +392,7 @@ class AuthManager:
         username = username.strip()
         if not username or not password.strip():
             raise ValueError("Username and password are required")
+        _check_password_length(password)
         pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
         try:
             await self.db.execute("DELETE FROM users")

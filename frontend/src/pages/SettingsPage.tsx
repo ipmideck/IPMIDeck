@@ -57,10 +57,11 @@ export default function SettingsPage() {
   const [certPath, setCertPath] = useState("");
   const [keyPath, setKeyPath] = useState("");
 
-  // Live backend version for the About section (zero-drift, /api/health).
+  // Live backend version for the About section (zero-drift). Read from /api/config:
+  // the public health endpoint reports liveness only and no longer carries the version.
   const [appVersion, setAppVersion] = useState<string | null>(null);
   useEffect(() => {
-    get<{ version: string }>("/api/health")
+    get<{ version: string }>("/api/config")
       .then((h) => setAppVersion(h.version))
       .catch(() => { /* leave null -> render the — placeholder */ });
   }, []);

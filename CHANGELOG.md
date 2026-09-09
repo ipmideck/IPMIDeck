@@ -50,6 +50,59 @@ into a new dated `## [<version>] - YYYY-MM-DD` section.
 - **`reset-password` no longer reports success for a username that does not exist (F17).**
 - **Backup archives are credential-grade.** An archive bundles the encryption key, the database
   and the configuration together, so it must be stored as carefully as the credentials themselves.
+- **The container no longer runs as root.** It runs as a dedicated unprivileged user
+  (uid/gid 1000). Existing data volumes are adopted automatically on first start — no manual
+  `chown`. If the ownership cannot be changed (a read-only mount, NFS without `no_root_squash`,
+  CIFS with a fixed uid/gid) the container still starts and logs a warning.
+- **The database and `config.yaml` are now created readable only by their owner.** They were
+  written with the default umask, so on a typical host every local account could read the stored
+  BMC credentials. Existing installations are repaired automatically on the next start, and
+  restoring a backup no longer widens the permissions of the restored files.
+- **A failed login now answers HTTP 401** instead of 200, and a correct password is never
+  refused because of the brute-force counter. That counter is keyed on a username supplied by
+  the caller, so burning the attempt budget on a guessed name previously locked the real
+  operator out of their own instance for the whole lockout window.
+- **The BMC host address is validated against an allow-list.** Values that are not addresses at
+  all were accepted and passed to `ipmitool`, where `-C0` selects cipher suite 0 and disables
+  authentication on the IPMI session. The credential-test endpoint had no validation whatsoever.
+- **Changing a server's address now requires re-entering its BMC credentials.** Those
+  credentials are never returned by the API, so changing only the address re-pointed unreadable
+  root-equivalent credentials at a machine of the caller's choosing.
+- **CSV exports can no longer carry executable cells.** Event descriptions come verbatim from
+  the BMC, and a cell starting with `=`, `+`, `-` or `@` is evaluated as a formula on open.
+  Export filenames can no longer break out of the `Content-Disposition` header either.
+- **Over-long passwords and malformed durations produce clear errors instead of HTTP 500.**
+  A password beyond bcrypt's 72-byte limit crashed login and first-run setup, and the
+  credential-change endpoint leaked the raw library exception text.
+- **Interactive API documentation (`/docs`, `/redoc`) is disabled outside demo and debug mode**,
+  and `/api/health` no longer discloses the build version or connection counts to anonymous
+  callers.
+- **Security headers are sent on every response**, state-changing requests from a foreign origin
+  are rejected, and the session cookie is `SameSite=Strict`.
+- **The session cookie's `Secure` flag is now correct behind a TLS-terminating proxy**, via the
+  new `server.forwarded_allow_ips` setting (`IPMIDECK_SERVER_FORWARDED_ALLOW_IPS`).
+
+### Fixed
+
+- **A malformed fan curve no longer stops FanPilot from controlling other servers.** Curve
+  points are stored as free-form JSON, and one unreadable curve aborted every control pass at
+  the same server, leaving every server after it with no curve evaluation, no fail-safe and no
+  auto-recovery — fans held at their last commanded speed while temperatures rose. An unusable
+  curve now resolves to 100% and failures are contained to a single server.
+
+### Changed
+
+- **Removed the `auth.enabled`, `auth.max_login_attempts` and `auth.lockout_duration` config
+  keys** (and `IPMIDECK_AUTH_ENABLED`). None of them were read by anything. Whether
+  authentication is enabled lives in the database and is changed from the Security settings, so
+  that write access to `config.yaml` cannot be used to turn the login off. `auth.session_expiry`
+  is unaffected and continues to work; existing configuration files keep loading.
+- **A server port other than 623 is now refused** with an explanation instead of being stored
+  and silently ignored — nothing ever passed that value to `ipmitool`.
+- `config.example.yaml` polling intervals now match the real defaults (30s). The example's
+  `command_timeout: 10` was actively harmful: the default is 30s because a real BMC's sensor
+  listing can take around 16 seconds.
+
 
 
 ## [2.0.1] - 2026-07-25

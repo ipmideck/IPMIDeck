@@ -36,8 +36,15 @@ RUN pip install --no-cache-dir .
 # Copy built frontend
 COPY --from=frontend /app/frontend/dist ./backend/static/
 
-# Create data directory
-RUN mkdir -p /data
+# Run as an unprivileged user rather than root. A fixed uid/gid keeps ownership predictable
+# for anyone bind-mounting a host directory. No USER directive: the entrypoint has to start
+# as root to adopt a data volume created by an older version of this image, and drops
+# privileges itself once that is done — see docker-entrypoint.sh.
+RUN groupadd --system --gid 1000 ipmideck && \
+    useradd --system --create-home --uid 1000 --gid 1000 ipmideck && \
+    mkdir -p /data && \
+    chown -R ipmideck:ipmideck /data /app
+ENV HOME=/home/ipmideck
 
 # Environment
 ENV IPMIDECK_DATA_DIR=/data
@@ -51,5 +58,8 @@ STOPSIGNAL SIGTERM
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:3000/api/health')"
+
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
 CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "3000"]

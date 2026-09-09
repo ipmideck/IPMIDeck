@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from backend.core.auth import require_auth
@@ -28,7 +29,7 @@ def _set_session_cookie(response: Response, request: Request, token: str, max_ag
         key="session",
         value=token,
         httponly=True,
-        samesite="lax",
+        samesite="strict",
         max_age=max_age,
         secure=request.url.scheme == "https",
     )
@@ -100,34 +101,39 @@ async def get_me(request: Request):
 async def login(body: LoginRequest, request: Request, response: Response, lang: str = Depends(get_lang)):
     """Authenticate and issue session cookie.
 
-    SEC-03 lockout flow (D-03):
-    1. Pre-check: if user is currently locked out → return generic message (D-04).
-    2. verify_password → if False → record_failure → if NOW locked, return generic
-       message; otherwise return 'Invalid credentials'.
-    3. Success → reset_failures, then issue session cookie.
+    The password is verified FIRST and the lockout is consulted only on the failure
+    path. Checking the lockout before verifying would let anyone lock the operator
+    out of their own instance: the counter is keyed on a username supplied by the
+    caller, so burning a handful of attempts on a guessed name was enough to have
+    the CORRECT password refused for the whole lockout window. Verifying first costs
+    the attacker a bcrypt comparison per attempt (the actual throttle) while a valid
+    credential is never rejected.
 
-    D-04: error messages MUST NOT reveal whether the username exists or when the
-    lockout expires.
+    A failed attempt answers HTTP 401 rather than 200, so caches, proxies and
+    scripted clients can tell an authentication failure from a success without
+    parsing the body. JSONResponse is used instead of HTTPException to keep the body
+    shape (`{"success": false, "error": ...}`) that existing callers already read.
+
+    Error messages must not reveal whether the username exists or when the lockout
+    expires.
     """
     from backend.main import auth
 
     if not await auth.is_auth_enabled():
         return {"success": True, "message": "Auth disabled"}
 
-    # 1. Pre-check lockout BEFORE attempting password verify (avoids leaking timing).
-    if await auth.check_lockout(body.username):
-        return {"success": False, "error": t("too_many_attempts", lang)}
-
-    # 2. Verify password.
     if not await auth.verify_password(body.username, body.password):
         await auth.record_failure(body.username)
-        # If this failure pushed us into lockout, return the generic message
-        # (Pitfall #3: must not leak that this specific attempt was the trigger).
-        if await auth.check_lockout(body.username):
-            return {"success": False, "error": t("too_many_attempts", lang)}
-        return {"success": False, "error": t("invalid_credentials", lang)}
+        # A failure that crosses the threshold must not be announced as the trigger:
+        # the generic lockout text is identical to the one a later attempt receives.
+        error = (
+            t("too_many_attempts", lang)
+            if await auth.check_lockout(body.username)
+            else t("invalid_credentials", lang)
+        )
+        return JSONResponse(status_code=401, content={"success": False, "error": error})
 
-    # 3. Success: clear any prior failure counter, issue session.
+    # Success: clear any prior failure counter, issue session.
     await auth.reset_failures(body.username)
     token = await auth.create_session_token_async(body.username)
     _set_session_cookie(response, request, token, auth.session_expiry_seconds)
@@ -157,7 +163,10 @@ async def setup(body: SetupRequest, request: Request, response: Response, lang: 
     from backend.main import auth
     if await auth.has_user():
         return {"success": False, "error": t("user_already_exists", lang)}
-    await auth.create_user(body.username, body.password)
+    try:
+        await auth.create_user(body.username, body.password)
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
     await auth.set_auth_enabled(True)
     token = await auth.create_session_token_async(body.username)
     _set_session_cookie(response, request, token, auth.session_expiry_seconds)
