@@ -14,7 +14,8 @@
     "add": "추가",
     "refresh": "새로 고침",
     "reset": "재설정",
-    "done": "완료"
+    "done": "완료",
+    "retry": "다시 시도"
   },
   "language": {
     "label": "언어"
@@ -420,7 +421,9 @@
       "confirmPasswordPlaceholder": "비밀번호 확인",
       "passwordsDoNotMatch": "비밀번호가 일치하지 않습니다.",
       "credentialsRequired": "사용자 이름과 비밀번호가 필요합니다.",
-      "applyFailed": "인증 설정 적용에 실패했습니다."
+      "applyFailed": "인증 설정 적용에 실패했습니다.",
+      "updateChecksLabel": "IPMIDeck이 새 버전을 확인하도록 허용",
+      "updateChecksHint": "IPMIDeck은 하루에 한 번 공개 릴리스 목록에 더 새로운 버전이 있는지 문의합니다. 요청에는 제품 이름과 사용 중인 버전만 담기며, 식별자나 서버 정보는 포함되지 않습니다. 설정에서 언제든 끌 수 있습니다."
     },
     "server": {
       "title": "첫 번째 서버 추가",
@@ -663,5 +666,39 @@
     "tested": "테스트됨",
     "experimental": "실험적",
     "monitoringOnly": "모니터링 전용"
+  },
+  "updates": {
+    "unreleased": "미출시",
+    "installed": "설치됨",
+    "securityRelease": "보안",
+    "changelogTitle": "변경 사항",
+    "changelogSubtitle": "이 설치본의 전체 버전 기록입니다.",
+    "changelogSubtitleWithVersion": "현재 버전은 {{version}}입니다.",
+    "changelogError": "버전 기록을 읽을 수 없습니다.",
+    "changelogEmpty": "이 빌드에는 버전 기록이 없습니다.",
+    "viewRelease": "릴리스 노트",
+    "viewAllReleases": "모든 릴리스",
+    "updateAvailable": "버전 {{version}}을(를) 사용할 수 있습니다",
+    "securityUpdateAvailable": "버전 {{version}}은(는) 보안 릴리스입니다",
+    "new": "신규",
+    "openChangelog": "버전 기록 열기",
+    "openChangelogFor": "버전 {{version}} — 버전 기록 열기",
+    "releaseNotes": "릴리스 노트",
+    "settingsTitle": "업데이트",
+    "settingsDescription": "IPMIDeck이 공개된 버전을 조회할 수 있는지와 조회 결과입니다.",
+    "suppressedByConfig": "업데이트 확인이 설정 파일에서 꺼져 있습니다(updates.enabled). 이 값이 바뀌기 전까지는 여기에서 네트워크에 연결되지 않습니다.",
+    "consentLabel": "새 버전을 자동으로 확인",
+    "consentHint": "시작할 때와 하루에 한 번. 제품 이름과 사용 중인 버전만 전송됩니다. 최신 상태이면 아무것도 표시되지 않습니다.",
+    "consentFailed": "설정을 저장하지 못했습니다.",
+    "checkNow": "지금 확인",
+    "checking": "확인 중…",
+    "lastChecked": "마지막 확인 {{when}}",
+    "upToDate": "버전 {{version}}이(가) 최신 릴리스입니다",
+    "checkFailed": "확인을 완료하지 못했습니다.",
+    "installMethod": "업데이트 출처: {{method}}",
+    "methodDocker": "Docker 레지스트리",
+    "methodPip": "Python 패키지 색인",
+    "methodGit": "공개 릴리스",
+    "methodUnknown": "공개 릴리스"
   }
 }
