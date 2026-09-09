@@ -158,7 +158,9 @@ async def migrate_credentials(db, key: bytes, data_dir: Path) -> None:
     if not rewritten:
         logger.error(
             "None of the %d stored credential(s) could be decrypted — leaving them "
-            "untouched. The encryption key does not match this database.",
+            "untouched. Most often this means encryption.key does not belong to this "
+            "database; with a single stored credential it can equally be that one row is "
+            "damaged. Nothing was changed either way.",
             len(stale),
         )
         return
@@ -210,7 +212,16 @@ async def _backup_before_rewrite(db, data_dir: Path) -> Path | None:
         # missing the most recent committed rows.
         await db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     except Exception:  # pragma: no cover - checkpointing is best effort
-        logger.debug("Could not checkpoint before copying the database", exc_info=True)
+        # Not fatal, but not a detail either: this copy is the only way back from the
+        # conversion, and without the checkpoint it can be missing the most recently
+        # committed rows. Saying so at debug level told the operator their safety net was
+        # intact while it might not have been.
+        logger.warning(
+            "Could not fold the write-ahead log into the database before copying it. The "
+            "pre-change copy is still written, but it may be missing the most recent "
+            "changes — treat it as a fallback rather than an exact snapshot.",
+            exc_info=True,
+        )
     try:
         shutil.copy2(db_path, db_backup)
         if key_path.exists():
