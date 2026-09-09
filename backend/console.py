@@ -290,7 +290,7 @@ class ConsoleUI:
     action key + a status line with the active verbosity and the connected-client count + the
     credits line) over a deque-backed scrolling-log body, via rich Live(screen=True) + Layout.
     Action keys dispatch to sub-views (connected sessions / configured servers / show-URL /
-    update-stub), cycle the runtime verbosity (starting at INFO per D-04), and run the D-15d
+    update check), cycle the runtime verbosity (starting at INFO per D-04), and run the D-15d
     change-bind-host/port flow.
 
     SCROLLBACK / HANDLER tradeoffs are documented in the module docstring (Pitfall 1 / Pitfall 6).
@@ -338,6 +338,7 @@ class ConsoleUI:
         verbosity: str = "INFO",
         max_log_lines: int = 500,
         get_bind=None,
+        on_check_updates=None,
     ) -> None:
         self.ws_manager = ws_manager
         self.get_url = get_url
@@ -350,6 +351,11 @@ class ConsoleUI:
         # change-bind editor prompt. The editable buffer stays EMPTY (NOT pre-filled) so the typed
         # value shows immediately. None (default) just omits the "current:" label — backward compat.
         self.get_bind = get_bind
+        # OPTIONAL: schedules a real update check and reports back through the log. It must NOT
+        # perform the lookup itself — dispatch() runs on the key thread and a network round trip
+        # there would freeze the render loop for the duration of the request. None (the default)
+        # means the console cannot check, and the key says so instead of pretending.
+        self.on_check_updates = on_check_updates
         self.verbosity = verbosity  # D-04: default/quiet == INFO
         self.log_lines: deque = deque(maxlen=max_log_lines)
         self.view = "log"  # "log" | "sessions" | "servers"
@@ -383,7 +389,7 @@ class ConsoleUI:
     # --- helpers ---------------------------------------------------------------------------
 
     def _push_log(self, line: str, style: str = _PUSH_LOG_DEFAULT_STYLE) -> None:
-        """Surface a one-line action result (URL, update stub, change-bind confirmation) in the body.
+        """Surface a one-line action result (URL, update check, change-bind confirmation) in the body.
 
         R8: stores a styled ``rich.text.Text`` (consistent with DequeLogHandler now storing Text) so
         an action result can stand out — e.g. the change-bind "restart required" confirmation in a
@@ -406,7 +412,7 @@ class ConsoleUI:
     def _show_log(self, line: str, style: str = _PUSH_LOG_DEFAULT_STYLE) -> None:
         """Push an action-result line AND switch back to the log view so it is actually visible (r10).
 
-        ROOT CAUSE (04.1-04 gap-closure r10, concern 2): the show-URL ('u'), update-stub ('g') and
+        ROOT CAUSE (04.1-04 gap-closure r10, concern 2): the show-URL ('u'), update-check ('g') and
         change-bind ('b' → commit) actions pushed a line into the deque via _push_log() but did NOT
         change self.view. While the operator was in the 's' (servers) or 'c' (sessions) sub-view the
         body renders the TABLE, so the freshly pushed line was HIDDEN behind it ("I pressed u and
@@ -751,8 +757,8 @@ class ConsoleUI:
           c   -> open the connected-sessions sub-view (D-14/D-19)
           s   -> open the configured-servers sub-view (D-15b)
           u   -> push the dashboard URL into the log (D-15a)
-          g   -> update-check STUB: print the local version + "ships with the pip release", NO
-                 network call (D-13)
+          g   -> check for a newer published version (scheduled off this thread; the result
+                 arrives as a log line)
           b   -> enter the keystroke-driven change-bind editor (D-15d) — NOT a blocking input()
           r   -> clean in-process restart (D-15c)
           q   -> if in a sub-view, return to the log view; else clean exit (D-03/D-12)
@@ -802,11 +808,18 @@ class ConsoleUI:
             # _show_log so the URL switches back to the log view (it was hidden behind a sub-view).
             self._show_log(self.get_url(), style="cyan")
         elif key == "g":
-            # Informational stub — neutral (default) style; not an alert (r8). r10: _show_log so the
-            # stub line is visible even when pressed from the servers/sessions sub-view.
-            self._show_log(
-                f"Current version {VERSION}. Online update check ships with the pip release."
-            )
+            # A real check, run off this thread. dispatch() is on the key thread and must never
+            # block: a lookup here would freeze the render loop for the length of the request (or
+            # the whole timeout, on a box with no route out). The callback schedules the work and
+            # the outcome arrives later as a log line, which is also why there is no spinner —
+            # the log IS the progress indicator.
+            self._show_log(f"Current version {VERSION}. Checking for a newer one\u2026")
+            if self.on_check_updates is None:
+                self._show_log(
+                    "Update checks are switched off in the configuration.", style="yellow"
+                )
+            else:
+                self.on_check_updates()
         elif key == "b":
             # D-15d: enter the keystroke-driven bind editor (no input(), never blocks the loop).
             self._enter_bind_edit()

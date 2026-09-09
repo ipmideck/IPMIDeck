@@ -110,13 +110,15 @@ def test_verbosity_cycle_calls_callback_and_updates_label():
     assert ui.verbosity == "INFO"
 
 
-def test_update_stub_pushes_version_line_no_network():
-    """dispatch('g') is a pure-string stub (D-13): version + 'ships with the pip release', no network."""
+def test_update_key_reports_the_running_version_and_performs_no_lookup_itself():
+    """dispatch('g') announces the running version and hands the lookup off; it must never do
+    the network work inline, since it runs on the key thread."""
     ui, _ = _make_ui()
     ui.dispatch("g")
-    last = ui.log_lines[-1]
-    assert VERSION in last
-    assert "ships with the pip release" in last
+    joined = " ".join(str(entry) for entry in ui.log_lines)
+    assert VERSION in joined
+    # The old behaviour printed a promise instead of checking; it must not come back.
+    assert "ships with the pip release" not in joined
 
 
 def test_sub_view_switch_and_back():
@@ -1322,15 +1324,14 @@ def test_url_line_is_cyan():
     assert "cyan" in _span_style_for(entry, "http://127.0.0.1:8099")
 
 
-def test_update_stub_line_is_default_or_dim():
-    """The 'g' update-stub line is neutral (default/dim) — informational, not an alert (r8)."""
+def test_update_key_version_line_is_default_or_dim():
+    """The version line the update key emits is neutral — informational, not an alert."""
     from rich.text import Text
 
     ui, _ = _make_ui()
     ui.dispatch("g")
-    entry = ui.log_lines[-1]
+    entry = next(e for e in ui.log_lines if VERSION in getattr(e, "plain", str(e)))
     assert isinstance(entry, Text)
-    assert VERSION in entry.plain
     style = _span_style_for(entry, VERSION)
     assert style in (None, "", "none") or "dim" in style
 
@@ -1420,13 +1421,13 @@ def test_url_from_servers_view_switches_back_to_log():
     assert last.plain == "http://127.0.0.1:8099"
 
 
-def test_update_stub_from_sessions_view_switches_back_to_log():
-    """dispatch('g') while in the sessions sub-view switches to log so the stub line is visible (r10)."""
+def test_update_key_from_sessions_view_switches_back_to_log():
+    """dispatch('g') while in the sessions sub-view switches to log so the result is visible."""
     ui, _ = _make_ui()
     ui.view = "sessions"
     ui.dispatch("g")
     assert ui.view == "log"
-    assert VERSION in ui.log_lines[-1]
+    assert VERSION in " ".join(str(entry) for entry in ui.log_lines)
 
 
 def test_commit_bind_invalid_from_servers_view_switches_back_to_log():
