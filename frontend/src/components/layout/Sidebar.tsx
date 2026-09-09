@@ -13,6 +13,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { NavLink, useNavigate } from "react-router-dom";
+import { VersionButton } from "./VersionButton";
 import { useState, useRef, useEffect } from "react";
 
 // Only stable paths + i18n keys live at module load; labels are resolved via t() in
@@ -61,15 +62,16 @@ export function Sidebar() {
 
   return (
     <aside className="hidden md:flex h-full w-[var(--sidebar-width)] flex-col border-r border-border bg-sidebar sticky top-0 shrink-0">
-      {/* Logo */}
+      {/* Logo + version. The version is a control, not decoration: it identifies the running
+          build and opens the history that explains it. */}
       <div className="border-b border-border px-4 py-3">
         <div className="flex items-center gap-2.5">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-foreground text-background font-bold text-sm">
             ID
           </div>
-          <div>
+          <div className="min-w-0">
             <span className="text-sm font-semibold">IPMIDeck</span>
-            <span className="ml-1 text-xs text-muted-foreground">v2</span>
+            <VersionButton />
           </div>
         </div>
       </div>
