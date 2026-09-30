@@ -19,12 +19,11 @@ WHY auth-OFF is done via set_auth_enabled(False) and not an environment variable
   `client` fixture writes the DB config via `bm.auth.set_auth_enabled(False)` AFTER the
   TestClient lifespan has entered (so bm.auth + bm.db are live).
 
-NOTE (REVIEWS MED #11 — lifespan re-mount): each `with TestClient(app)` re-enters lifespan, which
-  re-runs module_loader.mount_routes(app, ...) and _mount_spa(app). If backend/static exists this
-  appends another SPA catch-all + re-mounts module routes. Integration tests should target static
-  `/api/*` routes — they resolve fine even with a duplicated SPA catch-all because /api routes are
-  matched before the catch-all. A session-scoped app is not required: demo mode + tmp DB make each
-  lifespan cheap.
+NOTE (lifespan re-mount): each `with TestClient(app)` re-enters lifespan, which re-runs
+  module_loader.mount_routes(app, ...) and _mount_spa(app). lifespan first drops the routes the
+  previous run registered and restores the router's lifespan_context afterwards, so the route
+  table stays the same size across clients (tests/unit/test_restart_route_table.py). A
+  session-scoped app is not required: demo mode + tmp DB make each lifespan cheap.
 """
 
 import asyncio

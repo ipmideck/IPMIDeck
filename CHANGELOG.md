@@ -129,7 +129,10 @@ into a new dated `## [<version>] - YYYY-MM-DD` section.
   (`IPMIDECK_ATTEMPT_LIMIT`, `IPMIDECK_ATTEMPT_WINDOW`). A slot is consumed whether or not the
   password turns out to be right, so holding a valid one is not a way around the limit, and the
   cap deliberately leaves the per-account failure counter alone — otherwise traffic from a
-  single address would lock the operator out of their own account.
+  single address would lock the operator out of their own account. The cap counts per source
+  address as the app sees it: behind a reverse proxy, list the proxy in `forwarded_allow_ips`,
+  otherwise every client shares the proxy's address and one party's failed attempts hold
+  everyone off, a correct password included, until the window ends.
 - **The telemetry WebSocket now refuses a handshake from another site**, ends the socket when
   the session behind it expires or is revoked (re-checked every 60 seconds) rather than
   streaming to it until the browser goes away, and applies the same `server.trusted_origins`
@@ -159,7 +162,25 @@ into a new dated `## [<version>] - YYYY-MM-DD` section.
   points are stored as free-form JSON, and one unreadable curve aborted every control pass at
   the same server, leaving every server after it with no curve evaluation, no fail-safe and no
   auto-recovery — fans held at their last commanded speed while temperatures rose. An unusable
-  curve now resolves to 100% and failures are contained to a single server.
+  curve now resolves to 100% and failures are contained to a single server. That includes
+  `NaN` and `Infinity`, which the API accepted in a curve point and which then broke both the
+  control pass and the profile listing; they are now refused with a clear error, as is a
+  non-finite hysteresis or safety threshold.
+- **The container restarts cleanly under host networking.** The single-instance check refused
+  to start while the previous run's connections were still closing (up to about a minute
+  after a restart). It now reports only a port something is actually listening on, and it
+  probes an IPv6 bind address with an IPv6 socket instead of always reporting it busy.
+- **The container health check probes the port the app listens on.** It read
+  `IPMIDECK_SERVER_PORT`, but the image always listens on 3000, so setting that variable made a
+  working container report unhealthy.
+- **Repeated in-process restarts no longer pile up routes.** Each start registered the module
+  routes and the web UI fallback again and nested the server's startup hooks one level deeper,
+  until a long-running instance restarted from the console failed to start.
+- **A malformed `Origin` or `Referer` header is refused** instead of answering with a server
+  error, and an empty or non-text entry in `trusted_origins` is ignored instead of failing the
+  first proxied request.
+- **An undecryptable stored credential is reported with a clear message** by the connection
+  test and power commands, instead of the raw cryptography error.
 
 ### Changed
 

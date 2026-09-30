@@ -156,6 +156,18 @@ async def migrate_credentials(db, key: bytes, data_dir: Path) -> None:
         rewritten.append((encrypt(user, key), encrypt(pwd, key), row["id"]))
 
     if not rewritten:
+        already_converted = len(rows) - len(stale)
+        if already_converted:
+            # An earlier start converted the rest, so the key is right: only these rows are
+            # bad. They are retried on every start until they are fixed or re-entered.
+            logger.error(
+                "%d stored credential(s) in the old format could not be decrypted, while %d "
+                "other(s) were already converted with this key — those rows are damaged or "
+                "were written under a different key. Re-enter the BMC credentials of the "
+                "affected server(s). Nothing was changed.",
+                len(stale), already_converted,
+            )
+            return
         logger.error(
             "None of the %d stored credential(s) could be decrypted — leaving them "
             "untouched. Most often this means encryption.key does not belong to this "

@@ -363,12 +363,19 @@ async def test_connection(server_id: str, lang: str = Depends(get_lang)):
     host = server["host"]
 
     try:
-        # Decrypting inside the guard matters: a credential that cannot be decrypted
+        # Decrypting inside a guard matters: a credential that cannot be decrypted
         # used to escape as an unhandled error and a 500, while a working credential
         # against an unreachable BMC returned 200. That difference told an observer
-        # which of the two had happened.
+        # which of the two had happened. The same 200 shape is kept, with the localized
+        # message rather than the cryptography library's exception text.
         user = decrypt(server["username_enc"], key)
         pwd = decrypt(server["password_enc"], key)
+    except Exception:
+        await db.execute("UPDATE servers SET is_online = 0 WHERE id = ?", (server_id,))
+        await db.commit()
+        return {"success": False, "error": t("credentials_unreadable", lang)}
+
+    try:
         status = await ipmi_service.get_power_status(host, user, pwd)
         await db.execute(
             "UPDATE servers SET is_online = 1, last_seen = CURRENT_TIMESTAMP WHERE id = ?",

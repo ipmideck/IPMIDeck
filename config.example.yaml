@@ -38,7 +38,6 @@ ipmi:
 
 data:
   retention_days: 365
-  cleanup_interval: 24h
 
 logging:
   level: info                 # debug, info, warning, error

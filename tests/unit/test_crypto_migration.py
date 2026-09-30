@@ -127,6 +127,26 @@ async def test_an_unreadable_row_is_left_alone_and_the_others_convert(auth_manag
 
 
 @pytest.mark.asyncio
+async def test_the_next_start_blames_the_damaged_row_not_the_key(auth_manager, tmp_path, caplog):
+    """The first start converts the good row and leaves the junk one, so the next start sees
+    only the junk row. It must not claim the key is wrong: it just converted the others."""
+    import logging
+
+    am, db = auth_manager
+    key = am.get_encryption_key()
+    await _add_server(db, "good", _encrypt_legacy("root", key), _encrypt_legacy("calvin", key))
+    await _add_server(db, "junk", "not-real-ciphertext", "not-real-ciphertext")
+    await migrate_credentials(db, key, tmp_path)
+
+    caplog.clear()
+    with caplog.at_level(logging.ERROR):
+        await migrate_credentials(db, key, tmp_path)
+    messages = " ".join(r.getMessage() for r in caplog.records)
+    assert "already converted" in messages
+    assert "does not belong" not in messages
+
+
+@pytest.mark.asyncio
 async def test_a_key_that_does_not_match_the_data_writes_nothing(auth_manager, tmp_path):
     """A mismatched key must not be used to rewrite every credential into noise."""
     am, db = auth_manager

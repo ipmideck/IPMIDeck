@@ -151,6 +151,10 @@ IPMIDECK_LOGGING_LEVEL=info
 IPMIDECK_DATA_RETENTION_DAYS=180
 ```
 
+In the Docker image the app always listens on port 3000 inside the container: the image starts
+it with `--port 3000`, which takes precedence over `IPMIDECK_SERVER_PORT` and `config.yaml`.
+Change the published port with the port mapping (`-p 8080:3000`) instead.
+
 The `config.yaml` written on first run covers the common settings, not every key — read it for
 what it contains, and add the rest by hand if you need them. The same settings are also
 editable at runtime from the in-app **Settings** page.
@@ -282,7 +286,8 @@ ipmideck/
 - Local authentication with bcrypt password hashing
 - Session tokens signed with HMAC-SHA256 using a per-install secret, with configurable
   expiry (`IPMIDECK_AUTH_SESSION_EXPIRY` / the `auth.session_expiry` config key — e.g. `24h`,
-  `90m`, `1h`; default `24h`). The signature is what makes a token trustworthy: the payload
+  `90m`, `1h`; default `24h`; values above `30d` are capped at 30 days, with a warning in the
+  log). The signature is what makes a token trustworthy: the payload
   itself is base64url-encoded JSON, so treat the cookie as readable by whoever holds it
 - BMC credentials encrypted at rest with AES-256-GCM, which detects tampering as well as
   concealing the value. The 32-byte key is randomly generated and stored in
@@ -300,7 +305,10 @@ ipmideck/
 - Credential checks are capped at 5 per minute per source address
   (`IPMIDECK_ATTEMPT_LIMIT`, `IPMIDECK_ATTEMPT_WINDOW` in seconds). A slot is consumed whether
   or not the password turns out to be right, and the cap deliberately does not touch the
-  per-account failure counter, so traffic from one address cannot lock the operator out
+  per-account failure counter, so traffic from one address cannot lock the operator out.
+  Behind a reverse proxy, list it in `forwarded_allow_ips` (see
+  [Behind a reverse proxy](#behind-a-reverse-proxy)): otherwise every client shares the proxy's
+  address and one party's failed attempts hold everyone off until the window ends
 - State-changing requests (`POST`/`PUT`/`PATCH`/`DELETE`) are refused when the browser reports
   an origin other than the one the dashboard is served from, including a different port on the
   same host. Requests with no `Origin` and no `Referer` — the CLI, the container health check,
@@ -382,7 +390,9 @@ server:
 
 **Or terminate TLS at a reverse proxy** (Caddy, nginx, Traefik) and leave IPMIDeck on HTTP
 bound to `127.0.0.1`. If you do, make sure the proxy forwards the original scheme, otherwise
-the session cookie is not marked secure.
+the session cookie is not marked secure. A proxy that is not on `127.0.0.1` must also be listed
+in `forwarded_allow_ips`, and one that rewrites the `Host` header needs its public origin in
+`trusted_origins` — see [Behind a reverse proxy](#behind-a-reverse-proxy).
 
 To regenerate, delete `<data_dir>/certs/` and restart, or run `ipmideck --gen-cert`.
 `server.key` is as sensitive as `encryption.key` — protect and back it up the same way.

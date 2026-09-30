@@ -92,6 +92,17 @@ async def power_command(server_id: str, body: PowerAction, lang: str = Depends(g
     try:
         user = decrypt(server["username_enc"], key)
         pwd = decrypt(server["password_enc"], key)
+    except Exception:
+        # Same answer shape as a BMC failure, with the localized message rather than the
+        # cryptography library's exception text.
+        await ctx.db.execute(
+            "INSERT INTO command_log (server_id, command_type, command_detail, result, error_message) VALUES (?, ?, ?, ?, ?)",
+            (server_id, "power", body.action, "error", "credentials unreadable"),
+        )
+        await ctx.db.commit()
+        return {"success": False, "error": t("credentials_unreadable", lang)}
+
+    try:
         result = await ctx.ipmi.power_command(host, user, pwd, body.action)
 
         # Log command

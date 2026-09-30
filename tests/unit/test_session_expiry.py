@@ -124,3 +124,18 @@ def test_configured_expiry_drives_cookie_max_age(tmp_path, monkeypatch):
         token = c.cookies["session"]
         payload = _decode_payload(token)
         assert payload["exp"] - payload["iat"] == 3600
+
+
+def test_a_clamped_duration_is_logged(caplog):
+    """The cap substitutes a different lifetime than the one written, so it must be visible."""
+    import logging
+
+    from backend.core.config import MAX_DURATION_SECONDS
+
+    with caplog.at_level(logging.WARNING):
+        assert parse_duration_seconds("60d") == MAX_DURATION_SECONDS
+    assert any("maximum" in r.getMessage() for r in caplog.records)
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        assert parse_duration_seconds("7d") == 7 * 86400
+    assert not caplog.records

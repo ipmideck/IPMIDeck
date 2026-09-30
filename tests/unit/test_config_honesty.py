@@ -71,3 +71,21 @@ def test_existing_config_with_removed_keys_still_loads(tmp_path):
     )
     config = load_config(str(path))
     assert config.auth.session_expiry == "2h"
+
+
+def test_inert_cleanup_interval_is_neither_advertised_nor_written(tmp_path):
+    """data.cleanup_interval was never read: the retention sweep keeps its own schedule."""
+    raw = yaml.safe_load((REPO_ROOT / "config.example.yaml").read_text(encoding="utf-8"))
+    assert "cleanup_interval" not in raw["data"]
+    path = tmp_path / "config.yaml"
+    save_default_config(path)
+    assert "cleanup_interval" not in yaml.safe_load(path.read_text(encoding="utf-8"))["data"]
+
+
+def test_existing_config_with_cleanup_interval_still_loads(tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        yaml.dump({"data": {"retention_days": 90, "cleanup_interval": "12h"}}),
+        encoding="utf-8",
+    )
+    assert load_config(str(path)).data.retention_days == 90

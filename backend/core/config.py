@@ -43,7 +43,7 @@ def parse_duration_seconds(value: str | int | None, default: int = 86400) -> int
         if value <= 0:
             logger.warning("Invalid duration %r — using %ds instead", value, default)
             return default
-        return min(value, MAX_DURATION_SECONDS)
+        return _clamp_duration(value, value)
     match = _DURATION_RE.match(value.strip().lower())
     if not match:
         logger.warning("Invalid duration %r — using %ds instead", value, default)
@@ -52,7 +52,18 @@ def parse_duration_seconds(value: str | int | None, default: int = 86400) -> int
     if seconds <= 0:
         logger.warning("Invalid duration %r — using %ds instead", value, default)
         return default
-    return min(seconds, MAX_DURATION_SECONDS)
+    return _clamp_duration(seconds, value)
+
+
+def _clamp_duration(seconds: int, written: str | int) -> int:
+    """Cap a parsed duration at MAX_DURATION_SECONDS, logging when the cap applies."""
+    if seconds > MAX_DURATION_SECONDS:
+        logger.warning(
+            "Duration %r exceeds the %d-day maximum — using %ds instead",
+            written, MAX_DURATION_SECONDS // 86400, MAX_DURATION_SECONDS,
+        )
+        return MAX_DURATION_SECONDS
+    return seconds
 
 
 def _data_dir() -> Path:
@@ -86,6 +97,16 @@ class ServerConfig:
         # trust nothing, so accept both shapes rather than failing at request time.
         if isinstance(self.trusted_origins, str):
             self.trusted_origins = _split_origins(self.trusted_origins)
+        elif isinstance(self.trusted_origins, list):
+            # An empty "-" item loads as None, and a number as an int; either would raise
+            # inside the origin guard on the first proxied request. Keep only real entries.
+            self.trusted_origins = [
+                item.strip()
+                for item in self.trusted_origins
+                if isinstance(item, str) and item.strip()
+            ]
+        else:
+            self.trusted_origins = []
 
 
 @dataclass
@@ -110,6 +131,8 @@ class IPMIConfig:
 class DataConfig:
     db_path: str = ""
     retention_days: int = 365
+    # Never read: the retention sweep runs on its own fixed schedule. Kept only so a
+    # config.yaml written by an older release still loads; no longer advertised or written.
     cleanup_interval: str = "24h"
 
     def __post_init__(self):
@@ -256,7 +279,7 @@ def save_default_config(config_path: str | Path) -> None:
         "server": {"host": "0.0.0.0", "port": 3000, "https": False},
         "auth": {"session_expiry": "24h"},
         "ipmi": {"poll_interval": 30, "power_poll_interval": 30, "command_timeout": 30},
-        "data": {"retention_days": 365, "cleanup_interval": "24h"},
+        "data": {"retention_days": 365},
         "logging": {"level": "info"},
         "modules": {
             "sensors": {"enabled": True},

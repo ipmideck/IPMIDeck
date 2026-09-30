@@ -127,6 +127,43 @@ def test_a_listed_https_origin_does_not_trust_its_cleartext_twin(client, monkeyp
     assert _is_rejected(resp), resp.text
 
 
+# --- unparsable input is refused, not a 500 -------------------------------------------------
+
+
+def test_a_malformed_origin_is_refused_not_a_server_error(client):
+    """urlsplit raises on an unclosed IPv6 bracket; the guard runs before auth, so any
+    anonymous caller could otherwise fill the log with tracebacks."""
+    resp = client.post("/api/servers", json=CREATE_SERVER, headers={"Origin": "http://[::1"})
+    assert _is_rejected(resp), resp.text
+
+
+def test_a_malformed_referer_is_refused_not_a_server_error(client):
+    resp = client.post("/api/servers", json=CREATE_SERVER, headers={"Referer": "http://[::1/x"})
+    assert _is_rejected(resp), resp.text
+
+
+def test_a_malformed_trusted_entry_is_skipped(client, monkeypatch):
+    monkeypatch.setattr(
+        bm.config.server, "trusted_origins", ["http://[::1", "https://ipmi.example.com"]
+    )
+    resp = client.post(
+        "/api/servers",
+        json=CREATE_SERVER,
+        headers={"Origin": "https://ipmi.example.com", "Host": "localhost:3000"},
+    )
+    assert resp.status_code == 200, resp.text
+
+
+def test_empty_and_non_string_trusted_entries_are_dropped_at_load():
+    """YAML turns a bare "-" item into None and a number into an int; either one used to
+    raise inside the guard on the first proxied request."""
+    from backend.core.config import ServerConfig
+
+    cfg = ServerConfig(trusted_origins=[None, "  ", 8080, " https://ipmi.example.com "])
+    assert cfg.trusted_origins == ["https://ipmi.example.com"]
+    assert ServerConfig(trusted_origins=None).trusted_origins == []
+
+
 # --- defensive response headers -------------------------------------------------------------
 
 

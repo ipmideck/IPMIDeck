@@ -120,9 +120,12 @@ async def login(body: LoginRequest, request: Request, response: Response, lang: 
     out of their own instance: the counter is keyed on a username supplied by the
     caller, so burning a handful of attempts on a guessed name was enough to have
     the CORRECT password refused for the whole lockout window. A valid credential is
-    therefore never rejected, and the throttle is the per-source attempt cap applied
+    never rejected by the lockout, and the throttle is the per-source attempt cap applied
     above — which nothing the caller supplies can aim at somebody else — with the
-    bcrypt comparison as its floor.
+    bcrypt comparison as its floor. The cap does refuse a correct password once the
+    source has used its window: counting every attempt is what stops it being a password
+    oracle. "Source" is the client address as uvicorn reports it, so behind a reverse
+    proxy that is not listed in forwarded_allow_ips every client shares one source.
 
     A failed attempt answers HTTP 401 rather than 200, so caches, proxies and
     scripted clients can tell an authentication failure from a success without

@@ -225,7 +225,7 @@ async def lifespan(app: FastAPI):
     _silence_proactor_connreset()
 
     # D-21: emit the branded banner ONCE via a TTY-independent print/log so it shows in
-    # `docker logs` (the container never runs cli()). Gated on app.state.host_splash_shown:
+    # `docker logs` (the container runs cli() without a TTY). Gated on app.state.host_splash_shown:
     # cli() sets that flag ONLY on the interactive TTY path, where the rich splash (Task 2)
     # already shows the banner — so the host TTY never double-prints (REVIEWS MED: no-double-banner).
     # On Docker / non-TTY the flag is unset → the operator gets the banner here.
@@ -340,11 +340,24 @@ async def lifespan(app: FastAPI):
     # Disabled modules will never have their routes registered → 404 instead of 200.
     # IMPORTANT: must happen BEFORE the SPA fallback route is registered so FastAPI
     # routes module paths correctly (catch-all "/{full_path:path}" would shadow them).
+    #
+    # lifespan runs again on the same app object for an in-process restart (and for every
+    # TestClient the suite builds), so the routes the previous run added are dropped first.
+    # include_router also wraps the router's lifespan_context one level deeper on every call;
+    # restoring it keeps that chain the same depth, where it would otherwise grow with each
+    # start until entering it overflows the stack.
+    _drop_startup_routes(app)
+    routes_before = {id(route) for route in app.router.routes}
+    lifespan_context = app.router.lifespan_context
     module_loader.mount_routes(app, dependencies=[Depends(require_auth)])
 
     # Register SPA fallback AFTER all API routes (including dynamically mounted modules).
     # The catch-all /{full_path:path} must come last or it shadows module routes.
     _mount_spa(app)
+    app.router.lifespan_context = lifespan_context
+    _startup_routes.extend(
+        route for route in app.router.routes if id(route) not in routes_before
+    )
 
     # Start module background tasks
     await module_loader.start_background_tasks()
@@ -432,6 +445,19 @@ app = FastAPI(
 _STATE_CHANGING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
+def _split_url(value: str):
+    """urlsplit() that answers None for a value it cannot parse.
+
+    Origin, Referer and the trusted_origins entries are all free text; urlsplit raises
+    ValueError on some of it (an unclosed IPv6 bracket such as "http://[::1"), and every
+    caller here treats an unreadable value as "not this server".
+    """
+    try:
+        return urlsplit(value)
+    except ValueError:
+        return None
+
+
 def _same_authority(candidate: str, host_header: str, request_scheme: str) -> bool:
     """Return True if ``candidate`` (an Origin/Referer URL) targets this exact server.
 
@@ -444,8 +470,8 @@ def _same_authority(candidate: str, host_header: str, request_scheme: str) -> bo
     TLS-terminating proxy the app sees plain http and cannot know its external scheme,
     so demanding an exact scheme match would reject every proxied deployment.
     """
-    parsed = urlsplit(candidate)
-    if not parsed.netloc:
+    parsed = _split_url(candidate)
+    if parsed is None or not parsed.netloc:
         return False
     if request_scheme == "https" and parsed.scheme and parsed.scheme != "https":
         return False
@@ -467,14 +493,14 @@ def _is_trusted_origin(candidate: str, trusted: list[str]) -> bool:
     """
     if not trusted:
         return False
-    parsed = urlsplit(candidate)
-    if not parsed.netloc:
+    parsed = _split_url(candidate)
+    if parsed is None or not parsed.netloc:
         return False
     for entry in trusted:
         # A bare "host:port" has no scheme, and urlsplit would read the host as one. Forcing
         # the netloc form first makes both spellings parse the same way.
-        allowed = urlsplit(entry if "//" in entry else f"//{entry}")
-        if not allowed.netloc or allowed.netloc.lower() != parsed.netloc.lower():
+        allowed = _split_url(entry if "//" in entry else f"//{entry}")
+        if allowed is None or not allowed.netloc or allowed.netloc.lower() != parsed.netloc.lower():
             continue
         if allowed.scheme and allowed.scheme.lower() != parsed.scheme.lower():
             continue
@@ -570,7 +596,10 @@ def _ws_origin_allowed(websocket: WebSocket) -> bool:
     if not origin:
         return True
     host_header = websocket.headers.get("host")
-    if host_header and urlsplit(origin).netloc.lower() == host_header.lower():
+    parsed = _split_url(origin)
+    if parsed is None:
+        return False
+    if host_header and parsed.netloc.lower() == host_header.lower():
         return True
     return _is_trusted_origin(origin, config.server.trusted_origins)
 
@@ -676,6 +705,20 @@ def _resolve_spa_file(full_path: str, root: Path) -> Path | None:
     return candidate
 
 
+# Routes the last lifespan run registered: the enabled modules' routers, /assets and the SPA
+# catch-all. Kept so the next run on the same app object can remove exactly these.
+_startup_routes: list = []
+
+
+def _drop_startup_routes(app: FastAPI) -> None:
+    """Remove the routes a previous lifespan run registered on this app."""
+    if not _startup_routes:
+        return
+    stale = {id(route) for route in _startup_routes}
+    app.router.routes[:] = [route for route in app.router.routes if id(route) not in stale]
+    _startup_routes.clear()
+
+
 def _mount_spa(app: FastAPI) -> None:
     """Register static file serving and SPA fallback route.
 
@@ -692,10 +735,7 @@ def _mount_spa(app: FastAPI) -> None:
 
     # Serve static assets (JS, CSS, images) directly
     if (static_dir / "assets").exists():
-        try:
-            app.mount("/assets", StaticFiles(directory=str(static_dir / "assets")), name="static-assets")
-        except Exception:
-            pass  # Already mounted (e.g., during --reload; ignore duplicate)
+        app.mount("/assets", StaticFiles(directory=str(static_dir / "assets")), name="static-assets")
 
     spa_root = static_dir.resolve()
 
@@ -729,7 +769,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     a bare invocation (no command) also serves. Only `reset-password` short-circuits in cli() (along
     with the --gen-cert / --reload flag early-returns). So `ipmideck start`, `ipmideck`, and
     `ipmideck --host H --port P` all reach the serve path, while `ipmideck reset-password` does not.
-    Docker's `uvicorn backend.main:app` never calls cli(), so it is unaffected.
+    The Docker image runs `ipmideck --host 0.0.0.0 --port 3000 start`, i.e. this same serve path.
     """
     parser = argparse.ArgumentParser(description=f"{APP_NAME} — IPMI Management Platform")
     # default=None sentinels — lets us detect whether the user explicitly passed
@@ -952,8 +992,8 @@ def cli():
     #   over yaml (see config._apply_env_overrides). So a value persisted to
     #   config.yaml by the menu's change-bind action (D-15d) is OVERRIDDEN by an
     #   env var or a CLI --host/--port on the next boot — env/CLI always win. The
-    #   Docker bind is unaffected: the container's CMD passes --host/--port argv
-    #   and never executes cli(), so a bad persisted config value cannot break it.
+    #   Docker bind is unaffected: the container's CMD passes --host/--port on the
+    #   command line, which win over any persisted config value.
     # ============================================================================
 
     # === --reload dev fast path (REVIEWS MED) ===
