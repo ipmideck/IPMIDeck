@@ -166,6 +166,12 @@ into a new dated `## [<version>] - YYYY-MM-DD` section.
   `NaN` and `Infinity`, which the API accepted in a curve point and which then broke both the
   control pass and the profile listing; they are now refused with a clear error, as is a
   non-finite hysteresis or safety threshold.
+- **Fans held at 100% by an unusable curve now come with the reason.** FanPilot reports it
+  once per server and profile, as a warning notification and a command-log entry: the curve
+  has no points, a point's temperature or speed is missing or not a number, a value is `NaN`
+  or `Infinity`, or the stored curve is not valid JSON. A curve that is not valid JSON used to
+  be skipped with the fans left at their last speed; it now gets the same 100% as any other
+  unusable curve. The notice re-arms once the curve is fixed.
 - **The container restarts cleanly under host networking.** The single-instance check refused
   to start while the previous run's connections were still closing (up to about a minute
   after a restart). It now reports only a port something is actually listening on, and it
