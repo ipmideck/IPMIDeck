@@ -6,6 +6,7 @@ permissions:
 jobs:
   gate:
     runs-on: ubuntu-latest
+    timeout-minutes: 15    # covers both callers (ci.yml and release.yml) — the real job lives here
     steps:
       - uses: actions/checkout@v6
         with:

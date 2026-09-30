@@ -1,13 +1,20 @@
 name: ci
-on: [push, pull_request]
+on:
+  push:
+    branches: [main, dev] # branches-only: tag pushes excluded — the gate suite runs once per release, via release.yml
+  pull_request:
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true   # superseded pushes to the same ref cancel the older run
 permissions:
   contents: read
 jobs:
   gate:
-    uses: ./.github/workflows/gate.yml
+    uses: ./.github/workflows/gate.yml   # no timeout-minutes here: reusable-call jobs don't accept it (cap lives in gate.yml)
 
   docker-build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:

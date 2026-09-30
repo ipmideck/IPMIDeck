@@ -9,6 +9,10 @@ on:
         type: boolean
         default: true
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false   # a release run must never be cancelled mid-publish
+
 permissions:
   contents: read
 
@@ -16,6 +20,7 @@ jobs:
   guard:                 # D-16: tag must match branding._VERSION_FALLBACK (push only)
     if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
     steps:
@@ -40,6 +45,7 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' }}
     needs: [tests]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -72,9 +78,13 @@ jobs:
 
   # ---- tag-push publish (real) — D-09 gates every publish on event_name == 'push' ----
   pypi:
-    if: ${{ github.event_name == 'push' }}
-    needs: [guard, tests]
+    # Docker (re-runnable) gates PyPI (immutable). !cancelled() keeps the skip-safe path:
+    # dockerhub skipped for a missing DOCKERHUB_TOKEN still yields a pip-only release;
+    # dockerhub failed/timed out skips pypi so nothing irreversible is published.
+    if: ${{ !cancelled() && github.event_name == 'push' && needs.guard.result == 'success' && needs.tests.result == 'success' && (needs.dockerhub.result == 'success' || needs.dockerhub.result == 'skipped') }}
+    needs: [guard, tests, dockerhub]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       id-token: write     # OIDC / Trusted Publishing — no secret
       contents: read
@@ -95,6 +105,7 @@ jobs:
         with: { python-version: "3.11" }
       - run: python -m pip install --upgrade build
       - run: python -m build           # version comes from attr: -> _VERSION_FALLBACK
+      - run: python scripts/check-wheel.py   # SPA/migrations/version gate BEFORE the immutable publish
       - uses: pypa/gh-action-pypi-publish@release/v1   # zero-config with id-token: write, dist/ default
 
   # ---- Docker Hub (D-01..D-04) — skip-safe when secrets.DOCKERHUB_TOKEN absent ----
@@ -102,6 +113,7 @@ jobs:
     if: ${{ github.event_name == 'push' }}
     needs: [guard, tests]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
     outputs:
@@ -121,6 +133,7 @@ jobs:
     needs: [dockerhub-preflight]
     if: ${{ needs.dockerhub-preflight.outputs.has_token == 'true' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 40    # a hung QEMU build dies here, not at GitHub's 6 h hard limit
     permissions:
       contents: read
     steps:
@@ -140,6 +153,41 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=sha
             type=raw,value=latest
+      # Smoke gate: native-amd64 build (no QEMU) that both gates the multi-arch push
+      # AND warms the gha layer cache the push step reuses.
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: smoke:ci
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            REVISION=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test — boot the image, /api/health must answer, the package must carry the tag's version
+        run: |
+          set -euo pipefail
+          docker run -d --name smoke -p 3000:3000 -e IPMIDECK_DEMO=true smoke:ci
+          ok=0
+          for _ in $(seq 1 30); do
+            if curl -fsS http://localhost:3000/api/health >/dev/null 2>&1; then ok=1; break; fi
+            sleep 1
+          done
+          if [ "$ok" = 1 ]; then
+            # /api/health discloses liveness only, so the version is read from the installed
+            # package inside the container.
+            v=$(docker exec smoke python -c 'from backend.core.branding import VERSION; print(VERSION)') || ok=0
+            echo "package version=${v:-} expected=${GITHUB_REF_NAME#v}"
+            [ "${v:-}" = "${GITHUB_REF_NAME#v}" ] || ok=0
+          fi
+          if [ "$ok" != 1 ]; then
+            echo "::error::smoke test failed — /api/health unreachable or version mismatch"
+            docker logs smoke || true
+            docker rm -f smoke || true
+            exit 1
+          fi
+          docker rm -f smoke
       - uses: docker/build-push-action@v7
         with:
           context: .
@@ -163,9 +211,12 @@ jobs:
 
   # ---- Draft GitHub Release (D-10) — body from CHANGELOG.md, user presses Publish ----
   release-draft:
-    if: ${{ github.event_name == 'push' }}
-    needs: [guard, tests]
+    # Draft is created LAST: only after pypi succeeded and dockerhub succeeded-or-skipped
+    # (skipped = missing DOCKERHUB_TOKEN, still a valid pip-only release — hence !cancelled()).
+    if: ${{ !cancelled() && github.event_name == 'push' && needs.pypi.result == 'success' && (needs.dockerhub.result == 'success' || needs.dockerhub.result == 'skipped') }}
+    needs: [guard, tests, pypi, dockerhub]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write            # required to create the release
     steps:
