@@ -68,6 +68,9 @@ def test_an_address_this_host_cannot_bind_is_not_reported_as_in_use(host):
 def test_port_left_in_time_wait_is_not_in_use():
     """A port whose last connection the server closed (TIME_WAIT) is free to start on again."""
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    # As uvicorn does. Linux lets a new bind reuse a TIME_WAIT port only when the socket that
+    # left it had SO_REUSEADDR too.
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     listener.bind(("127.0.0.1", 0))
     listener.listen(1)
     port = listener.getsockname()[1]
