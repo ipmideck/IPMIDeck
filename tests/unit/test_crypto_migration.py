@@ -147,6 +147,26 @@ async def test_the_next_start_blames_the_damaged_row_not_the_key(auth_manager, t
 
 
 @pytest.mark.asyncio
+async def test_a_wrong_key_over_a_half_converted_table_blames_the_key(
+    auth_manager, tmp_path, caplog
+):
+    """A converted row is only evidence for the key if it actually opens with it. With a key
+    file from another install nothing opens, and the rows are not what is wrong."""
+    import logging
+
+    am, db = auth_manager
+    key = am.get_encryption_key()
+    await _add_server(db, "new", encrypt("root", key), encrypt("calvin", key))
+    await _add_server(db, "old", _encrypt_legacy("root", key), _encrypt_legacy("calvin", key))
+
+    with caplog.at_level(logging.ERROR):
+        await migrate_credentials(db, os.urandom(32), tmp_path)
+    messages = " ".join(r.getMessage() for r in caplog.records)
+    assert "does not belong" in messages
+    assert "already converted" not in messages
+
+
+@pytest.mark.asyncio
 async def test_a_key_that_does_not_match_the_data_writes_nothing(auth_manager, tmp_path):
     """A mismatched key must not be used to rewrite every credential into noise."""
     am, db = auth_manager

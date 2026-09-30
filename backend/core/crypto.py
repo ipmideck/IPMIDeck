@@ -106,6 +106,18 @@ def is_legacy_format(token: str | None) -> bool:
     return bool(token) and not token.startswith(_V2_PREFIX)
 
 
+def _key_opens_any(rows, key: bytes) -> bool:
+    """True if at least one of these rows decrypts with ``key``."""
+    for row in rows:
+        try:
+            decrypt(row["username_enc"], key)
+            decrypt(row["password_enc"], key)
+        except Exception:
+            continue
+        return True
+    return False
+
+
 async def migrate_credentials(db, key: bytes, data_dir: Path) -> None:
     """Re-encrypt stored BMC credentials in the authenticated format, once.
 
@@ -156,16 +168,18 @@ async def migrate_credentials(db, key: bytes, data_dir: Path) -> None:
         rewritten.append((encrypt(user, key), encrypt(pwd, key), row["id"]))
 
     if not rewritten:
-        already_converted = len(rows) - len(stale)
-        if already_converted:
-            # An earlier start converted the rest, so the key is right: only these rows are
-            # bad. They are retried on every start until they are fixed or re-entered.
+        stale_ids = {r["id"] for r in stale}
+        converted = [r for r in rows if r["id"] not in stale_ids]
+        if converted and _key_opens_any(converted, key):
+            # A row an earlier start converted still opens with this key, so the key is
+            # right and only these rows are bad. They are retried on every start until they
+            # are fixed or re-entered.
             logger.error(
-                "%d stored credential(s) in the old format could not be decrypted, while %d "
-                "other(s) were already converted with this key — those rows are damaged or "
-                "were written under a different key. Re-enter the BMC credentials of the "
-                "affected server(s). Nothing was changed.",
-                len(stale), already_converted,
+                "%d stored credential(s) in the old format could not be decrypted, while "
+                "credentials already converted still open with this key — those rows are "
+                "damaged or were written under a different key. Re-enter the BMC credentials "
+                "of the affected server(s). Nothing was changed.",
+                len(stale),
             )
             return
         logger.error(
