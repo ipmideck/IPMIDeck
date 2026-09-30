@@ -174,14 +174,14 @@ into a new dated `## [<version>] - YYYY-MM-DD` section.
   unusable curve. The notice re-arms once the curve is fixed.
 - **The container restarts cleanly under host networking.** The single-instance check refused
   to start while the previous run's connections were still closing (up to about a minute
-  after a restart). It now reports only a port something is actually listening on, and it
-  probes an IPv6 bind address with an IPv6 socket instead of always reporting it busy.
+  after a restart). It now reports only a port something is actually listening on. It also
+  starts on an IPv6 address instead of calling a free port busy, and on Windows it now sees
+  an instance already listening on `0.0.0.0`.
 - **The container health check probes the port the app listens on.** It read
   `IPMIDECK_SERVER_PORT`, but the image always listens on 3000, so setting that variable made a
-  working container report unhealthy.
-- **Repeated in-process restarts no longer pile up routes.** Each start registered the module
-  routes and the web UI fallback again and nested the server's startup hooks one level deeper,
-  until a long-running instance restarted from the console failed to start.
+  working container report unhealthy. It now reads the port the app was started with, so a
+  command overridden with another `--port` (the way to move the port under host networking)
+  is followed too.
 - **A malformed `Origin` or `Referer` header is refused** instead of answering with a server
   error, and an empty or non-text entry in `trusted_origins` is ignored instead of failing the
   first proxied request.

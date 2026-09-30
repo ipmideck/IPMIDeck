@@ -1,7 +1,7 @@
 """Starting the same app object again must not grow its route table or its lifespan chain.
 
-lifespan re-enters on one app object for an in-process restart and for every TestClient the
-suite builds. Each run used to append another copy of the module routes, /assets and the SPA
+lifespan re-enters on one app object for every TestClient the suite builds (and would for any
+in-process restart). Each run used to append another copy of the module routes, /assets and the SPA
 catch-all, and every include_router wrapped the router's lifespan_context one level deeper,
 until entering it overflowed the stack (after about 95 starts).
 """

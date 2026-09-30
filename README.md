@@ -153,7 +153,10 @@ IPMIDECK_DATA_RETENTION_DAYS=180
 
 In the Docker image the app always listens on port 3000 inside the container: the image starts
 it with `--port 3000`, which takes precedence over `IPMIDECK_SERVER_PORT` and `config.yaml`.
-Change the published port with the port mapping (`-p 8080:3000`) instead.
+Change the published port with the port mapping (`-p 8080:3000`) instead. Under
+`--network host` a port mapping has no effect, so override the command instead, for example
+`ipmideck --host 0.0.0.0 --port 8080 start`; the container's health check follows the port
+given there.
 
 The `config.yaml` written on first run covers the common settings, not every key — read it for
 what it contains, and add the rest by hand if you need them. The same settings are also

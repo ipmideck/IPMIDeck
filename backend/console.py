@@ -26,6 +26,7 @@ normal stdout/stderr logging is restored on exit.
 
 from __future__ import annotations
 
+import errno
 import logging
 import socket
 import sys
@@ -116,32 +117,58 @@ def browsable_url(scheme: str, host: str, port: int) -> str:
     return f"{scheme}://{browsable_host(host)}:{port}"
 
 
-def port_in_use(host: str, port: int) -> bool:
-    """Return True if ``port`` is already bound/listening on ``host``.
+PORT_IN_USE = "in_use"
+ADDRESS_UNAVAILABLE = "unavailable"
 
-    A plain bind() raises OSError (EADDRINUSE / WinError 10048) when the port is taken — that is
-    the "already running" signal. On POSIX the probe sets SO_REUSEADDR so that a connection
-    still in TIME_WAIT from the previous run (a quick restart, a container restarted under host
-    networking) does not count as "in use": uvicorn binds with SO_REUSEADDR itself and would
-    start fine there, and Linux/BSD still refuse the bind while a socket is actually listening.
-    On Windows SO_REUSEADDR lets a second socket bind over a live listener, which would hide a
-    running instance, so it stays off there.
 
-    "0.0.0.0"/"::"/"" wildcard binds are probed against 127.0.0.1 so the check is meaningful. An
-    IPv6 literal is probed with an IPv6 socket.
+def bind_problem(host: str, port: int) -> str | None:
+    """Try the bind the server is about to make and say why it would fail, or None if it would not.
+
+    Returns ``PORT_IN_USE`` when something already holds the port (the "already running"
+    signal) and ``ADDRESS_UNAVAILABLE`` when the address itself cannot be bound: not assigned
+    to this host, not resolvable, a family the host lacks, or not permitted (a privileged
+    port). One bind, classified once, so the two answers cannot disagree.
+
+    On Linux the probe sets SO_REUSEADDR so that a connection still in TIME_WAIT from the
+    previous run (a quick restart, a container restarted under host networking, where the
+    health check leaves one every 30 seconds) does not count as "in use": uvicorn binds with
+    SO_REUSEADDR itself and would start fine there, and Linux still refuses the bind while a
+    socket is listening. It stays off elsewhere: on Windows it lets a second socket bind over a
+    live listener, and on macOS/BSD it lets 127.0.0.1 bind while a wildcard listener holds the
+    port, either of which would hide a running instance.
+
+    The probe binds the same address the server will, wildcards included: probing 127.0.0.1 for
+    a 0.0.0.0 server misses an instance already listening on 0.0.0.0 on Windows, which lets a
+    specific address bind over a wildcard listener. An IPv6 address is probed with an IPv6
+    socket.
     """
-    probe_host = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
+    probe_host = host or "0.0.0.0"
     family = socket.AF_INET6 if ":" in probe_host else socket.AF_INET
-    s = socket.socket(family, socket.SOCK_STREAM)
     try:
-        if sys.platform != "win32":
+        s = socket.socket(family, socket.SOCK_STREAM)
+    except OSError:
+        return ADDRESS_UNAVAILABLE  # e.g. IPv6 disabled on this host
+    try:
+        if sys.platform.startswith("linux"):
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind((probe_host, port))
-        return False
-    except OSError:
-        return True
+        return None
+    except socket.gaierror:
+        return ADDRESS_UNAVAILABLE
+    except OSError as e:
+        if e.errno in (errno.EADDRNOTAVAIL, errno.EACCES) or getattr(e, "winerror", None) in (
+            10049,  # WSAEADDRNOTAVAIL
+            10013,  # WSAEACCES
+        ):
+            return ADDRESS_UNAVAILABLE
+        return PORT_IN_USE
     finally:
         s.close()
+
+
+def port_in_use(host: str, port: int) -> bool:
+    """Return True if ``port`` is already bound/listening on ``host`` (see :func:`bind_problem`)."""
+    return bind_problem(host, port) == PORT_IN_USE
 
 
 def read_key() -> str | None:

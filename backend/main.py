@@ -341,8 +341,8 @@ async def lifespan(app: FastAPI):
     # IMPORTANT: must happen BEFORE the SPA fallback route is registered so FastAPI
     # routes module paths correctly (catch-all "/{full_path:path}" would shadow them).
     #
-    # lifespan runs again on the same app object for an in-process restart (and for every
-    # TestClient the suite builds), so the routes the previous run added are dropped first.
+    # lifespan can run again on the same app object (every TestClient the suite builds does
+    # it), so the routes the previous run added are dropped first.
     # include_router also wraps the router's lifespan_context one level deeper on every call;
     # restoring it keeps that chain the same depth, where it would otherwise grow with each
     # start until entering it overflows the stack.
@@ -1027,60 +1027,33 @@ def cli():
     # surface; import it only on the serve path, after the TTY-independent fast
     # paths (reset-password / gen-cert / --reload) have already returned.
     from backend.console import (
+        ADDRESS_UNAVAILABLE,
+        PORT_IN_USE,
         ConsoleUI,
+        bind_problem,
         browsable_url,
         is_interactive,
-        port_in_use,
         start_key_listener,
     )
 
-    # === Single-instance guard with error distinction (D-17 + REVIEWS MED) ===
-    # Distinguish "port already in use" (a second backend — refuse, don't fight over
-    # the BMC) from "address unavailable / not permitted" (bad host, IPv6-only,
-    # privileged port). port_in_use() returns True for the EADDRINUSE case; for the
-    # address-unavailable case we attempt the bind here and inspect errno/winerror.
-    if port_in_use(effective_host, effective_port):
+    # === Single-instance guard ===
+    # Distinguish "port already in use" (a second backend: refuse, don't fight over the BMC)
+    # from "address unavailable / not permitted" (bad host, IPv6-only, privileged port).
+    problem = bind_problem(effective_host, effective_port)
+    if problem == ADDRESS_UNAVAILABLE:
+        print(
+            f"ERROR: {APP_NAME} cannot bind {effective_host}:{effective_port} — "
+            f"address unavailable or not permitted.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if problem == PORT_IN_USE:
         print(
             f"ERROR: {APP_NAME} refused to start — port {effective_port} is already "
             f"in use on {effective_host} (another instance may be running).",
             file=sys.stderr,
         )
         sys.exit(1)
-    else:
-        # Probe the actual bind once to surface address-unavailable / not-permitted
-        # errors with a DISTINCT message (EADDRNOTAVAIL / WSAEADDRNOTAVAIL / EACCES).
-        import errno as _errno
-        import socket as _socket
-
-        _probe_host = (
-            "127.0.0.1" if effective_host in ("0.0.0.0", "::", "") else effective_host
-        )
-        _probe = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
-        try:
-            _probe.bind((_probe_host, effective_port))
-        except OSError as e:
-            _eno = getattr(e, "errno", None)
-            _werr = getattr(e, "winerror", None)
-            _addr_unavailable = (
-                _eno in (_errno.EADDRNOTAVAIL, _errno.EACCES)
-                or _werr in (10049, 10013)  # WSAEADDRNOTAVAIL / WSAEACCES
-            )
-            if _addr_unavailable:
-                print(
-                    f"ERROR: {APP_NAME} cannot bind {effective_host}:{effective_port} — "
-                    f"address unavailable or not permitted.",
-                    file=sys.stderr,
-                )
-            else:
-                # An EADDRINUSE we lost the race to, or any other bind failure → in use.
-                print(
-                    f"ERROR: {APP_NAME} refused to start — port {effective_port} is already "
-                    f"in use on {effective_host} (another instance may be running).",
-                    file=sys.stderr,
-                )
-            sys.exit(1)
-        finally:
-            _probe.close()
 
     # === FIX-03 / signal coordination (REVIEWS HIGH-4; r9 cross-platform rewrite) ===
     # ONE cross-platform handler (_make_graceful_signal_handler), installed via signal.signal so it
