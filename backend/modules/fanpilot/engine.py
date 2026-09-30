@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 
 logger = logging.getLogger("ipmideck.modules.fanpilot")
 
@@ -28,6 +29,10 @@ def interpolate_curve(curve_points: list[dict], temperature: float) -> int:
         )
     except (KeyError, TypeError, ValueError, IndexError):
         return 100  # safety: an unreadable curve is treated as no curve
+    if not all(math.isfinite(p["temp"]) and math.isfinite(p["speed"]) for p in points):
+        return 100  # safety: NaN / Infinity would slip past every comparison below
+    if not math.isfinite(temperature):
+        return 100  # safety: no usable reading to place on the curve
 
     # Below minimum point
     if temperature <= points[0]["temp"]:

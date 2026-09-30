@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import math
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from backend.core.i18n import get_lang, t
@@ -31,6 +33,28 @@ def _fan_argv_echo(*results) -> str:
         if res is not None and (d := (res.detail or "").strip()) and d.startswith("raw ")
     ]
     return "; ".join(echoes)
+
+
+def _has_non_finite(body: BaseModel) -> bool:
+    """True when a profile body carries NaN / Infinity in a number the control loop reads.
+
+    The request body is parsed by json.loads, which accepts the bare tokens NaN and Infinity.
+    Stored, such a curve cannot be serialised back out (GET answers 500), and a NaN
+    comparison is always False, so a NaN safety_threshold would silently disable the safety
+    override. Checked here rather than with a model validator: FastAPI's 422 body echoes the
+    rejected input, and a NaN in it cannot be encoded as JSON either.
+    """
+    numbers = [getattr(body, "hysteresis", None), getattr(body, "safety_threshold", None)]
+    for point in getattr(body, "curve_points", None) or []:
+        if isinstance(point, dict):
+            numbers.extend(point.values())
+    return any(isinstance(v, float) and not math.isfinite(v) for v in numbers)
+
+
+def _non_finite_response(lang: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=422, content={"success": False, "error": t("invalid_curve_values", lang)}
+    )
 
 
 class ProfileCreate(BaseModel):
@@ -76,7 +100,9 @@ async def list_profiles():
 
 
 @router.post("/profiles")
-async def create_profile(body: ProfileCreate):
+async def create_profile(body: ProfileCreate, lang: str = Depends(get_lang)):
+    if _has_non_finite(body):
+        return _non_finite_response(lang)
     ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
     await ctx.db.execute(
         "INSERT INTO fan_profiles (name, description, curve_points, interpolation, hysteresis, safety_threshold, source_sensor) "
@@ -101,6 +127,8 @@ async def get_profile(profile_id: int, lang: str = Depends(get_lang)):
 
 @router.put("/profiles/{profile_id}")
 async def update_profile(profile_id: int, body: ProfileUpdate, lang: str = Depends(get_lang)):
+    if _has_non_finite(body):
+        return _non_finite_response(lang)
     ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
     existing = await ctx.db.fetchone("SELECT is_preset FROM fan_profiles WHERE id = ?", (profile_id,))
     if not existing:
