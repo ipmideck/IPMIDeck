@@ -8,16 +8,19 @@ Rather than reading the configuration — which lives on a volume this process m
 able to open — it tries both. The certificate is deliberately NOT verified: it is the
 container's own self-signed one by default, and this check asks "is the app alive", not
 "is the certificate trusted".
+
+The port is fixed at 3000 because the image's CMD passes `--port 3000`, and a command-line
+port wins over IPMIDECK_SERVER_PORT and config.yaml. Reading that variable here would probe
+a port nothing listens on.
 """
 
 from __future__ import annotations
 
-import os
 import ssl
 import sys
 import urllib.request
 
-PORT = os.environ.get("IPMIDECK_SERVER_PORT", "3000")
+PORT = 3000  # matches the CMD in the Dockerfile
 PATH = f"://localhost:{PORT}/api/health"
 UNVERIFIED = ssl._create_unverified_context()
 

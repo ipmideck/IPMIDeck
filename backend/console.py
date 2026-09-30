@@ -119,16 +119,23 @@ def browsable_url(scheme: str, host: str, port: int) -> str:
 def port_in_use(host: str, port: int) -> bool:
     """Return True if ``port`` is already bound/listening on ``host`` (D-17).
 
-    Deliberately does NOT set SO_REUSEADDR (RESEARCH Pitfall 4): SO_REUSEADDR would let the probe
-    re-bind over an already-listening socket, producing a FALSE negative and letting a second
-    backend start and fight over the same BMC. A plain bind() raises OSError (EADDRINUSE /
-    WinError 10048) when the port is taken — that is the "already running" signal.
+    A plain bind() raises OSError (EADDRINUSE / WinError 10048) when the port is taken — that is
+    the "already running" signal. On POSIX the probe sets SO_REUSEADDR so that a connection
+    still in TIME_WAIT from the previous run (a quick restart, a container restarted under host
+    networking) does not count as "in use": uvicorn binds with SO_REUSEADDR itself and would
+    start fine there, and Linux/BSD still refuse the bind while a socket is actually listening.
+    On Windows SO_REUSEADDR lets a second socket bind over a live listener, which would hide a
+    running instance (RESEARCH Pitfall 4), so it stays off there.
 
-    "0.0.0.0"/"::"/"" wildcard binds are probed against 127.0.0.1 so the check is meaningful.
+    "0.0.0.0"/"::"/"" wildcard binds are probed against 127.0.0.1 so the check is meaningful. An
+    IPv6 literal is probed with an IPv6 socket.
     """
     probe_host = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    family = socket.AF_INET6 if ":" in probe_host else socket.AF_INET
+    s = socket.socket(family, socket.SOCK_STREAM)
     try:
+        if sys.platform != "win32":
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind((probe_host, port))
         return False
     except OSError:
