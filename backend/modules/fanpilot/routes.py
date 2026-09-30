@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import math
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from backend.core.i18n import get_lang, t
@@ -31,6 +33,48 @@ def _fan_argv_echo(*results) -> str:
         if res is not None and (d := (res.detail or "").strip()) and d.startswith("raw ")
     ]
     return "; ".join(echoes)
+
+
+def _has_non_finite(body: BaseModel) -> bool:
+    """True when a profile body carries NaN / Infinity in a number the control loop reads.
+
+    The request body is parsed by json.loads, which accepts the bare tokens NaN and Infinity.
+    Stored, such a curve cannot be serialised back out (GET answers 500), and a NaN
+    comparison is always False, so a NaN safety_threshold would silently disable the safety
+    override. Checked here rather than with a model validator: FastAPI's 422 body echoes the
+    rejected input, and a NaN in it cannot be encoded as JSON either.
+    """
+    values = [
+        getattr(body, "hysteresis", None),
+        getattr(body, "safety_threshold", None),
+        getattr(body, "curve_points", None),
+    ]
+    # A point is a free-form dict, so a NaN can sit at any depth inside it and still end up
+    # stored; walk the whole structure, not just the top-level values.
+    while values:
+        value = values.pop()
+        if isinstance(value, dict):
+            values.extend(value.values())
+        elif isinstance(value, list):
+            values.extend(value)
+        elif isinstance(value, float) and not math.isfinite(value):
+            return True
+    return False
+
+
+def _load_curve(stored: str):
+    """Decode a stored curve, reading NaN / Infinity as null.
+
+    A row saved before those values were refused would otherwise make the response
+    impossible to encode, and one such profile would take down the whole listing.
+    """
+    return json.loads(stored, parse_constant=lambda _token: None)
+
+
+def _non_finite_response(lang: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=422, content={"success": False, "error": t("invalid_curve_values", lang)}
+    )
 
 
 class ProfileCreate(BaseModel):
@@ -71,12 +115,14 @@ async def list_profiles():
     ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
     rows = await ctx.db.fetchall("SELECT * FROM fan_profiles ORDER BY is_preset DESC, name")
     for row in rows:
-        row["curve_points"] = json.loads(row["curve_points"])
+        row["curve_points"] = _load_curve(row["curve_points"])
     return {"profiles": rows}
 
 
 @router.post("/profiles")
-async def create_profile(body: ProfileCreate):
+async def create_profile(body: ProfileCreate, lang: str = Depends(get_lang)):
+    if _has_non_finite(body):
+        return _non_finite_response(lang)
     ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
     await ctx.db.execute(
         "INSERT INTO fan_profiles (name, description, curve_points, interpolation, hysteresis, safety_threshold, source_sensor) "
@@ -95,12 +141,14 @@ async def get_profile(profile_id: int, lang: str = Depends(get_lang)):
     row = await ctx.db.fetchone("SELECT * FROM fan_profiles WHERE id = ?", (profile_id,))
     if not row:
         return {"success": False, "error": t("profile_not_found", lang)}
-    row["curve_points"] = json.loads(row["curve_points"])
+    row["curve_points"] = _load_curve(row["curve_points"])
     return {"profile": row}
 
 
 @router.put("/profiles/{profile_id}")
 async def update_profile(profile_id: int, body: ProfileUpdate, lang: str = Depends(get_lang)):
+    if _has_non_finite(body):
+        return _non_finite_response(lang)
     ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
     existing = await ctx.db.fetchone("SELECT is_preset FROM fan_profiles WHERE id = ?", (profile_id,))
     if not existing:
@@ -200,8 +248,14 @@ async def set_fanpilot_mode(server_id: str, body: FanMode, lang: str = Depends(g
 
     key = auth.get_encryption_key()
     host = server["host"]
-    user = decrypt(server["username_enc"], key)
-    pwd = decrypt(server["password_enc"], key)
+    try:
+        user = decrypt(server["username_enc"], key)
+        pwd = decrypt(server["password_enc"], key)
+    except Exception:
+        # Answering with the same shape as any other failure keeps an unreadable
+        # credential from being distinguishable by status code from a BMC that simply
+        # refused the write.
+        return {"success": False, "error": t("credentials_unreadable", lang)}
     # 04-W4-02: vendor-aware dispatch (default 'dell' if NULL/empty — Decision G).
     vendor = server["vendor"] or "dell"
 

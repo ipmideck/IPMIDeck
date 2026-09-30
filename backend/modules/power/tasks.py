@@ -31,6 +31,11 @@ _next_retry: dict[str, float] = {}
 _COOLDOWN_SECONDS = 60.0  # non-blocking cooldown for a failing server
 
 
+def forget_server(server_id: str) -> None:
+    """Drop a deleted server's poll state."""
+    _next_retry.pop(server_id, None)
+
+
 async def _poll_one_server(server: dict, key) -> None:
     """Poll a single server's chassis power state with isolated error handling.
 

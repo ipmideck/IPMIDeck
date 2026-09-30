@@ -7,6 +7,7 @@ import asyncio
 import contextlib
 import getpass
 import logging
+import os
 import signal
 import sys
 import threading
@@ -14,13 +15,16 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from typing import Annotated
+from urllib.parse import urlsplit
 
 import uvicorn
 from fastapi import Cookie, Depends, FastAPI, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.core.auth import AuthManager, require_auth
 from backend.core.branding import APP_NAME, VERSION, credits_line, render_banner_safe
+from backend.core.certs import resolve_tls_files
 from backend.core.config import (
     AppConfig,
     load_config,
@@ -28,6 +32,7 @@ from backend.core.config import (
     save_default_config,
     update_server_yaml,
 )
+from backend.core.crypto import _set_secure_permissions
 from backend.core.logging_util import suppress_noisy_loggers
 from backend.core.database import Database
 from backend.core.modules import ModuleLoader
@@ -220,7 +225,7 @@ async def lifespan(app: FastAPI):
     _silence_proactor_connreset()
 
     # D-21: emit the branded banner ONCE via a TTY-independent print/log so it shows in
-    # `docker logs` (the container never runs cli()). Gated on app.state.host_splash_shown:
+    # `docker logs` (the container runs cli() without a TTY). Gated on app.state.host_splash_shown:
     # cli() sets that flag ONLY on the interactive TTY path, where the rich splash (Task 2)
     # already shows the banner — so the host TTY never double-prints (REVIEWS MED: no-double-banner).
     # On Docker / non-TTY the flag is unset → the operator gets the banner here.
@@ -237,6 +242,16 @@ async def lifespan(app: FastAPI):
     # Save default config if missing
     data_dir = Path(config.data.db_path).parent
     save_default_config(data_dir / "config.yaml")
+
+    # An already-deployed config.yaml was written under the default umask and holds the
+    # session secret, so on a typical host every local account could read it. Writing it
+    # owner-only only helps files this version creates; existing ones are repaired here, the
+    # same way Database.connect() repairs the database on every start. Restricted to the
+    # resolved data dir so a config passed by path — the example file in the test suite —
+    # is never chmod'ed.
+    _existing_config = data_dir / "config.yaml"
+    if _existing_config.exists():
+        _set_secure_permissions(_existing_config)
 
     # 04-W6-03: apply a pending restore (staged by POST /api/system/restore) BEFORE
     # connecting the DB, so the swapped-in ipmideck.db + encryption.key + config.yaml
@@ -257,6 +272,17 @@ async def lifespan(app: FastAPI):
     # the single parse point; invalid values fall back to the 24h default without raising.
     # Only consulted when auth is enabled — no change to the is_auth_enabled() gating.
     auth.session_expiry_seconds = parse_duration_seconds(config.auth.session_expiry)
+
+    # Convert any credential still stored in the older unauthenticated format. Must run
+    # after the encryption key is loaded and before anything reads a credential — the
+    # demo seed below writes rows, and the module background tasks started later read
+    # them. Never fatal: both formats stay readable, so an install that fails to convert
+    # keeps working exactly as before rather than losing fan control at startup.
+    try:
+        from backend.core.crypto import migrate_credentials
+        await migrate_credentials(db, auth.get_encryption_key(), data_dir)
+    except Exception:
+        logger.exception("Could not convert stored credentials to the current format")
 
     # 08-04 (D-16): in demo mode, seed one synthetic server per canonical vendor so the
     # per-vendor journeys (tier badges, monitoring-only warnings, loop-skip, argv routing)
@@ -298,15 +324,40 @@ async def lifespan(app: FastAPI):
         ctx, config.modules, persisted_enabled=persisted_enabled
     )
 
+    # Turn the OpenAPI pages back on for a demo instance or a debug-level run. This MUST
+    # happen before the module routes and the SPA catch-all are registered below: the
+    # catch-all swallows every path registered after it, so a later setup() would produce
+    # routes that never match. The None check is required — lifespan re-enters for every
+    # app instance a test builds, and re-running setup() unguarded appends a duplicate set
+    # of routes each time.
+    if (config.demo or config.logging.level.lower() == "debug") and app.openapi_url is None:
+        app.openapi_url = "/openapi.json"
+        app.docs_url = "/docs"
+        app.redoc_url = "/redoc"
+        app.setup()
+
     # FIX-04: dynamically mount only enabled modules' routes (with auth guard).
     # Disabled modules will never have their routes registered → 404 instead of 200.
     # IMPORTANT: must happen BEFORE the SPA fallback route is registered so FastAPI
     # routes module paths correctly (catch-all "/{full_path:path}" would shadow them).
+    #
+    # lifespan can run again on the same app object (every TestClient the suite builds does
+    # it), so the routes the previous run added are dropped first.
+    # include_router also wraps the router's lifespan_context one level deeper on every call;
+    # restoring it keeps that chain the same depth, where it would otherwise grow with each
+    # start until entering it overflows the stack.
+    _drop_startup_routes(app)
+    routes_before = {id(route) for route in app.router.routes}
+    lifespan_context = app.router.lifespan_context
     module_loader.mount_routes(app, dependencies=[Depends(require_auth)])
 
     # Register SPA fallback AFTER all API routes (including dynamically mounted modules).
     # The catch-all /{full_path:path} must come last or it shadows module routes.
     _mount_spa(app)
+    app.router.lifespan_context = lifespan_context
+    _startup_routes.extend(
+        route for route in app.router.routes if id(route) not in routes_before
+    )
 
     # Start module background tasks
     await module_loader.start_background_tasks()
@@ -316,7 +367,51 @@ async def lifespan(app: FastAPI):
     # (e.g. from a test harness) without going through cli().
     effective_host = getattr(app.state, "effective_host", None) or config.server.host
     effective_port = getattr(app.state, "effective_port", None) or config.server.port
-    logger.info("%s started on %s:%d", APP_NAME, effective_host, effective_port)
+    # State the scheme: a container operator has no console to read, and "did TLS actually
+    # come up?" is otherwise unanswerable from the log alone. It is reported from what the
+    # launcher actually handed uvicorn, NOT from the config flag: a certificate can only be
+    # supplied when the server object is built, so a process started without one serves
+    # cleartext whatever the file says, and printing the flag would announce https over a
+    # plaintext socket — the one lie an operator here cannot afford.
+    #
+    # An environment variable rather than app.state because --reload runs the app in a
+    # reloader SUBPROCESS, which inherits the environment but not the parent's app object.
+    # Anyone invoking uvicorn directly with --ssl-certfile can set it to say so.
+    tls_active = os.environ.get("IPMIDECK_TLS_ACTIVE") == "1"
+    logger.info(
+        "%s started on %s://%s:%d",
+        APP_NAME,
+        "https" if tls_active else "http",
+        effective_host,
+        effective_port,
+    )
+    if config.server.https and not tls_active:
+        logger.warning(
+            "https is enabled in the configuration but this process was started without a "
+            "certificate, so it is serving CLEARTEXT. Start it through the ipmideck command "
+            "(what the container image does) instead of invoking uvicorn directly, or pass "
+            "--ssl-certfile/--ssl-keyfile yourself."
+        )
+    # A bind reachable from the network without TLS puts the session cookie and every BMC
+    # password typed into the UI on the wire in clear text. Refusing to start is not right
+    # (a trusted LAN is a legitimate choice), but the operator should be told rather than
+    # have to infer it.
+    if effective_host not in ("127.0.0.1", "::1", "localhost") and not tls_active:
+        logger.warning(
+            "Listening on %s without TLS — session cookies and BMC credentials are sent "
+            "in cleartext. Enable https in config.yaml or terminate TLS at a proxy.",
+            effective_host,
+        )
+    # Until first-run setup completes there is no account, and nothing over HTTP distinguishes
+    # the operator from anyone else who can reach the port: whoever answers the setup wizard
+    # first owns the instance. The window closes on its own the moment setup is completed, so
+    # the fix is to make sure the operator knows it is open rather than to add a mechanism.
+    if not await auth.has_user():
+        logger.warning(
+            "No account configured yet — anyone who can reach %s:%d can complete the setup "
+            "wizard and claim this instance. Finish first-run setup now.",
+            effective_host, effective_port,
+        )
     if config.demo:
         logger.info("Demo mode active — 6 virtual servers (one per vendor) with simulated data")
 
@@ -331,48 +426,239 @@ async def lifespan(app: FastAPI):
 
 # === FastAPI App ===
 
+# The interactive OpenAPI pages are constructed disabled and re-enabled inside lifespan()
+# for a demo instance or a debug-level run. They map every route in the app for an
+# anonymous caller, which is reconnaissance we don't owe a stranger; in a demo the API is
+# the thing being shown, and at debug level the operator asked for the detail.
 app = FastAPI(
     title=APP_NAME,
     version=VERSION,
     lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
 
 
+# Methods that can change state. Safe methods are never blocked: a cross-origin GET
+# cannot be turned into a write, and blocking them would break ordinary links.
+_STATE_CHANGING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+def _split_url(value: str):
+    """urlsplit() that answers None for a value it cannot parse.
+
+    Origin, Referer and the trusted_origins entries are all free text; urlsplit raises
+    ValueError on some of it (an unclosed IPv6 bracket such as "http://[::1"), and every
+    caller here treats an unreadable value as "not this server".
+    """
+    try:
+        return urlsplit(value)
+    except ValueError:
+        return None
+
+
+def _same_authority(candidate: str, host_header: str, request_scheme: str) -> bool:
+    """Return True if ``candidate`` (an Origin/Referer URL) targets this exact server.
+
+    The comparison is on the AUTHORITY — host AND port. Cookie same-site rules treat
+    every port on a host as one site, so another service listening on a different port
+    of the same machine can drive authenticated requests here; comparing the port is
+    exactly what closes that.
+
+    The scheme is only enforced when the request itself arrived over TLS. Behind a
+    TLS-terminating proxy the app sees plain http and cannot know its external scheme,
+    so demanding an exact scheme match would reject every proxied deployment.
+    """
+    parsed = _split_url(candidate)
+    if parsed is None or not parsed.netloc:
+        return False
+    if request_scheme == "https" and parsed.scheme and parsed.scheme != "https":
+        return False
+    return parsed.netloc.lower() == host_header.lower()
+
+
+def _is_trusted_origin(candidate: str, trusted: list[str]) -> bool:
+    """Return True if ``candidate`` matches an origin the operator declared as this server's.
+
+    Behind a reverse proxy that rewrites Host — nginx does not preserve it unless told to —
+    the browser's Origin can never equal the Host this app sees, so the authority comparison
+    alone would refuse every state-changing request in an otherwise correct deployment. This
+    list is the operator's statement of the address the dashboard is really served at.
+
+    It narrows nothing else: an origin that is neither this server's own authority nor on the
+    list is still rejected. An entry written without a scheme matches on authority alone; an
+    entry with one requires the scheme to match too, so listing an https origin does not also
+    trust its cleartext twin.
+    """
+    if not trusted:
+        return False
+    parsed = _split_url(candidate)
+    if parsed is None or not parsed.netloc:
+        return False
+    for entry in trusted:
+        # A bare "host:port" has no scheme, and urlsplit would read the host as one. Forcing
+        # the netloc form first makes both spellings parse the same way.
+        allowed = _split_url(entry if "//" in entry else f"//{entry}")
+        if allowed is None or not allowed.netloc or allowed.netloc.lower() != parsed.netloc.lower():
+            continue
+        if allowed.scheme and allowed.scheme.lower() != parsed.scheme.lower():
+            continue
+        return True
+    return False
+
+
+@app.middleware("http")
+async def _origin_guard(request, call_next):
+    """Reject state-changing requests a foreign origin caused the browser to send.
+
+    Several endpoints take no request body, so a browser can submit them cross-origin
+    as a simple request — no preflight, cookies attached — and the app had no way to
+    tell that apart from a click in its own UI.
+
+    A request with NO Origin and NO Referer is allowed through: command-line clients,
+    the container health check and server-to-server callers legitimately send neither,
+    and rejecting them would break every non-browser integration to stop an attack only
+    a browser can mount. Browsers always attach Origin to a cross-origin state-changing
+    request, so "present and pointing elsewhere" is the signal worth acting on.
+
+    Deployments behind a proxy that rewrites Host must list their external address in
+    ``server.trusted_origins``; without it the comparison below can never succeed there.
+    """
+    if request.method in _STATE_CHANGING_METHODS:
+        stated = request.headers.get("origin") or request.headers.get("referer")
+        host_header = request.headers.get("host")
+        if (
+            stated
+            and host_header
+            and not _same_authority(stated, host_header, request.url.scheme)
+            and not _is_trusted_origin(stated, config.server.trusted_origins)
+        ):
+            return JSONResponse(
+                status_code=403,
+                content={"success": False, "error": "Cross-origin request rejected"},
+            )
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def _security_headers(request, call_next):
+    """Attach defensive response headers to everything the app serves.
+
+    frame-ancestors (plus the legacy X-Frame-Options) keeps the dashboard out of a
+    hostile iframe, which is what turns a stolen click into a power-off. nosniff stops a
+    stored sensor string from being re-interpreted as script. no-referrer keeps LAN
+    hostnames out of Referer headers sent to third parties.
+
+    HSTS is emitted ONLY over an https request: sent over plain http it is ignored by
+    browsers, but if it ever were honoured on a LAN name it would strand the operator
+    with no way back to http.
+    """
+    response = await call_next(request)
+    response.headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    if request.url.scheme == "https":
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    return response
+
+
 # === WebSocket endpoint ===
+
+# How often an open connection re-checks that its session is still good. This is the
+# eviction latency being bought: after a password change or an expiry, a socket opened
+# earlier keeps receiving telemetry for at most this long. One row read per connection per
+# interval, on a single-user LAN dashboard.
+_WS_REVALIDATE_SECONDS = 60
+
+
+def _ws_origin_allowed(websocket: WebSocket) -> bool:
+    """True if this handshake did not come from another site.
+
+    A WebSocket handshake is not subject to the same-origin policy: any page the operator
+    visits can open a socket to this app and it will carry their cookie. Comparing the
+    stated origin against the Host the request was addressed to needs no configuration and
+    survives being reached by address, hostname or any port — which a fixed allow-list
+    would not, on a box the operator reaches half a dozen different ways.
+
+    It does consult ``server.trusted_origins`` for the one case the comparison cannot
+    handle: behind a proxy that rewrites Host, Origin can never equal it, and rejecting the
+    handshake would leave the dashboard loaded but with no live data and nothing in the UI
+    to explain why. That is the same setting the HTTP guard uses, so an operator configures
+    it once.
+
+    A missing Origin is allowed: command-line clients and health checks send none, and
+    browsers always send one for a cross-origin handshake, so "present and pointing
+    elsewhere" is the signal worth acting on.
+    """
+    origin = websocket.headers.get("origin")
+    if not origin:
+        return True
+    host_header = websocket.headers.get("host")
+    parsed = _split_url(origin)
+    if parsed is None:
+        return False
+    if host_header and parsed.netloc.lower() == host_header.lower():
+        return True
+    return _is_trusted_origin(origin, config.server.trusted_origins)
+
+
+async def _ws_session_valid(session: str | None) -> bool:
+    """Whether a session cookie still authorises a connection, right now.
+
+    Both conditions that end a session are covered by this one call: the token carries its
+    own expiry, and it is bound to a fingerprint of the stored password hash, so a password
+    change invalidates it too.
+    """
+    if not await auth.is_auth_enabled():
+        return True
+    username = await auth.verify_session_token_async(session) if session else None
+    if not username:
+        return False
+    # A token signed for an account that has since been replaced must not stay valid,
+    # same check the HTTP guard makes.
+    return await db.fetchone(
+        "SELECT 1 FROM users WHERE username = ? LIMIT 1", (username,)
+    ) is not None
+
 
 @app.websocket("/ws")
 async def websocket_endpoint(
     websocket: WebSocket,
     session: Annotated[str | None, Cookie()] = None,
 ):
-    # 04-W4-01 auth gate: when auth is ENABLED, a valid session cookie is required
-    # BEFORE the handshake is accepted. When auth is DISABLED (open-access mode, or
-    # no user configured), the connection is allowed exactly as before — this mirrors
-    # require_auth's is_auth_enabled() gate so single-user no-auth setups are never
-    # locked out. Uses the current module globals (auth, db, ws_manager) — there is
-    # NO app-state container exists (Decision A1 — Codex HIGH fix).
-    if await auth.is_auth_enabled():
-        username = await auth.verify_session_token_async(session) if session else None
-        if not username:
-            # Reject pre-accept with policy-violation close code (1008).
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-            return
-        # Phase 02.1 REVIEWS #7 invariant: a token signed for an OLD username (pre
-        # credential-replace) must not stay valid — confirm the token subject is the
-        # CURRENT single stored user, same check as require_auth.
-        row = await db.fetchone(
-            "SELECT 1 FROM users WHERE username = ? LIMIT 1", (username,)
-        )
-        if row is None:
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-            return
-    # Authenticated (or auth disabled) → accept + replay snapshot. The early-return
-    # above is added BEFORE connect(), so the snapshot-replay ordering is unchanged.
+    # Origin first, before the auth gate: it has to apply in open-access mode too, which
+    # is exactly when a socket opened by another site costs the most.
+    if not _ws_origin_allowed(websocket):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+    if not await _ws_session_valid(session):
+        # Closing before accept() makes this a rejected handshake, not a dropped socket.
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
     await ws_manager.connect(websocket)
     try:
         while True:
-            await websocket.receive_text()
+            try:
+                await asyncio.wait_for(
+                    websocket.receive_text(), timeout=_WS_REVALIDATE_SECONDS
+                )
+            except asyncio.TimeoutError:
+                # Nothing arrived, which is the normal case — the client never sends. The
+                # timeout is only here to give the check below somewhere to happen.
+                pass
+            # Authorising once at the handshake would let a connection outlive the session
+            # that opened it indefinitely, since a socket can stay open for days.
+            if not await _ws_session_valid(session):
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                break
     except WebSocketDisconnect:
+        pass
+    finally:
+        # Also covers the policy close above, which would otherwise leave the connection
+        # in the manager's list until a broadcast happened to fail on it.
         ws_manager.disconnect(websocket)
 
 
@@ -419,6 +705,20 @@ def _resolve_spa_file(full_path: str, root: Path) -> Path | None:
     return candidate
 
 
+# Routes the last lifespan run registered: the enabled modules' routers, /assets and the SPA
+# catch-all. Kept so the next run on the same app object can remove exactly these.
+_startup_routes: list = []
+
+
+def _drop_startup_routes(app: FastAPI) -> None:
+    """Remove the routes a previous lifespan run registered on this app."""
+    if not _startup_routes:
+        return
+    stale = {id(route) for route in _startup_routes}
+    app.router.routes[:] = [route for route in app.router.routes if id(route) not in stale]
+    _startup_routes.clear()
+
+
 def _mount_spa(app: FastAPI) -> None:
     """Register static file serving and SPA fallback route.
 
@@ -435,10 +735,7 @@ def _mount_spa(app: FastAPI) -> None:
 
     # Serve static assets (JS, CSS, images) directly
     if (static_dir / "assets").exists():
-        try:
-            app.mount("/assets", StaticFiles(directory=str(static_dir / "assets")), name="static-assets")
-        except Exception:
-            pass  # Already mounted (e.g., during --reload; ignore duplicate)
+        app.mount("/assets", StaticFiles(directory=str(static_dir / "assets")), name="static-assets")
 
     spa_root = static_dir.resolve()
 
@@ -472,7 +769,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     a bare invocation (no command) also serves. Only `reset-password` short-circuits in cli() (along
     with the --gen-cert / --reload flag early-returns). So `ipmideck start`, `ipmideck`, and
     `ipmideck --host H --port P` all reach the serve path, while `ipmideck reset-password` does not.
-    Docker's `uvicorn backend.main:app` never calls cli(), so it is unaffected.
+    The Docker image runs `ipmideck --host 0.0.0.0 --port 3000 start`, i.e. this same serve path.
     """
     parser = argparse.ArgumentParser(description=f"{APP_NAME} — IPMI Management Platform")
     # default=None sentinels — lets us detect whether the user explicitly passed
@@ -581,8 +878,6 @@ def _do_restart(platform: str, argv_tail: list[str], execv=None, popen=None) -> 
         return  # caller's finally runs (teardown) → asyncio.run returns → cli() returns → clean exit
 
     # POSIX: in-place re-exec a fresh process with the bind flags stripped.
-    import os
-
     if execv is None:
         execv = os.execv
     argv = [sys.executable, "-m", "backend.main"] + _reexec_args(argv_tail)
@@ -631,11 +926,9 @@ def cli():
     args = parser.parse_args()
 
     if args.demo:
-        import os
         os.environ["IPMIDECK_DEMO"] = "true"
 
     if args.config:
-        import os
         os.environ["IPMIDECK_CONFIG_PATH"] = args.config
 
     if args.command == "reset-password":
@@ -647,9 +940,9 @@ def cli():
         return
 
     if args.gen_cert:
-        # 04-W4-03: generate a self-signed pair under data/certs/, persist the paths to
-        # config.yaml's server section, then exit. The operator flips server.https=true
-        # (here in config.yaml or via the Settings Network card) and restarts.
+        # Generate a pair under data/certs/, persist the paths, then exit. Serving over
+        # TLS also generates on demand, so this is only for operators who want the file
+        # to exist (to import into a trust store) before flipping the setting.
         from backend.core.certs import generate_self_signed
         cfg = load_config()
         cert_dir = Path(cfg.data.db_path).parent / "certs"
@@ -659,6 +952,8 @@ def cli():
         print(f"Generated: {key_path}")
         print("Wrote cert_file/key_file to config.yaml. Set server.https=true and restart "
               "to serve over HTTPS.")
+        print("Browsers will warn that the issuer is unknown until you import the "
+              "certificate into the system or browser trust store.")
         return
 
     # === FIX-02 gap closure: load config BEFORE uvicorn.run() ===
@@ -697,8 +992,8 @@ def cli():
     #   over yaml (see config._apply_env_overrides). So a value persisted to
     #   config.yaml by the menu's change-bind action (D-15d) is OVERRIDDEN by an
     #   env var or a CLI --host/--port on the next boot — env/CLI always win. The
-    #   Docker bind is unaffected: the container's CMD passes --host/--port argv
-    #   and never executes cli(), so a bad persisted config value cannot break it.
+    #   Docker bind is unaffected: the container's CMD passes --host/--port on the
+    #   command line, which win over any persisted config value.
     # ============================================================================
 
     # === --reload dev fast path (REVIEWS MED) ===
@@ -712,16 +1007,19 @@ def cli():
         uvicorn_kwargs = dict(
             host=effective_host, port=effective_port, reload=True, log_level="info"
         )
-        if early_cfg is not None and early_cfg.server.https:
-            if not early_cfg.server.cert_file or not early_cfg.server.key_file:
+        if early_cfg is not None:
+            tls = resolve_tls_files(early_cfg)
+            if tls is not None:
+                uvicorn_kwargs["ssl_certfile"], uvicorn_kwargs["ssl_keyfile"] = tls
+                os.environ["IPMIDECK_TLS_ACTIVE"] = "1"
+            elif early_cfg.server.https:
                 print(
-                    "WARNING: server.https=true but cert_file/key_file are not set in config.yaml; "
-                    "run `ipmideck --gen-cert` first. Starting over plain HTTP.",
+                    "WARNING: https is enabled but no certificate could be set up. "
+                    "Starting over plain HTTP.",
                     file=sys.stderr,
                 )
-            else:
-                uvicorn_kwargs["ssl_certfile"] = early_cfg.server.cert_file
-                uvicorn_kwargs["ssl_keyfile"] = early_cfg.server.key_file
+        if early_cfg is not None and early_cfg.server.forwarded_allow_ips:
+            uvicorn_kwargs["forwarded_allow_ips"] = early_cfg.server.forwarded_allow_ips
         uvicorn.run("backend.main:app", **uvicorn_kwargs)
         return
 
@@ -729,60 +1027,33 @@ def cli():
     # surface; import it only on the serve path, after the TTY-independent fast
     # paths (reset-password / gen-cert / --reload) have already returned.
     from backend.console import (
+        ADDRESS_UNAVAILABLE,
+        PORT_IN_USE,
         ConsoleUI,
+        bind_problem,
         browsable_url,
         is_interactive,
-        port_in_use,
         start_key_listener,
     )
 
-    # === Single-instance guard with error distinction (D-17 + REVIEWS MED) ===
-    # Distinguish "port already in use" (a second backend — refuse, don't fight over
-    # the BMC) from "address unavailable / not permitted" (bad host, IPv6-only,
-    # privileged port). port_in_use() returns True for the EADDRINUSE case; for the
-    # address-unavailable case we attempt the bind here and inspect errno/winerror.
-    if port_in_use(effective_host, effective_port):
+    # === Single-instance guard ===
+    # Distinguish "port already in use" (a second backend: refuse, don't fight over the BMC)
+    # from "address unavailable / not permitted" (bad host, IPv6-only, privileged port).
+    problem = bind_problem(effective_host, effective_port)
+    if problem == ADDRESS_UNAVAILABLE:
+        print(
+            f"ERROR: {APP_NAME} cannot bind {effective_host}:{effective_port} — "
+            f"address unavailable or not permitted.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if problem == PORT_IN_USE:
         print(
             f"ERROR: {APP_NAME} refused to start — port {effective_port} is already "
             f"in use on {effective_host} (another instance may be running).",
             file=sys.stderr,
         )
         sys.exit(1)
-    else:
-        # Probe the actual bind once to surface address-unavailable / not-permitted
-        # errors with a DISTINCT message (EADDRNOTAVAIL / WSAEADDRNOTAVAIL / EACCES).
-        import errno as _errno
-        import socket as _socket
-
-        _probe_host = (
-            "127.0.0.1" if effective_host in ("0.0.0.0", "::", "") else effective_host
-        )
-        _probe = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
-        try:
-            _probe.bind((_probe_host, effective_port))
-        except OSError as e:
-            _eno = getattr(e, "errno", None)
-            _werr = getattr(e, "winerror", None)
-            _addr_unavailable = (
-                _eno in (_errno.EADDRNOTAVAIL, _errno.EACCES)
-                or _werr in (10049, 10013)  # WSAEADDRNOTAVAIL / WSAEACCES
-            )
-            if _addr_unavailable:
-                print(
-                    f"ERROR: {APP_NAME} cannot bind {effective_host}:{effective_port} — "
-                    f"address unavailable or not permitted.",
-                    file=sys.stderr,
-                )
-            else:
-                # An EADDRINUSE we lost the race to, or any other bind failure → in use.
-                print(
-                    f"ERROR: {APP_NAME} refused to start — port {effective_port} is already "
-                    f"in use on {effective_host} (another instance may be running).",
-                    file=sys.stderr,
-                )
-            sys.exit(1)
-        finally:
-            _probe.close()
 
     # === FIX-03 / signal coordination (REVIEWS HIGH-4; r9 cross-platform rewrite) ===
     # ONE cross-platform handler (_make_graceful_signal_handler), installed via signal.signal so it
@@ -896,6 +1167,11 @@ def cli():
 
         console = None
         render_thread = None
+        # Held in a one-element list so the serve loop below can update it: the URL shown by
+        # the console is rebuilt on every render, and after a restart with TLS newly enabled
+        # a scheme captured once would keep advertising http:// for a server that is no
+        # longer reachable that way.
+        scheme_box = ["https" if (early_cfg is not None and early_cfg.server.https) else "http"]
         if interactive:
             # D-24/D-07: only on a real TTY. The big ANSI Shadow banner is now PINNED PERMANENTLY
             # in the rich console header (04.1-04 gap-closure r3 — user override of D-02 "poi
@@ -906,7 +1182,6 @@ def cli():
             app.state.host_splash_shown = True
 
             cur_level = (early_cfg.logging.level.upper() if early_cfg is not None else "INFO")
-            scheme = "https" if (early_cfg is not None and early_cfg.server.https) else "http"
 
             # D-04/D-11 (04.1-04 gap-closure r4): ACTUALLY apply the initial verbosity on the
             # interactive path BEFORE the render thread starts. lifespan() does _setup_logging +
@@ -924,7 +1199,7 @@ def cli():
                 ws_manager=ws_manager,
                 # D-15a: map a wildcard bind (0.0.0.0/::/"") to a browsable 127.0.0.1 so 'u'
                 # surfaces a URL the operator can actually open (not http://0.0.0.0:port).
-                get_url=lambda: browsable_url(scheme, effective_host, effective_port),
+                get_url=lambda: browsable_url(scheme_box[0], effective_host, effective_port),
                 get_servers=lambda: list(servers_cache),  # D-15b — cached snapshot (async-safe)
                 on_exit=lambda: loop.call_soon_threadsafe(_request_exit),  # D-12
                 on_restart=lambda: loop.call_soon_threadsafe(_request_restart),  # D-15c
@@ -980,9 +1255,16 @@ def cli():
                 app.state.effective_port = iter_port
 
                 cfg_kwargs: dict = {}
-                if iter_cfg.server.https and iter_cfg.server.cert_file and iter_cfg.server.key_file:
-                    cfg_kwargs["ssl_certfile"] = iter_cfg.server.cert_file
-                    cfg_kwargs["ssl_keyfile"] = iter_cfg.server.key_file
+                # resolve_tls_files() supersedes the manual cert_file/key_file branch:
+                # it already prefers a configured pair and generates one only if there is
+                # none. forwarded_allow_ips is independent of TLS and stays.
+                tls = resolve_tls_files(iter_cfg)
+                if tls is not None:
+                    cfg_kwargs["ssl_certfile"], cfg_kwargs["ssl_keyfile"] = tls
+                scheme_box[0] = "https" if tls is not None else "http"
+                os.environ["IPMIDECK_TLS_ACTIVE"] = "1" if tls is not None else "0"
+                if iter_cfg.server.forwarded_allow_ips:
+                    cfg_kwargs["forwarded_allow_ips"] = iter_cfg.server.forwarded_allow_ips
 
                 uconfig = uvicorn.Config(
                     "backend.main:app",

@@ -9,6 +9,7 @@ import json
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 
+from backend.core.csv_export import csv_safe, safe_filename_part
 from backend.core.i18n import get_lang, t
 from backend.modules import get_ctx
 
@@ -144,20 +145,27 @@ async def export_sel(server_id: str, format: str = Query("csv", regex="^(csv|jso
         (server_id,),
     )
 
+    # The server id is echoed into the Content-Disposition header; reduce it to characters
+    # that cannot break out of the filename and steer the header.
+    safe_id = safe_filename_part(server_id[:8])
+
     if format == "json":
         return StreamingResponse(
             io.BytesIO(json.dumps(rows, indent=2).encode()),
             media_type="application/json",
-            headers={"Content-Disposition": f"attachment; filename=sel_{server_id[:8]}.json"},
+            headers={"Content-Disposition": f"attachment; filename=sel_{safe_id}.json"},
         )
 
     # CSV
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=["event_id", "timestamp", "sensor_name", "event_type", "description", "severity"])
     writer.writeheader()
-    writer.writerows(rows)
+    # Event descriptions and sensor names are reproduced verbatim from the BMC's own event
+    # log, so their content is not under this application's control and must not be able to
+    # execute when the export is opened in a spreadsheet.
+    writer.writerows({k: csv_safe(v) for k, v in row.items()} for row in rows)
     return StreamingResponse(
         io.BytesIO(output.getvalue().encode()),
         media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename=sel_{server_id[:8]}.csv"},
+        headers={"Content-Disposition": f"attachment; filename=sel_{safe_id}.csv"},
     )

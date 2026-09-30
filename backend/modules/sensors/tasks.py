@@ -18,6 +18,12 @@ _running = True
 _next_retry: dict[str, float] = {}
 _COOLDOWN_SECONDS = 60.0  # non-blocking cooldown for a failing server
 
+
+def forget_server(server_id: str) -> None:
+    """Drop a deleted server's poll state."""
+    _next_retry.pop(server_id, None)
+
+
 # Wake signal — callers (e.g. fanpilot routes that just changed fan state) can call
 # wake_loop() to make the sensor loop run its next poll immediately instead of waiting
 # up to poll_interval seconds. Initialized lazily inside the loop's event loop.

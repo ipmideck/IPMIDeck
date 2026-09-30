@@ -26,6 +26,24 @@ into a new dated `## [<version>] - YYYY-MM-DD` section.
 > `ipmideck rotate-session-secret` command: it replaces the session signing secret, so cookies
 > minted offline from a copied or stolen database stop working. Stop the app, run it, restart.
 
+> ### Behind a reverse proxy: check `trusted_origins` before upgrading
+>
+> State-changing requests are now refused when the browser reports an origin other than the one
+> the dashboard is served from. If your proxy does not pass the browser's `Host` through — nginx
+> does not, unless you added `proxy_set_header Host $host;` — every save will fail with
+> `Cross-origin request rejected` and the dashboard will look loaded but inert.
+>
+> Either fix the proxy header, or name the external address:
+>
+> ```yaml
+> server:
+>   trusted_origins:
+>     - https://ipmi.example.com
+> ```
+>
+> Direct deployments and Docker port mappings need nothing. See **Behind a reverse proxy** in
+> the README for the companion `forwarded_allow_ips` setting.
+
 ### Security
 
 - **Fixed a pre-authentication path traversal in the SPA catch-all (SEC-01).** An unauthenticated
@@ -50,6 +68,139 @@ into a new dated `## [<version>] - YYYY-MM-DD` section.
 - **`reset-password` no longer reports success for a username that does not exist (F17).**
 - **Backup archives are credential-grade.** An archive bundles the encryption key, the database
   and the configuration together, so it must be stored as carefully as the credentials themselves.
+- **The container no longer runs as root.** It runs as a dedicated unprivileged user
+  (uid/gid 1000). Existing data volumes are adopted automatically on first start — no manual
+  `chown`. If the ownership cannot be changed (a read-only mount, NFS without `no_root_squash`,
+  CIFS with a fixed uid/gid) the container still starts and logs a warning.
+- **The database and `config.yaml` are now created readable only by their owner.** They were
+  written with the default umask, so on a typical host every local account could read the stored
+  BMC credentials. Existing installations are repaired automatically on the next start — the
+  database and its write-ahead sidecars every time it is opened, `config.yaml` once during
+  startup — and restoring a backup no longer widens the permissions of the restored files.
+- **A failed login now answers HTTP 401** instead of 200, and a correct password is never
+  refused because of the brute-force counter. That counter is keyed on a username supplied by
+  the caller, so burning the attempt budget on a guessed name previously locked the real
+  operator out of their own instance for the whole lockout window.
+- **The BMC host address is validated against an allow-list.** Values that are not addresses at
+  all were accepted and passed to `ipmitool`, where `-C0` selects cipher suite 0 and disables
+  authentication on the IPMI session. The credential-test endpoint had no validation whatsoever.
+- **Changing a server's address now requires re-entering its BMC credentials.** Those
+  credentials are never returned by the API, so changing only the address re-pointed unreadable
+  root-equivalent credentials at a machine of the caller's choosing.
+- **CSV exports can no longer carry executable cells.** Event descriptions come verbatim from
+  the BMC, and a cell starting with `=`, `+`, `-` or `@` is evaluated as a formula on open.
+  Export filenames can no longer break out of the `Content-Disposition` header either.
+- **Over-long passwords and malformed durations produce clear errors instead of HTTP 500.**
+  A password beyond bcrypt's 72-byte limit crashed login and first-run setup, and the
+  credential-change endpoint leaked the raw library exception text.
+- **Interactive API documentation (`/docs`, `/redoc`) is disabled outside demo and debug mode**,
+  and `/api/health` no longer discloses the build version or connection counts to anonymous
+  callers.
+- **Security headers are sent on every response** — `frame-ancestors 'none'` and
+  `X-Frame-Options: DENY` against clickjacking, `nosniff`, `Referrer-Policy: no-referrer`, and
+  HSTS on TLS requests only — and the session cookie is `SameSite=Strict`.
+- **State-changing requests from a foreign origin are rejected**, including from another port on
+  the same host, which cookies alone do not separate. Requests carrying neither `Origin` nor
+  `Referer` — the CLI, the container health check, scripted integrations — are unaffected.
+  Deployments behind a proxy that rewrites `Host` must declare their external address in the new
+  `server.trusted_origins` setting (`IPMIDECK_SERVER_TRUSTED_ORIGINS`); see the upgrade note above.
+- **The session cookie's `Secure` flag is now correct behind a TLS-terminating proxy**, via the
+  new `server.forwarded_allow_ips` setting (`IPMIDECK_SERVER_FORWARDED_ALLOW_IPS`).
+
+- **Stored BMC credentials now use authenticated encryption (AES-256-GCM).** The previous
+  format concealed the value but did not detect modification, so anyone who could write to the
+  database could alter a stored credential undetectably. Stored values now carry a version
+  marker, and **the first start after upgrading converts existing credentials automatically** —
+  no action required, nothing is re-entered.
+
+  Before it changes anything the conversion copies `ipmideck.db` and `encryption.key` next to
+  themselves as `*.pre-authenc-<timestamp>.bak`. **Those copies are credential-grade** — they
+  contain your BMC passwords and the key that decrypts them. Keep them until you are satisfied
+  the upgrade went well, then delete them. They are never included in a backup archive.
+
+  Downgrading afterwards is possible: stop the app, move the two `.bak` files back over the
+  live names, install the older version. If you are not downgrading you do not need them —
+  the new version reads both formats, so an unconverted database keeps working.
+- **A credential that cannot be decrypted no longer answers differently from a BMC that is
+  simply unreachable.** The connection-test and fan-mode endpoints used to fail with a server
+  error in the first case and an ordinary failure in the second, which distinguished the two
+  for anyone probing.
+- **Credential checks are capped at 5 per minute per source address**
+  (`IPMIDECK_ATTEMPT_LIMIT`, `IPMIDECK_ATTEMPT_WINDOW`). A slot is consumed whether or not the
+  password turns out to be right, so holding a valid one is not a way around the limit, and the
+  cap deliberately leaves the per-account failure counter alone — otherwise traffic from a
+  single address would lock the operator out of their own account. The cap counts per source
+  address as the app sees it: behind a reverse proxy, list the proxy in `forwarded_allow_ips`,
+  otherwise every client shares the proxy's address and one party's failed attempts hold
+  everyone off, a correct password included, until the window ends.
+- **The telemetry WebSocket now refuses a handshake from another site**, ends the socket when
+  the session behind it expires or is revoked (re-checked every 60 seconds) rather than
+  streaming to it until the browser goes away, and applies the same `server.trusted_origins`
+  setting as the HTTP guard for proxied deployments.
+- **A misbehaving BMC can no longer make the application allocate without bound** — responses
+  are size-limited before they are parsed.
+
+### Added
+
+- **HTTPS with no manual certificate step.** Set `https: true` (or `IPMIDECK_SERVER_HTTPS=true`,
+  or use the Network card in Settings) and restart: if no certificate is configured, one is
+  generated at `<data_dir>/certs/` covering `localhost`, this machine's hostname and its
+  addresses. Browsers still warn that the issuer is unknown — the traffic is encrypted, only the
+  identity is unverified; the README lists how to import it. If a certificate cannot be set up
+  the app starts over plain HTTP rather than refusing to start, and logs that it did.
+
+### Fixed
+
+- **The container can serve HTTPS.** The image started the web server directly, and a
+  certificate can only be supplied as that server is built, so `https` was silently ignored in
+  Docker while the startup log still announced `https://`. The image now starts through the
+  `ipmideck` command, which resolves the certificate, and its health check follows whichever
+  scheme is live. The startup line reports the scheme actually served, and says so explicitly
+  when `https` is configured but no certificate reached the server. Overriding the container's
+  `command:` to invoke `uvicorn` directly still serves cleartext.
+- **A malformed fan curve no longer stops FanPilot from controlling other servers.** Curve
+  points are stored as free-form JSON, and one unreadable curve aborted every control pass at
+  the same server, leaving every server after it with no curve evaluation, no fail-safe and no
+  auto-recovery — fans held at their last commanded speed while temperatures rose. An unusable
+  curve now resolves to 100% and failures are contained to a single server. That includes
+  `NaN` and `Infinity`, which the API accepted in a curve point and which then broke both the
+  control pass and the profile listing; they are now refused with a clear error, as is a
+  non-finite hysteresis or safety threshold.
+- **Fans held at 100% by an unusable curve now come with the reason.** FanPilot reports it
+  once per server and profile, as a warning notification and a command-log entry: the curve
+  has no points, a point's temperature or speed is missing or not a number, a value is `NaN`
+  or `Infinity`, or the stored curve is not valid JSON. A curve that is not valid JSON used to
+  be skipped with the fans left at their last speed; it now gets the same 100% as any other
+  unusable curve. The notice re-arms once the curve is fixed.
+- **The container restarts cleanly under host networking.** The single-instance check refused
+  to start while the previous run's connections were still closing (up to about a minute
+  after a restart). It now reports only a port something is actually listening on. It also
+  starts on an IPv6 address instead of calling a free port busy, and on Windows it now sees
+  an instance already listening on `0.0.0.0`.
+- **The container health check probes the port the app listens on.** It read
+  `IPMIDECK_SERVER_PORT`, but the image always listens on 3000, so setting that variable made a
+  working container report unhealthy. It now reads the port the app was started with, so a
+  command overridden with another `--port` (the way to move the port under host networking)
+  is followed too.
+- **A malformed `Origin` or `Referer` header is refused** instead of answering with a server
+  error, and an empty or non-text entry in `trusted_origins` is ignored instead of failing the
+  first proxied request.
+- **An undecryptable stored credential is reported with a clear message** by the connection
+  test and power commands, instead of the raw cryptography error.
+
+### Changed
+
+- **Removed the `auth.enabled`, `auth.max_login_attempts` and `auth.lockout_duration` config
+  keys** (and `IPMIDECK_AUTH_ENABLED`). None of them were read by anything. Whether
+  authentication is enabled lives in the database and is changed from the Security settings, so
+  that write access to `config.yaml` cannot be used to turn the login off. `auth.session_expiry`
+  is unaffected and continues to work; existing configuration files keep loading.
+- **A server port other than 623 is now refused** with an explanation instead of being stored
+  and silently ignored — nothing ever passed that value to `ipmitool`.
+- `config.example.yaml` polling intervals now match the real defaults (30s). The example's
+  `command_timeout: 10` was actively harmful: the default is 30s because a real BMC's sensor
+  listing can take around 16 seconds.
+
 
 
 ## [2.0.1] - 2026-07-25

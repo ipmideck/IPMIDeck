@@ -3,16 +3,59 @@
 from __future__ import annotations
 
 import logging
+import math
 
 logger = logging.getLogger("ipmideck.modules.fanpilot")
 
 
-def interpolate_curve(curve_points: list[dict], temperature: float) -> int:
-    """Linear interpolation on a fan curve. Returns fan speed percentage (0-100)."""
-    if not curve_points:
-        return 100  # safety: full speed if no curve
+# Reasons curve_problem() reports. Each one makes interpolate_curve() answer 100%.
+CURVE_EMPTY = "empty"
+CURVE_UNREADABLE = "unreadable"
+CURVE_NOT_FINITE = "not_finite"
 
-    points = sorted(curve_points, key=lambda p: p["temp"])
+
+def _parse_curve(curve_points) -> tuple[list[dict] | None, str | None]:
+    """Return (points sorted by temp, None) for a usable curve, or (None, reason)."""
+    if not curve_points:
+        return None, CURVE_EMPTY
+    try:
+        points = sorted(
+            ({"temp": float(p["temp"]), "speed": float(p["speed"])} for p in curve_points),
+            key=lambda p: p["temp"],
+        )
+    except (KeyError, TypeError, ValueError, IndexError):
+        return None, CURVE_UNREADABLE
+    if not all(math.isfinite(p["temp"]) and math.isfinite(p["speed"]) for p in points):
+        # NaN / Infinity would slip past every comparison in interpolate_curve.
+        return None, CURVE_NOT_FINITE
+    return points, None
+
+
+def curve_problem(curve_points) -> str | None:
+    """Why this curve cannot be used, or None when it can.
+
+    interpolate_curve() answers 100% for exactly the curves this reports, so the caller
+    can tell the operator the reason instead of leaving the fans loud with no explanation.
+    """
+    return _parse_curve(curve_points)[1]
+
+
+def interpolate_curve(curve_points: list[dict], temperature: float) -> int:
+    """Linear interpolation on a fan curve. Returns fan speed percentage (0-100).
+
+    Total by construction: any curve this function cannot read resolves to 100%. Curve
+    points are stored as free-form JSON with no element schema, so a point missing a key,
+    carrying a non-numeric value, or not being a mapping at all reaches this function
+    intact. Raising here would abort the control loop mid-pass and leave the fans of every
+    server evaluated later in the same pass pinned at their last commanded speed while
+    temperatures climb. Full speed is loud but safe, and it matches what an empty curve
+    already does. curve_problem() names the reason.
+    """
+    points, problem = _parse_curve(curve_points)
+    if problem is not None:
+        return 100  # safety: full speed for a curve that cannot be used
+    if not math.isfinite(temperature):
+        return 100  # safety: no usable reading to place on the curve
 
     # Below minimum point
     if temperature <= points[0]["temp"]:

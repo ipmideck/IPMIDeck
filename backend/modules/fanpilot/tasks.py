@@ -8,7 +8,13 @@ import logging
 from datetime import datetime
 
 from backend.core.ipmi_service import is_fan_capable
-from backend.modules.fanpilot.engine import FanPilotController
+from backend.modules.fanpilot.engine import (
+    CURVE_EMPTY,
+    CURVE_NOT_FINITE,
+    CURVE_UNREADABLE,
+    FanPilotController,
+    curve_problem,
+)
 
 logger = logging.getLogger("ipmideck.modules.fanpilot")
 
@@ -38,6 +44,20 @@ _last_online_state: dict[str, bool] = {}
 # pops the entry so a later monitoring-only switch re-arms the alert. Cleared on
 # fanpilot_shutdown() alongside the other per-server maps.
 _monitoring_only_alerted: dict[str, str] = {}
+
+# === Unusable fan curve: say why the fans are at 100% ===
+# interpolate_curve() answers 100% for a curve it cannot use. That is the safe answer, but
+# on its own it leaves the operator with loud fans and no reason. The loop reports the
+# reason ONCE per (server, profile, reason) — a toast plus a command-log entry that stays
+# visible after the fact — and re-arms when the curve becomes usable again.
+CURVE_NOT_JSON = "not_json"
+_CURVE_PROBLEM_TEXT = {
+    CURVE_EMPTY: "has no points",
+    CURVE_UNREADABLE: "has a point whose temp or speed is missing or not a number",
+    CURVE_NOT_FINITE: "has a point whose temp or speed is NaN or Infinity",
+    CURVE_NOT_JSON: "is not valid JSON",
+}
+_curve_problem_alerted: dict[str, tuple[str, str]] = {}
 
 # === P0-2 (FANPILOT-FAILSAFE-VALUE): garbage-value plausibility guard ===
 # A *fresh* sensor row holding an implausible value falls through the Phase-4
@@ -371,6 +391,22 @@ _pending_readback: dict[str, dict] = {}
 # a down-command whose RPM drifts up is not mislabeled 'confirmed'. Observability only — NO
 # thermal-safety change (read-back still never trips recovery). Cleared in fanpilot_shutdown().
 _last_commanded_speed: dict[str, int] = {}
+
+
+def forget_server(server_id: str) -> None:
+    """Drop every per-server tracker a deleted server left behind.
+
+    All of these are keyed by server id and were only ever cleared at shutdown, so a
+    deleted server kept a controller, a curve state and several counters alive for the
+    lifetime of the process.
+    """
+    for tracker in (
+        _controllers, _last_state, _last_online_state, _monitoring_only_alerted,
+        _garbage_counts, _source_last_seen, _pending_readback, _last_commanded_speed,
+        _curve_problem_alerted,
+    ):
+        tracker.pop(server_id, None)
+
 # Read-back dead-band: ignore RPM changes smaller than this fraction of baseline OR this
 # many absolute RPM (sensor jitter is not movement). 05-RESEARCH §"P0-3 RPM Read-Back".
 _READBACK_DEADBAND_FRAC = 0.05
@@ -395,17 +431,49 @@ def _mean_fan_rpm(readings: list[dict]) -> float | None:
     return sum(rpms) / len(rpms)
 
 
-async def _record_command_log(ctx, server_id: str, detail: str, result: str) -> None:
+async def _record_command_log(
+    ctx, server_id: str, detail: str, result: str, error_message: str | None = None
+) -> None:
     """Best-effort command_log INSERT (the loop's own outcome marker)."""
     try:
         await ctx.db.execute(
-            "INSERT INTO command_log (server_id, command_type, command_detail, result) "
-            "VALUES (?, ?, ?, ?)",
-            (server_id, "fan_mode", detail, result),
+            "INSERT INTO command_log "
+            "(server_id, command_type, command_detail, result, error_message) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (server_id, "fan_mode", detail, result, error_message),
         )
         await ctx.db.commit()
     except Exception:
         logger.exception("FanPilot: command_log write failed for server %s", server_id)
+
+
+async def _report_curve_problem(ctx, server, problem: str | None) -> None:
+    """Tell the operator, once, why this server's fans are held at 100%.
+
+    ``problem`` is a curve_problem() reason (or CURVE_NOT_JSON), None when the curve is
+    usable. Best-effort: a failure to notify must never stop the fan write that follows.
+    """
+    server_id = server["id"]
+    if problem is None:
+        _curve_problem_alerted.pop(server_id, None)
+        return
+    profile = server["profile_name"] or "Custom"
+    if _curve_problem_alerted.get(server_id) == (profile, problem):
+        return
+    _curve_problem_alerted[server_id] = (profile, problem)
+    message = (
+        f"Fan curve of profile '{profile}' {_CURVE_PROBLEM_TEXT[problem]}; "
+        f"fans held at 100% until the curve is fixed"
+    )
+    logger.warning("FanPilot server_id=%s: %s", server_id, message)
+    await _record_command_log(
+        ctx, server_id, f"fan curve unusable ({problem})", "held_at_100", error_message=message
+    )
+    if ctx.ws is not None:
+        try:
+            await ctx.ws.broadcast_alert(server_id, "warning", "FanPilot", message, 100)
+        except Exception:
+            logger.exception("FanPilot: curve alert broadcast failed for %s", server_id)
 
 
 async def _readback_confirm(ctx, server) -> None:
@@ -823,11 +891,15 @@ async def fanpilot_loop():
                 if not curve_json:
                     continue
 
+                # A stored curve that is not even JSON is the same case as an unreadable
+                # one: it resolves to 100% and is reported, rather than skipping the tick
+                # and leaving the fans at whatever speed they were last given.
                 try:
                     curve_points = json.loads(curve_json)
-                except (json.JSONDecodeError, TypeError):
-                    logger.error("Invalid curve JSON for server %s", server_id)
-                    continue
+                    curve_issue = curve_problem(curve_points)
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    curve_points = []
+                    curve_issue = CURVE_NOT_JSON
 
                 # Get or create controller
                 if server_id not in _controllers:
@@ -936,8 +1008,6 @@ async def fanpilot_loop():
                     )
                     continue
 
-                target_speed = ctrl.compute_fan_speed(curve_points, current_temp)
-
                 # Apply fan speed via IPMI. P0-3: _apply_fan_write consumes the
                 # FanWriteResult (transient retries / hard-reject immediate fall-back /
                 # recovery+alert) and returns whether the write was ACCEPTED. A rejected
@@ -945,7 +1015,17 @@ async def fanpilot_loop():
                 # broadcast a false 'fanpilot active'. The classified rejection is handled
                 # INSIDE _apply_fan_write, not swallowed by this try/except (which now only
                 # guards genuine unexpected errors — e.g. a malformed credential blob).
+                #
+                # Computing the target speed is inside this guard too: the loop walks the
+                # servers in a fixed order, so an exception raised while evaluating one
+                # server's curve used to abort the whole pass and permanently starve every
+                # server after it — no curve evaluation, no fail-safe, no recovery, fans
+                # left at their last commanded speed. Failing one server at a time keeps
+                # the rest of the fleet under control.
+                await _report_curve_problem(ctx, server, curve_issue)
                 try:
+                    target_speed = ctrl.compute_fan_speed(curve_points, current_temp)
+
                     accepted = await _apply_fan_write(ctx, server, target_speed)
                     if not accepted:
                         continue  # fail-safe fired; do NOT broadcast active
@@ -1026,6 +1106,7 @@ async def fanpilot_shutdown():
     _last_state.clear()
     _last_online_state.clear()
     _monitoring_only_alerted.clear()
+    _curve_problem_alerted.clear()
     _garbage_counts.clear()
     _pending_readback.clear()
     _source_last_seen.clear()

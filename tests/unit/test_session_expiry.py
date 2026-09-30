@@ -55,6 +55,23 @@ def test_parse_duration_respects_custom_default():
     assert parse_duration_seconds("nonsense", default=1234) == 1234
 
 
+def test_parse_duration_clamps_absurd_values():
+    """A typo cannot grant a session a lifetime measured in years."""
+    from backend.core.config import MAX_DURATION_SECONDS
+
+    assert parse_duration_seconds("9999d") == MAX_DURATION_SECONDS
+    assert parse_duration_seconds(10**12) == MAX_DURATION_SECONDS
+    # A legitimate value below the cap is untouched.
+    assert parse_duration_seconds("7d") == 604800
+
+
+def test_parse_duration_logs_the_fallback(caplog):
+    """The operator can discover that the configured value was never in effect."""
+    with caplog.at_level("WARNING", logger="ipmideck.config"):
+        assert parse_duration_seconds("not-a-duration", default=86400) == 86400
+    assert any("not-a-duration" in r.getMessage() for r in caplog.records)
+
+
 # === 2. token exp reflects the instance session_expiry_seconds ===
 
 
@@ -107,3 +124,18 @@ def test_configured_expiry_drives_cookie_max_age(tmp_path, monkeypatch):
         token = c.cookies["session"]
         payload = _decode_payload(token)
         assert payload["exp"] - payload["iat"] == 3600
+
+
+def test_a_clamped_duration_is_logged(caplog):
+    """The cap substitutes a different lifetime than the one written, so it must be visible."""
+    import logging
+
+    from backend.core.config import MAX_DURATION_SECONDS
+
+    with caplog.at_level(logging.WARNING):
+        assert parse_duration_seconds("60d") == MAX_DURATION_SECONDS
+    assert any("maximum" in r.getMessage() for r in caplog.records)
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        assert parse_duration_seconds("7d") == 7 * 86400
+    assert not caplog.records

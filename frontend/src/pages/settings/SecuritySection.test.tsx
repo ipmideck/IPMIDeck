@@ -71,6 +71,21 @@ function currentPasswordInput(): HTMLElement | null {
   return screen.queryByPlaceholderText(/settings\.currentPasswordPlaceholder|current password/i);
 }
 
+/** The username input, identified by its placeholder i18n key. */
+function usernameInput(): HTMLElement {
+  return screen.getByPlaceholderText(/settings\.secUsernamePlaceholder|username/i);
+}
+
+/** The NEW-password input, identified by its placeholder i18n key. */
+function newPasswordInput(): HTMLElement {
+  return screen.getByPlaceholderText(/settings\.secPasswordPlaceholder|new password/i);
+}
+
+/** The confirm-new-password input, identified by its placeholder i18n key. */
+function confirmPasswordInput(): HTMLElement {
+  return screen.getByPlaceholderText(/settings\.secConfirmNewPasswordPlaceholder|confirm new password/i);
+}
+
 function enableButton(): HTMLElement {
   return screen.getByRole("button", { name: /settings\.enableAuth|enable/i });
 }
@@ -93,12 +108,13 @@ describe("SecuritySection — the approved Current password field (SEC-05 / D2)"
     const user = userEvent.setup();
     renderSection(true);
 
-    const inputs = screen.getAllByRole("textbox");
-    await user.type(inputs[0], "newadmin");
-    const passwords = document.querySelectorAll<HTMLInputElement>('input[type="password"]');
-    await user.type(passwords[0], "new-password-value");
-    await user.type(passwords[1], "new-password-value");
-    // passwords[2] is the Current password field — deliberately left empty.
+    // Fields are addressed by placeholder, never by position: the form's field
+    // ORDER is a UX decision that has already changed once, and a positional
+    // lookup silently types into the wrong box when it does.
+    await user.type(usernameInput(), "newadmin");
+    await user.type(newPasswordInput(), "new-password-value");
+    await user.type(confirmPasswordInput(), "new-password-value");
+    // The Current password field is deliberately left empty.
 
     await user.click(enableButton());
 
@@ -110,12 +126,10 @@ describe("SecuritySection — the approved Current password field (SEC-05 / D2)"
     const user = userEvent.setup();
     renderSection(true);
 
-    const inputs = screen.getAllByRole("textbox");
-    await user.type(inputs[0], "newadmin");
-    const passwords = document.querySelectorAll<HTMLInputElement>('input[type="password"]');
-    await user.type(passwords[0], "new-password-value");
-    await user.type(passwords[1], "new-password-value");
-    await user.type(passwords[2], "the-current-password");
+    await user.type(usernameInput(), "newadmin");
+    await user.type(newPasswordInput(), "new-password-value");
+    await user.type(confirmPasswordInput(), "new-password-value");
+    await user.type(currentPasswordInput()!, "the-current-password");
 
     await user.click(enableButton());
 
@@ -134,12 +148,11 @@ describe("SecuritySection — the approved Current password field (SEC-05 / D2)"
     // current password, and demanding one would make enabling auth impossible.
     expect(currentPasswordInput()).toBeNull();
 
-    const inputs = screen.getAllByRole("textbox");
-    await user.type(inputs[0], "firstadmin");
-    const passwords = document.querySelectorAll<HTMLInputElement>('input[type="password"]');
-    expect(passwords.length).toBe(2);
-    await user.type(passwords[0], "first-password-value");
-    await user.type(passwords[1], "first-password-value");
+    // Only the two new-password fields exist here — no current password to ask for.
+    expect(document.querySelectorAll('input[type="password"]').length).toBe(2);
+    await user.type(usernameInput(), "firstadmin");
+    await user.type(newPasswordInput(), "first-password-value");
+    await user.type(confirmPasswordInput(), "first-password-value");
 
     await user.click(enableButton());
 
