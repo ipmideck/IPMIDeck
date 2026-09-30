@@ -162,7 +162,7 @@ def test_login_failure_localized(client_auth):
 
 
 def test_login_correct_password_accepted_after_failed_attempts(client_auth):
-    """A valid credential still works once the failure counter is past the threshold.
+    """A valid credential still works once the account's failure counter has locked it.
 
     The failure counter is keyed on a caller-supplied username, so anyone able to
     reach the login form could otherwise burn attempts on a guessed name and have
@@ -173,26 +173,21 @@ def test_login_correct_password_accepted_after_failed_attempts(client_auth):
     )
     assert setup_resp.status_code == 200
 
-    for _ in range(5):
+    # Six failures lock the account. TestClient reports one fixed client address, so the
+    # per-source window is cleared before each attempt: this plays the attacker spreading
+    # the attempts over several addresses, and keeps the source cap from answering first.
+    for _ in range(6):
+        bm.auth._attempt_window.clear()
         bad = client_auth.post(
             "/api/auth/login", json={"username": "admin", "password": "wrong"}
         )
         assert bad.status_code == 401
         assert bad.json()["success"] is False
 
-    # The sixth request from this address is refused by the per-source rate cap before the
-    # password is even looked at, so it is the cap — not the account — answering here.
-    capped = client_auth.post(
-        "/api/auth/login", json={"username": "admin", "password": "wrong"}
-    )
-    assert capped.status_code == 401
-    assert capped.json()["error"] == t("too_many_attempts", "en")
+    assert asyncio.run(bm.auth.check_lockout("admin")) is True
 
-    # The operator arrives from their own address, which the attacker's attempts never
-    # touched: the rate cap is keyed on the source, so their budget is untouched. Cleared
-    # directly because TestClient reports one fixed client address for every request.
+    # The operator arrives from their own address, whose budget the attacker never touched.
     bm.auth._attempt_window.clear()
-
     good = client_auth.post(
         "/api/auth/login", json={"username": "admin", "password": "correcthorse"}
     )
@@ -200,25 +195,80 @@ def test_login_correct_password_accepted_after_failed_attempts(client_auth):
     assert good.json()["success"] is True
 
 
+def test_the_failure_that_locks_the_account_gets_the_generic_lockout_answer(client_auth):
+    """The account lockout, not the source cap, answers here: the window is cleared before
+    every attempt. Crossing the threshold must read the same as any later locked attempt."""
+    client_auth.post("/api/auth/setup", json={"username": "admin", "password": "correcthorse"})
+
+    answers = []
+    for _ in range(7):
+        bm.auth._attempt_window.clear()
+        resp = client_auth.post(
+            "/api/auth/login", json={"username": "admin", "password": "wrong"}
+        )
+        assert resp.status_code == 401
+        answers.append(resp.json()["error"])
+
+    assert answers[:5] == [t("invalid_credentials", "en")] * 5
+    assert answers[5:] == [t("too_many_attempts", "en")] * 2
+
+
 def test_the_source_rate_cap_refuses_the_sixth_attempt_in_a_window(client_auth):
     """Five credential checks a minute per address, and the sixth is refused unread.
 
-    The cap answers exactly as the account lockout does, status and message alike: telling
-    the two apart would say whether the username is a real account.
+    Every attempt names a different account, so no per-account counter ever gets near its
+    threshold: only the source cap can produce the refusal below. It answers exactly as the
+    account lockout does, status and message alike: telling the two apart would say whether
+    the username is a real account.
     """
     client_auth.post("/api/auth/setup", json={"username": "admin", "password": "correcthorse"})
     bm.auth._attempt_window.clear()
 
-    for _ in range(5):
-        assert client_auth.post(
-            "/api/auth/login", json={"username": "admin", "password": "wrong"}
-        ).status_code == 401
+    for i in range(5):
+        resp = client_auth.post(
+            "/api/auth/login", json={"username": f"guess{i}", "password": "wrong"}
+        )
+        assert resp.status_code == 401
+        assert resp.json()["error"] == t("invalid_credentials", "en")
 
     sixth = client_auth.post(
-        "/api/auth/login", json={"username": "admin", "password": "wrong"}
+        "/api/auth/login", json={"username": "guess5", "password": "wrong"}
     )
     assert sixth.status_code == 401
     assert sixth.json()["error"] == t("too_many_attempts", "en")
+
+
+def test_the_source_rate_cap_also_bounds_the_disable_path(client_auth):
+    """/toggle verifies the current password, so it is capped like the login."""
+    client_auth.post("/api/auth/setup", json={"username": "admin", "password": "correcthorse"})
+    bm.auth._attempt_window.clear()
+
+    for _ in range(5):
+        resp = client_auth.post(
+            "/api/auth/toggle", json={"enabled": False, "current_password": "wrong"}
+        )
+        assert resp.json() == {"success": False, "error": "Incorrect password"}
+
+    sixth = client_auth.post(
+        "/api/auth/toggle", json={"enabled": False, "current_password": "correcthorse"}
+    )
+    assert sixth.json() == {"success": False, "error": t("too_many_attempts", "en")}
+
+
+def test_the_source_rate_cap_also_bounds_the_account_rewrite(client_auth):
+    """/configure verifies the current password, so it is capped like the login."""
+    client_auth.post("/api/auth/setup", json={"username": "admin", "password": "correcthorse"})
+    bm.auth._attempt_window.clear()
+    body = {"username": "admin", "password": "newhorse1", "current_password": "wrong"}
+
+    for _ in range(5):
+        resp = client_auth.post("/api/auth/configure", json=body)
+        assert resp.json() == {"success": False, "error": "Incorrect password"}
+
+    sixth = client_auth.post(
+        "/api/auth/configure", json={**body, "current_password": "correcthorse"}
+    )
+    assert sixth.json() == {"success": False, "error": t("too_many_attempts", "en")}
 
 
 def test_a_correct_password_still_consumes_a_slot(client_auth):

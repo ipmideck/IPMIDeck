@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 from starlette.websockets import WebSocketDisconnect
 
@@ -102,3 +104,43 @@ def test_a_socket_is_accepted_without_auth(client):
 def test_revalidation_happens_often_enough_to_matter():
     """The interval IS the eviction latency after a password change — keep it honest."""
     assert 0 < bm._WS_REVALIDATE_SECONDS <= 60
+
+
+def test_a_malformed_origin_refuses_the_handshake_instead_of_raising(client):
+    with pytest.raises(WebSocketDisconnect) as excinfo:
+        with client.websocket_connect("/ws", headers={"origin": "http://[::1"}):
+            pass
+    assert excinfo.value.code == 1008
+
+
+def test_an_open_socket_is_closed_once_its_session_is_revoked(client_auth, monkeypatch):
+    """The in-loop re-check, not just the handshake: rewriting the account invalidates every
+    token issued before it, and the socket opened with one of them must then be closed.
+
+    Observed on the server side (the connection leaves the manager when the loop ends)
+    rather than by reading from the client, whose receive has no timeout: a regression
+    must fail this test, not hang it.
+    """
+    monkeypatch.setattr(bm, "_WS_REVALIDATE_SECONDS", 0.05)
+    client_auth.post("/api/auth/setup", json={"username": "admin", "password": "correcthorse"})
+
+    def _open_sockets() -> int:
+        return len(bm.ws_manager._connections)
+
+    def _wait_for(predicate) -> bool:
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if predicate():
+                return True
+            time.sleep(0.02)
+        return False
+
+    with client_auth.websocket_connect("/ws"):
+        assert _wait_for(lambda: _open_sockets() == 1)
+        rewrite = client_auth.post(
+            "/api/auth/configure",
+            json={"username": "admin", "password": "newhorse1", "current_password": "correcthorse"},
+        )
+        assert rewrite.json()["success"] is True
+        closed = _wait_for(lambda: _open_sockets() == 0)
+    assert closed, "the socket outlived the session that opened it"

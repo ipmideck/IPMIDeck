@@ -63,15 +63,23 @@ def test_startup_leaves_the_config_owner_only(tmp_path, monkeypatch):
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
-def test_startup_does_not_fail_when_there_is_no_config(tmp_path, monkeypatch):
-    """A first run has nothing to repair; the guard must not turn that into a crash."""
+def test_startup_does_not_touch_a_config_that_is_not_there(tmp_path, monkeypatch):
+    """With no file to repair, the repair must not be attempted: chmod on a missing path
+    raises on POSIX and would abort startup. save_default_config is stubbed out so the
+    no-file branch is really taken; normally it has just written the file."""
     monkeypatch.setenv("IPMIDECK_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("IPMIDECK_DEMO", "true")
     monkeypatch.setenv("IPMIDECK_DATA_DB_PATH", str(tmp_path / "ipmideck.db"))
 
-    from backend.main import app
+    import backend.main as bm
 
-    with TestClient(app):
+    seen: list[Path] = []
+    real = bm._set_secure_permissions
+    monkeypatch.setattr(bm, "save_default_config", lambda path: None)
+    monkeypatch.setattr(bm, "_set_secure_permissions", lambda p: (seen.append(Path(p)), real(p))[1])
+
+    with TestClient(bm.app):
         pass
 
-    assert (tmp_path / "config.yaml").exists()  # written by save_default_config instead
+    assert not (tmp_path / "config.yaml").exists()
+    assert tmp_path / "config.yaml" not in seen, seen
