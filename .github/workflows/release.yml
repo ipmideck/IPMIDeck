@@ -80,9 +80,10 @@ jobs:
   pypi:
     # Docker (re-runnable) gates PyPI (immutable). !cancelled() keeps the skip-safe path:
     # dockerhub skipped for a missing DOCKERHUB_TOKEN still yields a pip-only release;
-    # dockerhub failed/timed out skips pypi so nothing irreversible is published.
-    if: ${{ !cancelled() && github.event_name == 'push' && needs.guard.result == 'success' && needs.tests.result == 'success' && (needs.dockerhub.result == 'success' || needs.dockerhub.result == 'skipped') }}
-    needs: [guard, tests, dockerhub]
+    # dockerhub failed/timed out skips pypi so nothing irreversible is published. A failed
+    # preflight also leaves dockerhub "skipped", so the preflight must itself have succeeded.
+    if: ${{ !cancelled() && github.event_name == 'push' && needs.guard.result == 'success' && needs.tests.result == 'success' && needs.dockerhub-preflight.result == 'success' && (needs.dockerhub.result == 'success' || needs.dockerhub.result == 'skipped') }}
+    needs: [guard, tests, dockerhub-preflight, dockerhub]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -213,8 +214,8 @@ jobs:
   release-draft:
     # Draft is created LAST: only after pypi succeeded and dockerhub succeeded-or-skipped
     # (skipped = missing DOCKERHUB_TOKEN, still a valid pip-only release — hence !cancelled()).
-    if: ${{ !cancelled() && github.event_name == 'push' && needs.pypi.result == 'success' && (needs.dockerhub.result == 'success' || needs.dockerhub.result == 'skipped') }}
-    needs: [guard, tests, pypi, dockerhub]
+    if: ${{ !cancelled() && github.event_name == 'push' && needs.pypi.result == 'success' && needs.dockerhub-preflight.result == 'success' && (needs.dockerhub.result == 'success' || needs.dockerhub.result == 'skipped') }}
+    needs: [guard, tests, pypi, dockerhub-preflight, dockerhub]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
