@@ -14,7 +14,8 @@
     "add": "Aggiungi",
     "refresh": "Aggiorna",
     "reset": "Reimposta",
-    "done": "Fatto"
+    "done": "Fatto",
+    "retry": "Riprova"
   },
   "language": {
     "label": "Lingua"
@@ -421,7 +422,9 @@
       "confirmPasswordPlaceholder": "Conferma password",
       "passwordsDoNotMatch": "Le password non corrispondono.",
       "credentialsRequired": "Nome utente e password sono obbligatori.",
-      "applyFailed": "Impossibile applicare l'impostazione di autenticazione."
+      "applyFailed": "Impossibile applicare l'impostazione di autenticazione.",
+      "updateChecksLabel": "Consenti a IPMIDeck di cercare nuove versioni",
+      "updateChecksHint": "Una volta al giorno IPMIDeck chiede all'indice pubblico delle release se esiste una versione più recente. La richiesta contiene solo il nome del prodotto e la versione in uso: nessun identificativo, nulla sui tuoi server. Puoi disattivarla quando vuoi dalle Impostazioni."
     },
     "server": {
       "title": "Aggiungi il tuo primo server",
@@ -666,5 +669,39 @@
     "tested": "Testato",
     "experimental": "Sperimentale",
     "monitoringOnly": "Solo monitoraggio"
+  },
+  "updates": {
+    "unreleased": "Non rilasciato",
+    "installed": "Installata",
+    "securityRelease": "Sicurezza",
+    "changelogTitle": "Cosa è cambiato",
+    "changelogSubtitle": "Lo storico completo delle versioni di questa installazione.",
+    "changelogSubtitleWithVersion": "Stai usando la versione {{version}}.",
+    "changelogError": "Non è stato possibile leggere lo storico delle versioni.",
+    "changelogEmpty": "Questa build non contiene alcuno storico delle versioni.",
+    "viewRelease": "Note di rilascio",
+    "viewAllReleases": "Tutte le release",
+    "updateAvailable": "È disponibile la versione {{version}}",
+    "securityUpdateAvailable": "La versione {{version}} è un rilascio di sicurezza",
+    "new": "nuova",
+    "openChangelog": "Apri lo storico delle versioni",
+    "openChangelogFor": "Versione {{version}} — apri lo storico delle versioni",
+    "releaseNotes": "Note di rilascio",
+    "settingsTitle": "Aggiornamenti",
+    "settingsDescription": "Se IPMIDeck può consultare le versioni pubblicate, e cosa ha trovato.",
+    "suppressedByConfig": "Il controllo aggiornamenti è disattivato nel file di configurazione (updates.enabled). Finché non viene cambiato, nulla qui può contattare la rete.",
+    "consentLabel": "Cerca automaticamente nuove versioni",
+    "consentHint": "All'avvio e una volta al giorno. Vengono inviati solo il nome del prodotto e la tua versione. Se sei aggiornato non compare nulla.",
+    "consentFailed": "Non è stato possibile salvare l'impostazione.",
+    "checkNow": "Controlla ora",
+    "checking": "Controllo in corso…",
+    "lastChecked": "Ultimo controllo {{when}}",
+    "upToDate": "La versione {{version}} è l'ultima disponibile",
+    "checkFailed": "Non è stato possibile completare il controllo.",
+    "installMethod": "Gli aggiornamenti vengono letti da: {{method}}",
+    "methodDocker": "Registro Docker",
+    "methodPip": "Indice dei pacchetti Python",
+    "methodGit": "Release pubblicate",
+    "methodUnknown": "Release pubblicate"
   }
 }

@@ -149,6 +149,7 @@ IPMIDECK_SERVER_HTTPS=true
 IPMIDECK_IPMI_POLL_INTERVAL=30
 IPMIDECK_LOGGING_LEVEL=info
 IPMIDECK_DATA_RETENTION_DAYS=180
+IPMIDECK_UPDATES_ENABLED=false
 ```
 
 In the Docker image the app always listens on port 3000 inside the container: the image starts
@@ -165,6 +166,29 @@ editable at runtime from the in-app **Settings** page.
 Note that whether authentication is enabled is **not** a config-file setting. It is stored in
 the database and changed from the Security settings, so write access to `config.yaml` cannot be
 used to turn the login off.
+
+### Update checks
+
+IPMIDeck can tell you when a newer version has been published. Nothing is contacted until you
+have answered: first-run setup asks the question once, with the box already ticked, and you
+confirm or untick it. You can change your mind at any time under **Settings → About → Updates**.
+
+- **What it does.** With your answer recorded, IPMIDeck looks up the newest published version at
+  start-up and once every 24 hours. The **Check now** button and the console `[g]` key check on
+  demand, when you press them.
+- **What it sends.** One `GET`, to the index matching how you installed (the Python package
+  index, the container registry, or the published releases). The request carries the product
+  name and the version you are running, and nothing else — no identifier, no hostname, nothing
+  about your servers. Like any request, it shows the endpoint your public IP address. When a
+  package-index or container-registry lookup finds a newer version, one more `GET` asks the
+  published releases whether it is a security release. Every request is logged verbatim before
+  the socket opens, so you can audit it in your own logs.
+- **What it never does.** It does not download or install anything, and it shows nothing at all
+  while you are on the latest version.
+- **Turning it off completely.** Set `updates.enabled: false` in `config.yaml` (or
+  `IPMIDECK_UPDATES_ENABLED=false`). With that set, the endpoints that could open a socket are
+  never registered and the periodic check never starts — whatever was answered during setup.
+  The version history keeps working: it is read from a file inside the package, not fetched.
 
 ---
 
@@ -302,7 +326,13 @@ ipmideck/
   migration was interrupted: until it completes, the in-database key is still usable
 - BMC passwords are never placed on the command line — `ipmitool` reads them from the environment
   (`-E` / `IPMITOOL_PASSWORD`), so they never appear in `ps`
-- No external network dependencies — fully offline capable
+- No telemetry, no analytics, no accounts, no licence checks. The only connection IPMIDeck makes
+  on its own initiative is IPMI to the BMCs you configure. The single exception is the optional
+  update check, which is presented during setup and can be switched off outright
+  (`updates.enabled: false`) — see [Update checks](#update-checks). There is no HTTP client in
+  the runtime dependencies: check `pyproject.toml`, or run `tcpdump`
+- Fully offline capable — an air-gapped install works, including the in-app version history,
+  which is read from a file shipped inside the package rather than fetched
 - ipmitool arguments are passed as a list, never through a shell (no shell-injection surface)
 - Optional HTTPS/TLS for the dashboard, with one-click self-signed certificate generation
 - Credential checks are capped at 5 per minute per source address

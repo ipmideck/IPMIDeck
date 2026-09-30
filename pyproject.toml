@@ -58,8 +58,15 @@ include = ["backend*"]
 # NOTE: package-data keys must be valid module names or the predefined "*" (the strict pyproject
 # validator in current setuptools rejects a ".*" wildcard suffix like "backend.modules.*"), so the
 # 5 module packages are enumerated explicitly — each is the exact package that owns its migrations/.
+#
+# CHANGELOG.md appears here as a copy that lives INSIDE the package. The authored file stays at
+# the repository root — the release workflow slices the release body out of it and the forge
+# renders it on the landing page — but package-data cannot reach a file above the package, and
+# data-files is refused for the reason stated above. So the root file is mirrored into
+# backend/ and a unit test fails the build if the two ever diverge. The copy is what an
+# installed instance reads, which is what lets the version history render with no network.
 [tool.setuptools.package-data]
-"backend" = ["static/**/*"]
+"backend" = ["static/**/*", "CHANGELOG.md"]
 "backend.modules.fanpilot" = ["migrations/*.sql"]
 "backend.modules.fru" = ["migrations/*.sql"]
 "backend.modules.power" = ["migrations/*.sql"]

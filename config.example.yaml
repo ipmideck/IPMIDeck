@@ -42,6 +42,16 @@ data:
 logging:
   level: info                 # debug, info, warning, error
 
+updates:
+  # Master switch for the update check. With this false IPMIDeck never opens a socket to look up
+  # a published version: the check endpoint is not registered and the periodic check is not
+  # started, whatever was answered during setup. Leaving it true does NOT by itself make the app
+  # check — an unattended check also needs the opt-in from the setup wizard (or the Updates
+  # toggle in Settings). The on-demand button and the console update key are explicit requests
+  # and work whenever this is true.
+  # Environment override: IPMIDECK_UPDATES_ENABLED=false
+  enabled: true
+
 modules:
   sensors:
     enabled: true

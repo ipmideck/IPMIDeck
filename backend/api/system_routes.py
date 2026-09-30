@@ -54,6 +54,10 @@ _ALLOWED_APP_CONFIG_KEYS = {
     "currency",
     "alerting.notifications_enabled",
     "data.retention_days",
+    # Whether IPMIDeck may check for a newer version on its own. Readable here so the setup
+    # wizard and Settings can show the current answer; the write that also starts or stops the
+    # check has its own endpoint.
+    "updates.check_enabled",
 }
 
 

@@ -14,7 +14,8 @@
     "add": "追加",
     "refresh": "更新",
     "reset": "リセット",
-    "done": "完了"
+    "done": "完了",
+    "retry": "再試行"
   },
   "language": {
     "label": "言語"
@@ -421,7 +422,9 @@
       "confirmPasswordPlaceholder": "パスワードを確認",
       "passwordsDoNotMatch": "パスワードが一致しません。",
       "credentialsRequired": "ユーザー名とパスワードは必須です。",
-      "applyFailed": "認証設定の適用に失敗しました。"
+      "applyFailed": "認証設定の適用に失敗しました。",
+      "updateChecksLabel": "IPMIDeck が新しいバージョンを確認することを許可する",
+      "updateChecksHint": "IPMIDeck は 1 日に 1 回、公開されているリリース一覧に新しいバージョンがあるか問い合わせます。送信されるのは製品名と実行中のバージョンだけで、識別子もサーバーの情報も含みません。設定からいつでも無効にできます。"
     },
     "server": {
       "title": "最初のサーバーを追加",
@@ -664,5 +667,39 @@
     "tested": "テスト済み",
     "experimental": "実験的",
     "monitoringOnly": "監視のみ"
+  },
+  "updates": {
+    "unreleased": "未リリース",
+    "installed": "インストール済み",
+    "securityRelease": "セキュリティ",
+    "changelogTitle": "変更点",
+    "changelogSubtitle": "このインストールの完全なバージョン履歴です。",
+    "changelogSubtitleWithVersion": "現在のバージョンは {{version}} です。",
+    "changelogError": "バージョン履歴を読み込めませんでした。",
+    "changelogEmpty": "このビルドにはバージョン履歴が含まれていません。",
+    "viewRelease": "リリースノート",
+    "viewAllReleases": "すべてのリリース",
+    "updateAvailable": "バージョン {{version}} が利用可能です",
+    "securityUpdateAvailable": "バージョン {{version}} はセキュリティリリースです",
+    "new": "新着",
+    "openChangelog": "バージョン履歴を開く",
+    "openChangelogFor": "バージョン {{version}} — バージョン履歴を開く",
+    "releaseNotes": "リリースノート",
+    "settingsTitle": "更新",
+    "settingsDescription": "IPMIDeck が公開バージョンを照会してよいか、そして何が見つかったか。",
+    "suppressedByConfig": "更新確認は設定ファイルで無効になっています（updates.enabled）。変更されるまで、ここから通信が行われることはありません。",
+    "consentLabel": "新しいバージョンを自動的に確認する",
+    "consentHint": "起動時と 1 日に 1 回。送信されるのは製品名とバージョンだけです。最新の場合は何も表示されません。",
+    "consentFailed": "設定を保存できませんでした。",
+    "checkNow": "今すぐ確認",
+    "checking": "確認中…",
+    "lastChecked": "最終確認 {{when}}",
+    "upToDate": "バージョン {{version}} は最新のリリースです",
+    "checkFailed": "確認を完了できませんでした。",
+    "installMethod": "更新の取得元：{{method}}",
+    "methodDocker": "Docker レジストリ",
+    "methodPip": "Python パッケージインデックス",
+    "methodGit": "公開リリース",
+    "methodUnknown": "公開リリース"
   }
 }

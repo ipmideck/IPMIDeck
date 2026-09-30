@@ -152,12 +152,26 @@ class ModuleConfig:
 
 
 @dataclass
+class UpdatesConfig:
+    """Whether this instance is allowed to contact the network to look up a published version.
+
+    This is the kill switch, and it is deliberately coarser than the operator's own preference:
+    with it false the check endpoint is never registered and the periodic task is never started,
+    so suppression is structural rather than a runtime branch someone could regress past. The
+    per-operator opt-in lives in the database and only decides whether the check runs unattended.
+    """
+
+    enabled: bool = True
+
+
+@dataclass
 class AppConfig:
     server: ServerConfig = field(default_factory=ServerConfig)
     auth: AuthConfig = field(default_factory=AuthConfig)
     ipmi: IPMIConfig = field(default_factory=IPMIConfig)
     data: DataConfig = field(default_factory=DataConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    updates: UpdatesConfig = field(default_factory=UpdatesConfig)
     demo: bool = False
     modules: dict[str, ModuleConfig] = field(default_factory=dict)
 
@@ -185,6 +199,9 @@ def _apply_env_overrides(config: AppConfig) -> None:
         "IPMIDECK_DATA_DB_PATH": ("data", "db_path"),
         "IPMIDECK_DATA_RETENTION_DAYS": ("data", "retention_days", int),
         "IPMIDECK_LOGGING_LEVEL": ("logging", "level"),
+        "IPMIDECK_UPDATES_ENABLED": (
+            "updates", "enabled", lambda v: v.lower() in ("true", "1", "yes")
+        ),
         "IPMIDECK_DEMO": ("demo", None, lambda v: v.lower() in ("true", "1", "yes")),
     }
     for env_key, mapping in env_map.items():
@@ -224,6 +241,8 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
             config.data = DataConfig(**{k: v for k, v in raw["data"].items() if k in DataConfig.__dataclass_fields__})
         if "logging" in raw:
             config.logging = LoggingConfig(**{k: v for k, v in raw["logging"].items() if k in LoggingConfig.__dataclass_fields__})
+        if "updates" in raw and isinstance(raw["updates"], dict):
+            config.updates = UpdatesConfig(**{k: v for k, v in raw["updates"].items() if k in UpdatesConfig.__dataclass_fields__})
         if "demo" in raw:
             config.demo = bool(raw["demo"])
         if "modules" in raw and isinstance(raw["modules"], dict):
@@ -281,6 +300,7 @@ def save_default_config(config_path: str | Path) -> None:
         "ipmi": {"poll_interval": 30, "power_poll_interval": 30, "command_timeout": 30},
         "data": {"retention_days": 365},
         "logging": {"level": "info"},
+        "updates": {"enabled": True},
         "modules": {
             "sensors": {"enabled": True},
             "fanpilot": {"enabled": True},

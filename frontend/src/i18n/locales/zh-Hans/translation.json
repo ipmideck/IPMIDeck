@@ -14,7 +14,8 @@
     "add": "添加",
     "refresh": "刷新",
     "reset": "重置",
-    "done": "完成"
+    "done": "完成",
+    "retry": "重试"
   },
   "language": {
     "label": "语言"
@@ -421,7 +422,9 @@
       "confirmPasswordPlaceholder": "确认密码",
       "passwordsDoNotMatch": "密码不匹配。",
       "credentialsRequired": "需要用户名和密码。",
-      "applyFailed": "应用身份验证设置失败。"
+      "applyFailed": "应用身份验证设置失败。",
+      "updateChecksLabel": "允许 IPMIDeck 检查新版本",
+      "updateChecksHint": "IPMIDeck 每天一次向公开的发布索引询问是否有更新的版本。请求只包含产品名称和你正在运行的版本，不含任何标识符，也不含服务器信息。你可以随时在设置中关闭。"
     },
     "server": {
       "title": "添加您的第一台服务器",
@@ -664,5 +667,39 @@
     "tested": "已测试",
     "experimental": "实验性",
     "monitoringOnly": "仅监控"
+  },
+  "updates": {
+    "unreleased": "未发布",
+    "installed": "已安装",
+    "securityRelease": "安全",
+    "changelogTitle": "更新内容",
+    "changelogSubtitle": "本安装的完整版本历史。",
+    "changelogSubtitleWithVersion": "你正在运行版本 {{version}}。",
+    "changelogError": "无法读取版本历史。",
+    "changelogEmpty": "此构建未记录版本历史。",
+    "viewRelease": "发布说明",
+    "viewAllReleases": "全部发布",
+    "updateAvailable": "版本 {{version}} 已可用",
+    "securityUpdateAvailable": "版本 {{version}} 是安全发布",
+    "new": "新",
+    "openChangelog": "打开版本历史",
+    "openChangelogFor": "版本 {{version}} — 打开版本历史",
+    "releaseNotes": "发布说明",
+    "settingsTitle": "更新",
+    "settingsDescription": "IPMIDeck 是否可以查询已发布的版本，以及查询结果。",
+    "suppressedByConfig": "更新检查已在配置文件中关闭（updates.enabled）。在此更改之前，这里的任何操作都不会联网。",
+    "consentLabel": "自动检查新版本",
+    "consentHint": "启动时以及每天一次。只发送产品名称和你的版本。已是最新时不会显示任何内容。",
+    "consentFailed": "无法保存该设置。",
+    "checkNow": "立即检查",
+    "checking": "正在检查…",
+    "lastChecked": "上次检查 {{when}}",
+    "upToDate": "版本 {{version}} 已是最新发布",
+    "checkFailed": "检查未能完成。",
+    "installMethod": "更新来源：{{method}}",
+    "methodDocker": "Docker 仓库",
+    "methodPip": "Python 包索引",
+    "methodGit": "已发布版本",
+    "methodUnknown": "已发布版本"
   }
 }

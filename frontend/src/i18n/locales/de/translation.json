@@ -14,7 +14,8 @@
     "add": "Hinzufügen",
     "refresh": "Aktualisieren",
     "reset": "Zurücksetzen",
-    "done": "Fertig"
+    "done": "Fertig",
+    "retry": "Erneut versuchen"
   },
   "language": {
     "label": "Sprache"
@@ -421,7 +422,9 @@
       "confirmPasswordPlaceholder": "Passwort bestätigen",
       "passwordsDoNotMatch": "Die Passwörter stimmen nicht überein.",
       "credentialsRequired": "Benutzername und Passwort sind erforderlich.",
-      "applyFailed": "Authentifizierungseinstellung konnte nicht angewendet werden."
+      "applyFailed": "Authentifizierungseinstellung konnte nicht angewendet werden.",
+      "updateChecksLabel": "IPMIDeck darf nach neuen Versionen suchen",
+      "updateChecksHint": "Einmal täglich fragt IPMIDeck beim öffentlichen Release-Index nach, ob eine neuere Version vorliegt. Die Anfrage enthält nur den Produktnamen und Ihre laufende Version — keine Kennung, nichts über Ihre Server. Sie können das jederzeit in den Einstellungen abschalten."
     },
     "server": {
       "title": "Füge deinen ersten Server hinzu",
@@ -666,5 +669,39 @@
     "tested": "Getestet",
     "experimental": "Experimentell",
     "monitoringOnly": "Nur Überwachung"
+  },
+  "updates": {
+    "unreleased": "Unveröffentlicht",
+    "installed": "Installiert",
+    "securityRelease": "Sicherheit",
+    "changelogTitle": "Was sich geändert hat",
+    "changelogSubtitle": "Der vollständige Versionsverlauf dieser Installation.",
+    "changelogSubtitleWithVersion": "Sie verwenden Version {{version}}.",
+    "changelogError": "Der Versionsverlauf konnte nicht gelesen werden.",
+    "changelogEmpty": "In diesem Build ist kein Versionsverlauf enthalten.",
+    "viewRelease": "Versionshinweise",
+    "viewAllReleases": "Alle Versionen",
+    "updateAvailable": "Version {{version}} ist verfügbar",
+    "securityUpdateAvailable": "Version {{version}} ist eine Sicherheitsversion",
+    "new": "neu",
+    "openChangelog": "Versionsverlauf öffnen",
+    "openChangelogFor": "Version {{version}} — Versionsverlauf öffnen",
+    "releaseNotes": "Versionshinweise",
+    "settingsTitle": "Aktualisierungen",
+    "settingsDescription": "Ob IPMIDeck veröffentlichte Versionen abfragen darf und was dabei gefunden wurde.",
+    "suppressedByConfig": "Die Aktualisierungsprüfung ist in der Konfigurationsdatei abgeschaltet (updates.enabled). Bis das geändert wird, kann hier nichts das Netzwerk kontaktieren.",
+    "consentLabel": "Automatisch nach neuen Versionen suchen",
+    "consentHint": "Beim Start und einmal täglich. Übertragen werden nur der Produktname und Ihre Version. Solange alles aktuell ist, wird nichts angezeigt.",
+    "consentFailed": "Die Einstellung konnte nicht gespeichert werden.",
+    "checkNow": "Jetzt prüfen",
+    "checking": "Wird geprüft…",
+    "lastChecked": "Zuletzt geprüft {{when}}",
+    "upToDate": "Version {{version}} ist die neueste Ausgabe",
+    "checkFailed": "Die Prüfung konnte nicht abgeschlossen werden.",
+    "installMethod": "Aktualisierungen stammen aus: {{method}}",
+    "methodDocker": "Docker-Registry",
+    "methodPip": "Python-Paketindex",
+    "methodGit": "Veröffentlichte Versionen",
+    "methodUnknown": "Veröffentlichte Versionen"
   }
 }
