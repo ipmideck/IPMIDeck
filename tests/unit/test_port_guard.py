@@ -1,9 +1,9 @@
-"""Single-instance port-guard tests (D-17).
+"""Single-instance port-guard tests.
 
 port_in_use() must report True when a socket is already listening and False when the port is
-free. On Windows it binds WITHOUT SO_REUSEADDR (RESEARCH Pitfall 4); on POSIX it sets it, so a
-port left in TIME_WAIT by the previous run does not block a restart. Pure localhost sockets — the real BMC
-(192.0.2.110) is never touched.
+free. On Windows it binds WITHOUT SO_REUSEADDR, which would let a second socket bind over a
+live listener; on POSIX it sets it, so a port left in TIME_WAIT by the previous run does not
+block a restart. Pure localhost sockets — the real BMC (192.0.2.110) is never touched.
 """
 
 from __future__ import annotations

@@ -117,7 +117,7 @@ def browsable_url(scheme: str, host: str, port: int) -> str:
 
 
 def port_in_use(host: str, port: int) -> bool:
-    """Return True if ``port`` is already bound/listening on ``host`` (D-17).
+    """Return True if ``port`` is already bound/listening on ``host``.
 
     A plain bind() raises OSError (EADDRINUSE / WinError 10048) when the port is taken — that is
     the "already running" signal. On POSIX the probe sets SO_REUSEADDR so that a connection
@@ -125,7 +125,7 @@ def port_in_use(host: str, port: int) -> bool:
     networking) does not count as "in use": uvicorn binds with SO_REUSEADDR itself and would
     start fine there, and Linux/BSD still refuse the bind while a socket is actually listening.
     On Windows SO_REUSEADDR lets a second socket bind over a live listener, which would hide a
-    running instance (RESEARCH Pitfall 4), so it stays off there.
+    running instance, so it stays off there.
 
     "0.0.0.0"/"::"/"" wildcard binds are probed against 127.0.0.1 so the check is meaningful. An
     IPv6 literal is probed with an IPv6 socket.
