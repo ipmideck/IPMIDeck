@@ -44,11 +44,31 @@ def _has_non_finite(body: BaseModel) -> bool:
     override. Checked here rather than with a model validator: FastAPI's 422 body echoes the
     rejected input, and a NaN in it cannot be encoded as JSON either.
     """
-    numbers = [getattr(body, "hysteresis", None), getattr(body, "safety_threshold", None)]
-    for point in getattr(body, "curve_points", None) or []:
-        if isinstance(point, dict):
-            numbers.extend(point.values())
-    return any(isinstance(v, float) and not math.isfinite(v) for v in numbers)
+    values = [
+        getattr(body, "hysteresis", None),
+        getattr(body, "safety_threshold", None),
+        getattr(body, "curve_points", None),
+    ]
+    # A point is a free-form dict, so a NaN can sit at any depth inside it and still end up
+    # stored; walk the whole structure, not just the top-level values.
+    while values:
+        value = values.pop()
+        if isinstance(value, dict):
+            values.extend(value.values())
+        elif isinstance(value, list):
+            values.extend(value)
+        elif isinstance(value, float) and not math.isfinite(value):
+            return True
+    return False
+
+
+def _load_curve(stored: str):
+    """Decode a stored curve, reading NaN / Infinity as null.
+
+    A row saved before those values were refused would otherwise make the response
+    impossible to encode, and one such profile would take down the whole listing.
+    """
+    return json.loads(stored, parse_constant=lambda _token: None)
 
 
 def _non_finite_response(lang: str) -> JSONResponse:
@@ -95,7 +115,7 @@ async def list_profiles():
     ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
     rows = await ctx.db.fetchall("SELECT * FROM fan_profiles ORDER BY is_preset DESC, name")
     for row in rows:
-        row["curve_points"] = json.loads(row["curve_points"])
+        row["curve_points"] = _load_curve(row["curve_points"])
     return {"profiles": rows}
 
 
@@ -121,7 +141,7 @@ async def get_profile(profile_id: int, lang: str = Depends(get_lang)):
     row = await ctx.db.fetchone("SELECT * FROM fan_profiles WHERE id = ?", (profile_id,))
     if not row:
         return {"success": False, "error": t("profile_not_found", lang)}
-    row["curve_points"] = json.loads(row["curve_points"])
+    row["curve_points"] = _load_curve(row["curve_points"])
     return {"profile": row}
 
 

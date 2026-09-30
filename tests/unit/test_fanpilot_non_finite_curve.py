@@ -8,6 +8,7 @@ engine's parse guard, which aborted the control pass with no fan write at all.
 from __future__ import annotations
 
 import math
+import sqlite3
 
 import pytest
 
@@ -40,6 +41,40 @@ def test_api_refuses_a_non_finite_curve_point(client, token):
     assert _raw(client, "POST", PROFILES, body).status_code == 422
     listing = client.get(PROFILES)
     assert listing.status_code == 200
+
+
+@pytest.mark.parametrize(
+    "point",
+    [
+        '{"temp": 30, "speed": 50, "meta": [NaN]}',
+        '{"temp": [Infinity], "speed": 50}',
+        '{"temp": 30, "speed": 50, "extra": {"deep": [1, -Infinity]}}',
+    ],
+)
+def test_api_refuses_a_non_finite_value_nested_in_a_point(client, point):
+    body = '{"name": "x", "curve_points": [%s]}' % point
+    assert _raw(client, "POST", PROFILES, body).status_code == 422
+    assert client.get(PROFILES).status_code == 200
+
+
+def test_a_curve_stored_with_nan_before_the_check_does_not_break_the_listing(client, tmp_path):
+    created = client.post(
+        PROFILES, json={"name": "old", "curve_points": [{"temp": 30, "speed": 50}]}
+    ).json()
+    profile_id = created["profile_id"]
+    con = sqlite3.connect(tmp_path / "ipmideck.db")
+    with con:
+        con.execute(
+            "UPDATE fan_profiles SET curve_points = ? WHERE id = ?",
+            ('[{"temp": 30, "speed": NaN}, {"temp": 80, "speed": Infinity}]', profile_id),
+        )
+    con.close()
+
+    listing = client.get(PROFILES)
+    assert listing.status_code == 200
+    single = client.get(f"{PROFILES}/{profile_id}")
+    assert single.status_code == 200
+    assert '"speed":null' in single.text.replace(" ", "")
 
 
 @pytest.mark.parametrize("field", ["hysteresis", "safety_threshold"])
