@@ -17,6 +17,7 @@ Importing this module performs no I/O.
 
 from __future__ import annotations
 
+import http.client
 import json
 import logging
 import os
@@ -79,21 +80,34 @@ UNKNOWN = "unknown"
 INSTALL_METHODS = (DOCKER, PIP, GIT, UNKNOWN)
 
 
-def _in_container() -> bool:
-    """True when this process is running inside a container.
+# Values an application-container runtime puts in PID 1's ``container`` variable. LXC and
+# systemd-nspawn set the same variable for a whole-system container, which boots its own init and
+# gets this app by pip or a clone like any host does, so those values must not count.
+_APP_CONTAINER_RUNTIMES = frozenset({b"docker", b"podman", b"oci"})
 
-    Two independent markers because neither alone is reliable: Docker writes /.dockerenv, while
-    Podman and several rootless runtimes do not, and instead expose ``container=`` in PID 1's
-    environment. Reading /proc/1/environ can fail (non-Linux, restricted /proc), which is not an
-    error — it just means that marker is unavailable.
+
+def _in_container() -> bool:
+    """True when this process is running inside an application container built from an image.
+
+    Several markers because no single one is reliable: Docker writes /.dockerenv and Podman
+    writes /run/.containerenv, while other rootless runtimes write neither and instead set
+    ``container=`` in PID 1's environment. That variable is only trusted for the runtimes in
+    ``_APP_CONTAINER_RUNTIMES``; an LXC or systemd-nspawn system container sets it too, but is
+    updated like a host, not by pulling a new image. Reading /proc/1/environ can fail (non-Linux,
+    restricted /proc), which is not an error — it just means that marker is unavailable.
     """
-    if Path("/.dockerenv").exists():
+    if Path("/.dockerenv").exists() or Path("/run/.containerenv").exists():
         return True
     try:
         with open("/proc/1/environ", "rb") as fh:
-            return b"container=" in fh.read(4096)
+            environ = fh.read(4096)
     except OSError:
         return False
+    for entry in environ.split(b"\0"):
+        key, _, value = entry.partition(b"=")
+        if key == b"container":
+            return value in _APP_CONTAINER_RUNTIMES
+    return False
 
 
 def detect_install_method() -> str:
@@ -146,6 +160,11 @@ def parse_version(raw: str | None) -> tuple | None:
     # the leading flag alone decides the ordering between the two.
     tail = (0, suffix.lower()) if suffix else (1, "")
     return (int(major), int(minor), int(patch), tail)
+
+
+def _is_prerelease(parsed: tuple) -> bool:
+    """True for a parsed version that carries a pre-release suffix (see ``parse_version``)."""
+    return parsed[3][0] == 0
 
 
 def is_newer(candidate: str | None, current: str | None) -> bool:
@@ -266,8 +285,12 @@ def safe_release_url(candidate) -> str:
 
 
 def _is_security_body(body) -> bool:
-    text = body if isinstance(body, str) else ""
-    return bool(_SECURITY_RE.search(text)) or "security release" in text.lower()
+    """A release body marks a security release only through its ``### Security`` grouping.
+
+    That is the rule the version history uses and the heading the release workflow writes. A
+    phrase found in the prose would mark "this is not a security release" as one.
+    """
+    return isinstance(body, str) and bool(_SECURITY_RE.search(body))
 
 
 @dataclass
@@ -278,6 +301,9 @@ class UpdateProbe:
     latest_version: str | None = None
     release_url: str | None = None
     is_security: bool = False
+    # A newer version was found but its release notes could not be read, so whether it is a
+    # security release is unknown, which is not the same as known to be an ordinary one.
+    security_unresolved: bool = False
     error: str | None = None
     checked_at: str | None = None
     extra: dict = field(default_factory=dict)
@@ -288,6 +314,7 @@ class UpdateProbe:
             "latest_version": self.latest_version,
             "release_url": self.release_url,
             "is_security": self.is_security,
+            "security_unresolved": self.security_unresolved,
             "error": self.error,
             "checked_at": self.checked_at,
         }
@@ -337,24 +364,47 @@ def _fetch(url: str, accept: str, timeout: float) -> dict:
         raw = response.read(_MAX_RESPONSE_BYTES + 1)
     if len(raw) > _MAX_RESPONSE_BYTES:
         raise ValueError("response larger than expected")
-    return json.loads(raw.decode("utf-8"))
+    data = json.loads(raw.decode("utf-8"))
+    # Every endpoint asked here answers with an object. Anything else is a broken or hostile
+    # answer, and refusing it once here spares each channel from guarding against it.
+    if not isinstance(data, dict):
+        raise ValueError("response is not a JSON object")
+    return data
 
 
-def _newest(versions) -> str | None:
-    """Highest strictly-semantic version in an iterable; anything unparseable is discarded."""
+def _newest(versions, include_prereleases: bool = False) -> str | None:
+    """Highest strictly-semantic version in an iterable; anything unparseable is discarded.
+
+    Pre-releases are discarded too unless asked for: an install running a final release must not
+    be told to move to a release candidate just because the index already lists one.
+    """
     parsed = [(parse_version(v), v) for v in versions]
-    ranked = [(key, raw) for key, raw in parsed if key is not None]
+    ranked = [
+        (key, raw)
+        for key, raw in parsed
+        if key is not None and (include_prereleases or not _is_prerelease(key))
+    ]
     if not ranked:
         return None
     ranked.sort(key=lambda item: item[0])
     return ranked[-1][1]
 
 
+def _running_prerelease() -> bool:
+    """True when this build is itself a pre-release, so its operator has already opted into them."""
+    running = parse_version(VERSION)
+    return running is not None and _is_prerelease(running)
+
+
 def _latest_from_pypi(timeout: float) -> UpdateProbe:
     """The index API returns the file list; the simple JSON form is an order of magnitude
     smaller than the project JSON route for the same answer."""
     data = _fetch(timeout=timeout, url=PYPI_URL, accept="application/vnd.pypi.simple.v1+json")
-    latest = _newest(data.get("versions") or [])
+    versions = data.get("versions")
+    latest = _newest(
+        versions if isinstance(versions, list) else [],
+        include_prereleases=_running_prerelease(),
+    )
     return UpdateProbe(source=PIP, latest_version=latest, release_url=RELEASES_URL)
 
 
@@ -362,8 +412,10 @@ def _latest_from_dockerhub(timeout: float) -> UpdateProbe:
     """Tags come back newest-first, but the newest is usually a moving tag (`latest`, `2.0`) or a
     commit tag (`sha-…`). Only strictly semantic tags are ordered; the rest are discarded."""
     data = _fetch(timeout=timeout, url=DOCKERHUB_URL, accept="application/json")
-    names = [entry.get("name") for entry in (data.get("results") or []) if isinstance(entry, dict)]
-    latest = _newest(names)
+    results = data.get("results")
+    entries = results if isinstance(results, list) else []
+    names = [entry.get("name") for entry in entries if isinstance(entry, dict)]
+    latest = _newest(names, include_prereleases=_running_prerelease())
     return UpdateProbe(source=DOCKER, latest_version=latest, release_url=RELEASES_URL)
 
 
@@ -371,9 +423,10 @@ def _latest_from_github(timeout: float) -> UpdateProbe:
     """The releases endpoint carries the release body as well as the tag, which is the only
     channel that can tell a security release from an ordinary one."""
     data = _fetch(timeout=timeout, url=GITHUB_URL, accept="application/vnd.github+json")
+    tag = data.get("tag_name")
     return UpdateProbe(
         source=GIT,
-        latest_version=data.get("tag_name"),
+        latest_version=tag if isinstance(tag, str) and tag else None,
         release_url=safe_release_url(data.get("html_url")),
         is_security=_is_security_body(data.get("body")),
     )
@@ -383,8 +436,11 @@ def _mark_security_from_release(probe: UpdateProbe, timeout: float) -> None:
     """Ask the published release of a newer version found on the index or registry whether it
     is a security release. Those two channels carry no release notes of their own.
 
-    Best effort: any failure leaves the probe as it was. The version is already known, and a
-    missing badge is better than turning a found update into an error.
+    Best effort: a failed lookup keeps the found version and leaves ``error`` unset, because a
+    missing badge is better than turning a found update into an error. It does record that the
+    answer is unknown. The release workflow publishes to the index and the registry first and
+    leaves the GitHub release as a draft until it is published by hand, and anonymous callers get
+    a 404 for a draft, so this window is ordinary rather than exceptional.
     """
     tag = "v" + probe.latest_version.lstrip("v")
     url = GITHUB_TAG_URL.format(tag=urllib.parse.quote(tag, safe=""))
@@ -392,9 +448,12 @@ def _mark_security_from_release(probe: UpdateProbe, timeout: float) -> None:
         data = _fetch(timeout=timeout, url=url, accept="application/vnd.github+json")
     except Exception as exc:  # noqa: BLE001 — see docstring
         logger.debug("Could not read the release notes of %s: %s", tag, exc)
+        probe.security_unresolved = True
         return
     if not isinstance(data, dict):
+        probe.security_unresolved = True
         return
+    probe.security_unresolved = False
     probe.is_security = _is_security_body(data.get("body"))
     probe.release_url = safe_release_url(data.get("html_url"))
 
@@ -425,10 +484,15 @@ def fetch_latest(method: str | None = None, timeout: float = DEFAULT_TIMEOUT) ->
         # different situation for the operator than the endpoint being broken.
         reason = "rate_limited" if exc.code in (403, 429) else f"http_{exc.code}"
         return UpdateProbe(source=channel, error=reason)
-    except (urllib.error.URLError, socket.timeout, TimeoutError):
+    except (urllib.error.URLError, socket.timeout, TimeoutError, http.client.HTTPException):
+        # A body cut short (IncompleteRead) is raised while reading the response, where urllib no
+        # longer wraps errors, and it is an HTTPException rather than an OSError.
         return UpdateProbe(source=channel, error="unreachable")
     except (ValueError, OSError) as exc:
         logger.debug("Update check failed: %s", exc)
+        return UpdateProbe(source=channel, error="invalid_response")
+    except Exception as exc:  # noqa: BLE001 — see docstring: a lookup must never raise
+        logger.debug("Update check failed unexpectedly: %r", exc)
         return UpdateProbe(source=channel, error="invalid_response")
     if probe.latest_version is None:
         probe.error = "no_release_found"

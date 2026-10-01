@@ -51,10 +51,16 @@ MIN_AUTO_INTERVAL_SECONDS = 15 * 60
 # live, long enough that holding the button cannot spend the hourly budget.
 MIN_MANUAL_INTERVAL_SECONDS = 60
 
-# After a failure, wait before trying again — doubling from a minute up to six hours. A box with
-# no route out should settle into one attempt every few hours, not one every minute.
-_BACKOFF_START_SECONDS = 60
+# After a failure the unattended check retries from 15 minutes, doubling up to six hours. A box
+# with no route out should settle into one attempt every few hours, not one every minute. It starts
+# at the floor above because any shorter wait would only be turned into a cache read by it.
+_BACKOFF_START_SECONDS = MIN_AUTO_INTERVAL_SECONDS
 _BACKOFF_CEILING_SECONDS = 6 * 60 * 60
+
+# A newer version was found but its release notes could not be read yet, so nobody can say whether
+# it is a security release. That is usually a release whose notes are not published yet; asking
+# again on the daily cadence would leave a security badge missing for up to a day after they are.
+_SECURITY_RETRY_SECONDS = 60 * 60
 
 
 @dataclass
@@ -65,6 +71,9 @@ class UpdateStatus:
     latest_version: str | None = None
     update_available: bool = False
     is_security: bool = False
+    # True when a newer version was found but its release notes could not be read, so whether it
+    # is a security release is not known yet. ``is_security`` false then means "unknown", not "no".
+    security_unresolved: bool = False
     release_url: str = RELEASES_URL
     install_method: str = "unknown"
     checked_at: str | None = None
@@ -77,6 +86,7 @@ class UpdateStatus:
             "latest_version": self.latest_version,
             "update_available": self.update_available,
             "is_security": self.is_security,
+            "security_unresolved": self.security_unresolved,
             "release_url": self.release_url,
             "install_method": self.install_method,
             "checked_at": self.checked_at,
@@ -90,6 +100,7 @@ def _status_from_probe(probe: UpdateProbe, checked_at: str) -> UpdateStatus:
         latest_version=probe.latest_version,
         update_available=is_newer(probe.latest_version, VERSION),
         is_security=probe.is_security,
+        security_unresolved=probe.security_unresolved,
         release_url=safe_release_url(probe.release_url),
         install_method=probe.source,
         checked_at=checked_at,
@@ -146,6 +157,7 @@ class UpdateService:
             return status
         status.latest_version = data.get("latest_version")
         status.is_security = bool(data.get("is_security"))
+        status.security_unresolved = bool(data.get("security_unresolved"))
         status.release_url = safe_release_url(data.get("release_url"))
         status.checked_at = data.get("checked_at")
         status.error = data.get("error")
@@ -162,6 +174,7 @@ class UpdateService:
                 {
                     "latest_version": status.latest_version,
                     "is_security": status.is_security,
+                    "security_unresolved": status.security_unresolved,
                     "release_url": status.release_url,
                     "checked_at": status.checked_at,
                     "error": status.error,
@@ -198,7 +211,8 @@ class UpdateService:
         """Look up the published version, honouring the rate limit.
 
         Inside the rate-limit window the cached answer is returned with ``from_cache`` set, so a
-        caller can tell "nothing changed" from "we did not ask".
+        caller can tell "nothing changed" from "we did not ask". When there is no stored answer to
+        repeat, the error is ``not_checked`` rather than a blank status that looks like success.
         """
         if not self._config.updates.enabled:
             # Reached only if a caller bypasses the route gating; refuse rather than assume.
@@ -208,11 +222,25 @@ class UpdateService:
 
         async with self._lock:
             if self._too_soon(minimum_interval) or await self._checked_recently(minimum_interval):
-                return await self.cached_status()
+                status = await self.cached_status()
+                status.from_cache = True
+                if status.checked_at is None:
+                    # The attempt holding the rate limit never stored an answer, as when it is
+                    # cancelled mid-lookup. The blank default would otherwise read as "you are up
+                    # to date" when nobody knows.
+                    status.error = "not_checked"
+                return status
 
             self._last_attempt = time.monotonic()
             method = detect_install_method()
-            probe = await asyncio.to_thread(fetch_latest, method)
+            try:
+                probe = await asyncio.to_thread(fetch_latest, method)
+            except Exception:
+                # The lookup is written never to raise. If it does anyway, record it as a failed
+                # attempt like any other, so it is stored and backed off rather than leaving the
+                # rate limit held over an answer that was never written.
+                logger.debug("The update lookup raised unexpectedly", exc_info=True)
+                probe = UpdateProbe(source=method, error="invalid_response")
             checked_at = datetime.now(timezone.utc).isoformat()
             status = _status_from_probe(probe, checked_at)
             # The channel is what this install actually updates from; a fetcher fallback must not
@@ -220,8 +248,16 @@ class UpdateService:
             status.install_method = method
 
             if probe.error:
+                # A failed lookup says nothing about what is published, so it must not erase an
+                # update an earlier one found: keep what was known and record only that this
+                # attempt failed, and when.
+                previous = await self.cached_status()
+                status.latest_version = previous.latest_version
+                status.is_security = previous.is_security
+                status.security_unresolved = previous.security_unresolved
+                status.release_url = previous.release_url
+                status.update_available = is_newer(status.latest_version, VERSION)
                 self._consecutive_failures += 1
-                self._backoff = min(self._backoff * 2, _BACKOFF_CEILING_SECONDS)
                 logger.info("Update check did not complete (%s)", probe.error)
             else:
                 self._consecutive_failures = 0
@@ -238,15 +274,28 @@ class UpdateService:
 
     # --- the unattended check ------------------------------------------------------------
 
+    def _take_backoff(self) -> float:
+        """The wait after a failed attempt; each one used doubles the next, up to the ceiling."""
+        delay = self._backoff
+        self._backoff = min(self._backoff * 2, _BACKOFF_CEILING_SECONDS)
+        return delay
+
     async def _loop(self) -> None:
         while True:
             try:
+                # Asked on every pass rather than trusted from start(): this check runs only on
+                # the strength of that answer, so a loop that outlives its withdrawal ends here
+                # instead of making one more request.
+                if not await self.consent_given():
+                    return
                 status = await self.check_now(minimum_interval=MIN_AUTO_INTERVAL_SECONDS)
                 if status.from_cache:
                     # A previous run checked moments ago: try again once the floor has passed.
                     delay = MIN_AUTO_INTERVAL_SECONDS
                 elif status.error:
-                    delay = self._backoff
+                    delay = self._take_backoff()
+                elif status.update_available and status.security_unresolved:
+                    delay = _SECURITY_RETRY_SECONDS
                 else:
                     delay = CHECK_INTERVAL_SECONDS
             except asyncio.CancelledError:
@@ -254,7 +303,7 @@ class UpdateService:
             except Exception:
                 # A version check is never worth taking the process down for.
                 logger.exception("The update check task hit an unexpected error")
-                delay = self._backoff
+                delay = self._take_backoff()
             await asyncio.sleep(delay)
 
     def running(self) -> bool:
@@ -265,6 +314,11 @@ class UpdateService:
         if not self._config.updates.enabled or self.running():
             return False
         if not await self.consent_given():
+            return False
+        # Asked again after the read above, which yields: two answers arriving together (a double
+        # click, two open tabs) would otherwise both get here and start a second loop that stop()
+        # has no handle on.
+        if self.running():
             return False
         self._task = asyncio.create_task(self._loop())
         logger.info("Update checks enabled — checking now and once a day")

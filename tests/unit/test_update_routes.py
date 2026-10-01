@@ -9,6 +9,7 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.core import update_service as svc_mod
 from backend.core.updates import UpdateProbe
 
 
@@ -30,9 +31,9 @@ def _run(coro):
 # instances cannot coexist: the second boot's globals are the ones every route handler sees.
 #
 # So there is exactly ONE live instance at a time, rebooted only when a test needs the other
-# configuration. Tests are grouped by configuration below, which makes that two boots in
-# practice. Per-test isolation is restored by clearing the stored rows and the in-memory
-# rate-limit state before each test.
+# configuration. Tests are grouped by configuration below, so a reboot happens only where one
+# group gives way to the next. Per-test isolation is restored before each test by clearing the
+# stored rows, stopping the unattended check and resetting the in-memory rate-limit state.
 class _Instance:
     """The single live application instance, rebooted only when the configuration must change."""
 
@@ -111,7 +112,7 @@ def _reset_update_state(bm) -> None:
     _run(bm.db.set_config("updates.last_result", ""))
     _run(bm.update_service.stop())
     bm.update_service._last_attempt = None
-    bm.update_service._backoff = 60
+    bm.update_service._backoff = svc_mod._BACKOFF_START_SECONDS
 
 
 # --- the offline routes -------------------------------------------------------------------------
@@ -242,6 +243,18 @@ def test_a_security_release_is_carried_through_the_check(open_client, monkeypatc
     assert client.post("/api/updates/check").json()["is_security"] is True
 
 
+def test_an_unknown_security_answer_is_carried_through_the_check(open_client, monkeypatch):
+    client, _ = open_client
+    monkeypatch.setattr(
+        "backend.core.update_service.fetch_latest",
+        lambda method: UpdateProbe(
+            source=method, latest_version="99.0.0", security_unresolved=True
+        ),
+    )
+    assert client.post("/api/updates/check").json()["security_unresolved"] is True
+    assert client.get("/api/updates/state").json()["security_unresolved"] is True
+
+
 # --- consent ------------------------------------------------------------------------------------
 
 
@@ -283,17 +296,28 @@ def test_an_unreadable_cached_result_degrades_instead_of_breaking_the_page(open_
     assert body["latest_version"] is None
 
 
-def test_the_consent_key_is_readable_through_the_generic_config_route(open_client):
+def test_the_consent_key_is_readable_through_the_generic_config_route(open_client, monkeypatch):
     client, _ = open_client
+    # Consenting starts the unattended check, whose first act is a lookup.
+    monkeypatch.setattr(
+        "backend.core.update_service.fetch_latest",
+        lambda method: UpdateProbe(source=method, latest_version="1.0.0"),
+    )
     client.put("/api/updates/consent", json={"enabled": True})
     body = client.get("/api/system/app-config/updates.check_enabled").json()
     assert body["success"] is True and body["value"] is True
 
 
-def test_the_consent_key_is_not_writable_through_the_generic_config_route(open_client):
+def test_the_consent_key_is_not_writable_through_the_generic_config_route(
+    open_client, monkeypatch
+):
     """A write there would store the answer without starting or stopping the check, so "off"
     would not hold until a restart. Only the dedicated route may change it."""
     client, bm = open_client
+    monkeypatch.setattr(
+        "backend.core.update_service.fetch_latest",
+        lambda method: UpdateProbe(source=method, latest_version="1.0.0"),
+    )
     client.put("/api/updates/consent", json={"enabled": True})
     refused = client.put(
         "/api/system/app-config/updates.check_enabled", json={"value": False}

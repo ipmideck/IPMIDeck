@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import pathlib
 import tomllib
@@ -79,6 +80,11 @@ def test_newest_of_nothing_orderable_is_none():
     assert updates._newest(["latest", "2.0", "sha-abc"]) is None
 
 
+def test_newest_skips_prereleases_unless_asked_for():
+    assert updates._newest(["2.0.1", "2.1.0a1"]) == "2.0.1"
+    assert updates._newest(["2.0.1", "2.1.0a1"], include_prereleases=True) == "2.1.0a1"
+
+
 # --- install method -----------------------------------------------------------------------------
 
 
@@ -117,9 +123,9 @@ def test_neither_a_tree_nor_a_distribution_is_left_unknown(monkeypatch, tmp_path
     assert updates.detect_install_method() == updates.UNKNOWN
 
 
-def test_container_env_marker_is_read(monkeypatch, tmp_path):
+def _fake_pid1_environ(monkeypatch, tmp_path, content: bytes) -> None:
     environ = tmp_path / "environ"
-    environ.write_bytes(b"PATH=/usr/bin\x00container=podman\x00")
+    environ.write_bytes(content)
     real_open = open
 
     def fake_open(path, *args, **kwargs):
@@ -128,7 +134,37 @@ def test_container_env_marker_is_read(monkeypatch, tmp_path):
         return real_open(path, *args, **kwargs)
 
     monkeypatch.setattr("builtins.open", fake_open)
+
+
+@pytest.mark.parametrize("runtime", [b"podman", b"docker", b"oci"])
+def test_container_env_marker_is_read(monkeypatch, tmp_path, runtime):
+    _fake_pid1_environ(monkeypatch, tmp_path, b"PATH=/usr/bin\x00container=" + runtime + b"\x00")
     monkeypatch.setattr(updates.Path, "exists", lambda self: False)
+    assert updates._in_container() is True
+
+
+@pytest.mark.parametrize("runtime", [b"lxc", b"systemd-nspawn", b"lxc-libvirt"])
+def test_a_system_container_is_not_reported_as_docker(monkeypatch, tmp_path, runtime):
+    """LXC and systemd-nspawn set the same variable for a whole-system container. The app inside
+    one is installed with pip or a clone and updated like a host, so pointing it at the image
+    registry would send the operator to the wrong place."""
+    _fake_pid1_environ(monkeypatch, tmp_path, b"PATH=/usr/bin\x00container=" + runtime + b"\x00")
+    monkeypatch.setattr(updates.Path, "exists", lambda self: False)
+    assert updates._in_container() is False
+
+
+def test_only_the_exact_container_variable_counts(monkeypatch, tmp_path):
+    _fake_pid1_environ(monkeypatch, tmp_path, b"PATH=/usr/bin\x00my_container=docker\x00")
+    monkeypatch.setattr(updates.Path, "exists", lambda self: False)
+    assert updates._in_container() is False
+
+
+def test_the_podman_marker_file_is_read(monkeypatch, tmp_path):
+    """Podman writes /run/.containerenv rather than /.dockerenv."""
+    _fake_pid1_environ(monkeypatch, tmp_path, b"PATH=/usr/bin\x00")
+    monkeypatch.setattr(
+        updates.Path, "exists", lambda self: self.as_posix() == "/run/.containerenv"
+    )
     assert updates._in_container() is True
 
 
@@ -206,6 +242,30 @@ def _stub_fetch(monkeypatch, payload):
     return calls
 
 
+class _FakeResponse:
+    """A response with a fixed body that records every size it was asked to read."""
+
+    def __init__(self, body: bytes):
+        self.body = body
+        self.requested = []
+
+    def read(self, n=-1):
+        self.requested.append(n)
+        return self.body if n < 0 else self.body[:n]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def _serve(monkeypatch, body: bytes) -> _FakeResponse:
+    response = _FakeResponse(body)
+    monkeypatch.setattr(updates, "_urlopen", lambda *a, **k: response)
+    return response
+
+
 def test_the_python_index_channel_picks_the_highest_release(monkeypatch):
     _stub_fetch(monkeypatch, {"versions": ["2.0.0", "2.0.1", "1.9.9"]})
     probe = updates.fetch_latest(updates.PIP)
@@ -238,11 +298,67 @@ def test_an_ordinary_release_is_not_marked_as_security(monkeypatch):
     assert updates.fetch_latest(updates.GIT).is_security is False
 
 
+def test_security_in_the_prose_does_not_mark_the_release(monkeypatch):
+    """Only the heading counts, the same rule the version history uses."""
+    _stub_fetch(monkeypatch, {"tag_name": "v2.1.0", "body": "This is not a security release."})
+    assert updates.fetch_latest(updates.GIT).is_security is False
+
+
+def test_a_security_grouping_with_windows_line_endings_still_counts(monkeypatch):
+    _stub_fetch(monkeypatch, {"tag_name": "v2.1.0", "body": "### Security\r\n\r\n- Fixed."})
+    assert updates.fetch_latest(updates.GIT).is_security is True
+
+
 def test_an_empty_channel_answer_is_reported_rather_than_guessed(monkeypatch):
     _stub_fetch(monkeypatch, {"versions": []})
     probe = updates.fetch_latest(updates.PIP)
     assert probe.latest_version is None
     assert probe.error == "no_release_found"
+
+
+@pytest.mark.parametrize("channel", [updates.PIP, updates.DOCKER, updates.GIT])
+@pytest.mark.parametrize("body", [b"[]", b'["99.0.0"]', b'"99.0.0"', b"null", b"5"])
+def test_an_answer_that_is_not_an_object_is_a_reason(monkeypatch, channel, body):
+    """A captive portal or a misbehaving proxy can answer 200 with anything at all."""
+    _serve(monkeypatch, body)
+    probe = updates.fetch_latest(channel)
+    assert probe.error == "invalid_response"
+    assert probe.latest_version is None
+
+
+@pytest.mark.parametrize("body", [b"[]", b'"99.0.0"', b"null"])
+def test_the_fetch_itself_refuses_an_answer_that_is_not_an_object(monkeypatch, body):
+    """Refused where it is read, so no channel ever sees a payload it would have to guard."""
+    _serve(monkeypatch, body)
+    with pytest.raises(ValueError):
+        updates._fetch(updates.PYPI_URL, "application/json", 1.0)
+
+
+@pytest.mark.parametrize(
+    "channel, payload",
+    [
+        (updates.PIP, {"versions": 5}),
+        (updates.PIP, {"versions": {"99.0.0": {}}}),
+        (updates.DOCKER, {"versions": 5}),
+        (updates.DOCKER, {"results": 5}),
+        (updates.DOCKER, {"results": ["99.0.0", 5]}),
+        (updates.GIT, {"versions": 5}),
+        (updates.GIT, {"tag_name": 5}),
+        (updates.GIT, {"tag_name": ["v99.0.0"]}),
+    ],
+)
+def test_a_field_of_the_wrong_type_is_treated_as_absent(monkeypatch, channel, payload):
+    _serve(monkeypatch, json.dumps(payload).encode())
+    probe = updates.fetch_latest(channel)
+    assert probe.error == "no_release_found"
+    assert probe.latest_version is None
+
+
+def test_a_deeply_nested_answer_is_a_reason_not_an_exception(monkeypatch):
+    """The JSON decoder gives up on deep nesting with a RecursionError, which is neither a
+    ValueError nor an OSError, and a body well inside the size bound can carry it."""
+    _serve(monkeypatch, b"[" * 100_000)
+    assert updates.fetch_latest(updates.PIP).error == "invalid_response"
 
 
 @pytest.mark.parametrize(
@@ -253,7 +369,10 @@ def test_an_empty_channel_answer_is_reported_rather_than_guessed(monkeypatch):
         (urllib.error.HTTPError("u", 500, "boom", {}, None), "http_500"),
         (urllib.error.URLError("no route to host"), "unreachable"),
         (TimeoutError(), "unreachable"),
+        # Raised while reading the body, where urllib no longer wraps errors, and not an OSError.
+        (http.client.IncompleteRead(b'{"vers'), "unreachable"),
         (ValueError("garbage"), "invalid_response"),
+        (AttributeError("a shape nobody anticipated"), "invalid_response"),
     ],
 )
 def test_every_failure_comes_back_as_a_reason_not_an_exception(monkeypatch, raised, expected):
@@ -270,25 +389,23 @@ def test_every_failure_comes_back_as_a_reason_not_an_exception(monkeypatch, rais
 
 
 def test_an_oversized_response_is_refused(monkeypatch):
-    class FakeResponse:
-        def read(self, n):
-            return b"x" * n
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-    monkeypatch.setattr(updates, "_urlopen", lambda *a, **k: FakeResponse())
+    """The body is valid JSON, so only the size bound can refuse it; and the read itself has to
+    be bounded, or the check runs after the memory is already spent."""
+    head, tail = b'{"versions": ["0.0.1"], "padding": "', b'"}'
+    body = head + b"x" * (updates._MAX_RESPONSE_BYTES + 1 - len(head) - len(tail)) + tail
+    assert len(body) == updates._MAX_RESPONSE_BYTES + 1
+    assert json.loads(body)["versions"] == ["0.0.1"]
+    response = _serve(monkeypatch, body)
     assert updates.fetch_latest(updates.PIP).error == "invalid_response"
+    assert response.requested, "the body was never read"
+    assert all(0 <= n <= updates._MAX_RESPONSE_BYTES + 1 for n in response.requested)
 
 
 def test_the_request_carries_no_install_identifier(monkeypatch):
     captured = {}
 
     class FakeResponse:
-        def read(self, n):
+        def read(self, n=-1):
             return json.dumps({"versions": ["2.0.1"]}).encode()
 
         def __enter__(self):
@@ -352,12 +469,20 @@ def test_a_newer_index_version_is_checked_for_a_security_release(monkeypatch, ch
     probe = updates.fetch_latest(channel)
     assert probe.error is None
     assert probe.is_security is True
+    assert probe.security_unresolved is False
     assert probe.release_url == _NEWER_PAGE
     assert calls[-1] == updates.GITHUB_TAG_URL.format(tag="v99.0.0")
 
 
 def test_an_ordinary_newer_release_stays_ordinary(monkeypatch):
     _stub_channels(monkeypatch, _PIP_NEWER, {"body": "### Added\n\n- A feature."})
+    probe = updates.fetch_latest(updates.PIP)
+    assert probe.is_security is False
+    assert probe.security_unresolved is False
+
+
+def test_security_in_the_prose_of_the_found_release_does_not_mark_it(monkeypatch):
+    _stub_channels(monkeypatch, _PIP_NEWER, {"body": "This is not a security release."})
     assert updates.fetch_latest(updates.PIP).is_security is False
 
 
@@ -368,12 +493,58 @@ def test_no_release_lookup_when_nothing_newer_was_found(monkeypatch):
     assert len(calls) == 1, "only the index may be contacted when there is nothing newer"
 
 
-def test_a_failed_release_lookup_keeps_the_found_version(monkeypatch):
-    _stub_channels(monkeypatch, _PIP_NEWER, release_error=urllib.error.URLError("down"))
+@pytest.mark.parametrize(
+    "release_payload, release_error",
+    [
+        (None, urllib.error.URLError("down")),
+        # A release still in draft answers 404 to an anonymous caller.
+        (None, urllib.error.HTTPError("u", 404, "Not Found", {}, None)),
+        (["not", "an", "object"], None),
+    ],
+)
+def test_a_failed_release_lookup_keeps_the_found_version(
+    monkeypatch, release_payload, release_error
+):
+    """The found update still stands, but the answer about its notes is recorded as unknown
+    rather than as an ordinary release."""
+    _stub_channels(monkeypatch, _PIP_NEWER, release_payload, release_error)
     probe = updates.fetch_latest(updates.PIP)
     assert probe.error is None
     assert probe.latest_version == "99.0.0"
     assert probe.is_security is False
+    assert probe.security_unresolved is True
+
+
+def test_the_unresolved_marker_is_part_of_the_probe_answer():
+    probe = updates.UpdateProbe(source=updates.PIP, security_unresolved=True)
+    assert probe.as_dict()["security_unresolved"] is True
+
+
+# --- pre-releases on the index and registry channels --------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "channel, payload",
+    [
+        (updates.PIP, {"versions": ["2.0.0", "2.0.1", "99.0.0rc1"]}),
+        (updates.DOCKER, {"results": [{"name": "99.0.0-rc1"}, {"name": "2.0.1"}]}),
+    ],
+)
+def test_a_stable_install_is_not_offered_a_prerelease(monkeypatch, channel, payload):
+    monkeypatch.setattr(updates, "VERSION", "2.0.1")
+    calls = _stub_channels(monkeypatch, payload, {"body": "### Security"})
+    probe = updates.fetch_latest(channel)
+    assert probe.error is None
+    assert probe.latest_version == "2.0.1"
+    assert not updates.is_newer(probe.latest_version, updates.VERSION)
+    assert len(calls) == 1, "no release lookup when there is no update to describe"
+
+
+def test_a_prerelease_install_is_offered_newer_prereleases(monkeypatch):
+    """Running a pre-release is the operator's own opt-in to them."""
+    monkeypatch.setattr(updates, "VERSION", "2.1.0a1")
+    _stub_channels(monkeypatch, {"versions": ["2.0.1", "2.1.0a1", "2.1.0a2"]}, {"body": ""})
+    assert updates.fetch_latest(updates.PIP).latest_version == "2.1.0a2"
 
 
 # --- release links and redirects ----------------------------------------------------------------

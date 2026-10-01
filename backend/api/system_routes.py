@@ -56,10 +56,11 @@ _ALLOWED_APP_CONFIG_KEYS = {
     "data.retention_days",
 }
 
-# Readable here but NOT writable. Whether IPMIDeck may check for a newer version on its own is
-# shown by the setup wizard and Settings from this route, but a write here would store the answer
-# without starting or stopping the check, so "off" would not hold until a restart. The write goes
-# through PUT /api/updates/consent, which does both.
+# Readable here but NOT writable. Whether IPMIDeck may check for a newer version on its own is an
+# ordinary app_config row, so it can be read by name like the others; the interface itself takes
+# the answer from GET /api/updates/state. A write here would store the answer without starting or
+# stopping the check, so "off" would not hold until a restart. The write goes through
+# PUT /api/updates/consent, which does both.
 _READ_ONLY_APP_CONFIG_KEYS = {
     "updates.check_enabled",
 }

@@ -27,15 +27,36 @@ NOTE (lifespan re-mount): each `with TestClient(app)` re-enters lifespan, which 
 """
 
 import asyncio
+import urllib.error
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 import backend.main as bm
+from backend.core import updates
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 IPMI_FIXTURES_DIR = FIXTURES_DIR / "ipmi"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _update_lookups_never_reach_the_network():
+    """Backstop: no test opens a socket to an update endpoint, stubbed or not.
+
+    Tests that exercise a lookup replace the opener themselves, and get this refusal back once
+    they finish. Anything that reaches it without doing so (a check started by an unstubbed route
+    call, say) fails as an unreachable endpoint instead of making a real request. Session-wide
+    rather than per test, because the unattended check is a background task that can outlive the
+    test that started it, and would otherwise find the real opener restored under it.
+    """
+
+    def refuse(request, timeout):
+        raise urllib.error.URLError("network disabled in tests")
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(updates, "_urlopen", refuse)
+        yield
 
 
 def _set_temp_env(tmp_path, monkeypatch) -> None:
