@@ -29,6 +29,7 @@ from backend.core.updates import (
     detect_install_method,
     fetch_latest,
     is_newer,
+    safe_release_url,
 )
 
 logger = logging.getLogger("ipmideck.updates")
@@ -42,7 +43,8 @@ _RESULT_KEY = "updates.last_result"
 CHECK_INTERVAL_SECONDS = 24 * 60 * 60
 
 # Floor between two network calls on the unattended path. Guards against a restart loop turning
-# into a request loop.
+# into a request loop, so it is measured against the stored time of the last check as well as
+# the in-memory one: a fresh process has no memory of the check its predecessor made a minute ago.
 MIN_AUTO_INTERVAL_SECONDS = 15 * 60
 
 # Floor between two network calls on the on-demand path. Short enough that a button press feels
@@ -88,7 +90,7 @@ def _status_from_probe(probe: UpdateProbe, checked_at: str) -> UpdateStatus:
         latest_version=probe.latest_version,
         update_available=is_newer(probe.latest_version, VERSION),
         is_security=probe.is_security,
-        release_url=probe.release_url or RELEASES_URL,
+        release_url=safe_release_url(probe.release_url),
         install_method=probe.source,
         checked_at=checked_at,
         error=probe.error,
@@ -144,7 +146,7 @@ class UpdateService:
             return status
         status.latest_version = data.get("latest_version")
         status.is_security = bool(data.get("is_security"))
-        status.release_url = data.get("release_url") or RELEASES_URL
+        status.release_url = safe_release_url(data.get("release_url"))
         status.checked_at = data.get("checked_at")
         status.error = data.get("error")
         # Recomputed rather than trusted: the running version changes on upgrade while the cached
@@ -174,6 +176,24 @@ class UpdateService:
             time.monotonic() - self._last_attempt
         ) < minimum
 
+    async def _checked_recently(self, minimum: float) -> bool:
+        """True when the stored result is younger than ``minimum`` seconds.
+
+        A timestamp in the future (a clock that was wrong, then corrected) does not count as
+        recent, so it cannot suppress checks until that moment arrives.
+        """
+        checked_at = (await self.cached_status()).checked_at
+        if not checked_at:
+            return False
+        try:
+            then = datetime.fromisoformat(checked_at)
+        except (TypeError, ValueError):
+            return False
+        if then.tzinfo is None:
+            then = then.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - then).total_seconds()
+        return 0 <= age < minimum
+
     async def check_now(self, minimum_interval: float = MIN_MANUAL_INTERVAL_SECONDS) -> UpdateStatus:
         """Look up the published version, honouring the rate limit.
 
@@ -187,7 +207,7 @@ class UpdateService:
             return status
 
         async with self._lock:
-            if self._too_soon(minimum_interval):
+            if self._too_soon(minimum_interval) or await self._checked_recently(minimum_interval):
                 return await self.cached_status()
 
             self._last_attempt = time.monotonic()
@@ -222,7 +242,13 @@ class UpdateService:
         while True:
             try:
                 status = await self.check_now(minimum_interval=MIN_AUTO_INTERVAL_SECONDS)
-                delay = self._backoff if status.error else CHECK_INTERVAL_SECONDS
+                if status.from_cache:
+                    # A previous run checked moments ago: try again once the floor has passed.
+                    delay = MIN_AUTO_INTERVAL_SECONDS
+                elif status.error:
+                    delay = self._backoff
+                else:
+                    delay = CHECK_INTERVAL_SECONDS
             except asyncio.CancelledError:
                 raise
             except Exception:
