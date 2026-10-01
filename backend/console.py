@@ -324,7 +324,7 @@ class ConsoleUI:
     action key + a status line with the active verbosity and the connected-client count + the
     credits line) over a deque-backed scrolling-log body, via rich Live(screen=True) + Layout.
     Action keys dispatch to sub-views (connected sessions / configured servers / show-URL /
-    update check), cycle the runtime verbosity (starting at INFO per D-04), and run the D-15d
+    update check), cycle the runtime verbosity (starting at INFO), and run the
     change-bind-host/port flow.
 
     SCROLLBACK / HANDLER tradeoffs are documented in the module docstring (Pitfall 1 / Pitfall 6).
@@ -446,7 +446,7 @@ class ConsoleUI:
     def _show_log(self, line: str, style: str = _PUSH_LOG_DEFAULT_STYLE) -> None:
         """Push an action-result line AND switch back to the log view so it is actually visible (r10).
 
-        ROOT CAUSE (04.1-04 gap-closure r10, concern 2): the show-URL ('u'), update-check ('g') and
+        ROOT CAUSE: the show-URL ('u'), update-check ('g') and
         change-bind ('b' → commit) actions pushed a line into the deque via _push_log() but did NOT
         change self.view. While the operator was in the 's' (servers) or 'c' (sessions) sub-view the
         body renders the TABLE, so the freshly pushed line was HIDDEN behind it ("I pressed u and
