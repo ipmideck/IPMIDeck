@@ -5,6 +5,9 @@ from __future__ import annotations
 import http.client
 import json
 import pathlib
+import ssl
+import threading
+import time
 import tomllib
 import urllib.error
 import urllib.request
@@ -55,6 +58,97 @@ def test_semantic_tags_parse(raw, expected_head):
 
 def test_a_prerelease_sorts_below_its_final_release():
     assert updates.parse_version("2.1.0") > updates.parse_version("2.1.0-rc1")
+
+
+# Each pair is (lower, higher) in PEP 440 order.
+@pytest.mark.parametrize(
+    "lower, higher",
+    [
+        ("2.1.0.dev1", "2.1.0a1"),
+        ("2.1.0a2", "2.1.0b1"),
+        ("2.1.0alpha3", "2.1.0beta1"),
+        ("2.1.0b9", "2.1.0rc1"),
+        ("2.1.0c1", "2.1.0rc2"),
+        ("2.1.0rc9", "2.1.0rc10"),
+        ("2.1.0-rc.9", "2.1.0-rc.10"),
+        ("2.1.0rc10", "2.1.0"),
+        ("2.1.0.dev99", "2.1.0"),
+        # A suffix of no known kind cannot be placed, so it ranks below everything.
+        ("2.1.0-nightly", "2.1.0.dev1"),
+        ("2.1.0-nightly", "2.1.0"),
+        # A post-release is a final release, ordered after the one it follows.
+        ("2.0.2", "2.0.2.post1"),
+        ("2.0.2.post1", "2.0.2.post2"),
+        ("2.0.2.post9", "2.0.3.dev1"),
+    ],
+)
+def test_release_phases_follow_pep_440_order(lower, higher):
+    assert updates.parse_version(lower) < updates.parse_version(higher)
+    assert updates.is_newer(higher, lower) is True
+    assert updates.is_newer(lower, higher) is False
+
+
+def test_a_post_release_is_a_final_release():
+    """It is offered to an install running a final release like any other release."""
+    assert updates._is_prerelease(updates.parse_version("2.0.2.post1")) is False
+    assert updates._newest(["2.0.2", "2.0.2.post1"]) == "2.0.2.post1"
+
+
+@pytest.mark.parametrize("raw", ["2.1.0.dev1", "2.1.0a1", "2.1.0-beta", "2.1.0rc1", "2.1.0-x"])
+def test_every_other_suffix_is_a_prerelease(raw):
+    assert updates._is_prerelease(updates.parse_version(raw)) is True
+
+
+# --- hostile version strings --------------------------------------------------------------------
+
+# Every version string comes from a remote answer: a tag name, an index entry. A run of digits
+# that cannot match makes a pattern with a digit-or-suffix ambiguity try every split of it.
+_HOSTILE_VERSION = "1.1." + "1" * 20_000 + "!"
+
+
+def _parse_timed(raw):
+    started = time.perf_counter()
+    parsed = updates.parse_version(raw)
+    return parsed, time.perf_counter() - started
+
+
+def test_a_hostile_version_string_is_refused_quickly():
+    parsed, elapsed = _parse_timed(_HOSTILE_VERSION)
+    assert parsed is None
+    assert elapsed < 0.5, f"parsing one version took {elapsed:.2f}s"
+
+
+def test_the_pattern_alone_stays_linear_on_hostile_input(monkeypatch):
+    """With the length limit out of the way, the pattern itself must still fail fast."""
+    monkeypatch.setattr(updates, "_MAX_VERSION_LENGTH", 10**6)
+    parsed, elapsed = _parse_timed(_HOSTILE_VERSION)
+    assert parsed is None
+    assert elapsed < 0.5, f"parsing one version took {elapsed:.2f}s"
+
+
+@pytest.mark.parametrize("lift_length_limit", [False, True])
+def test_a_huge_number_is_refused_rather_than_raised(monkeypatch, lift_length_limit):
+    """int() refuses more than a few thousand digits with a ValueError of its own."""
+    if lift_length_limit:
+        monkeypatch.setattr(updates, "_MAX_VERSION_LENGTH", 10**6)
+    assert updates.parse_version("1.1." + "1" * 5000) is None
+
+
+def test_a_ten_digit_number_is_refused_not_split_into_number_and_suffix():
+    """Nine digits is the bound, and the digit after it must not be read as a pre-release tag."""
+    assert updates.parse_version("2.0.1234567890") is None
+    assert updates.parse_version("2.0.123456789")[:3] == (2, 0, 123456789)
+
+
+def test_a_version_longer_than_the_limit_is_refused():
+    longest = "2.0.0-" + "a" * (updates._MAX_VERSION_LENGTH - len("2.0.0-"))
+    assert updates.parse_version(longest) is not None
+    assert updates.parse_version(longest + "a") is None
+
+
+@pytest.mark.parametrize("raw", [5, 2.0, ["2.0.1"], {"v": "2.0.1"}, True, b"2.0.1"])
+def test_a_version_of_the_wrong_type_is_refused(raw):
+    assert updates.parse_version(raw) is None
 
 
 @pytest.mark.parametrize(
@@ -168,6 +262,66 @@ def test_the_podman_marker_file_is_read(monkeypatch, tmp_path):
     assert updates._in_container() is True
 
 
+def test_the_docker_marker_file_alone_is_enough(monkeypatch, tmp_path):
+    """Docker writes /.dockerenv and sets no container variable, and the image carries the
+    installed distribution, so this one file is what keeps the answer off the Python index."""
+    _fake_pid1_environ(monkeypatch, tmp_path, b"PATH=/usr/bin\x00")
+    monkeypatch.setattr(updates.Path, "exists", lambda self: self.as_posix() == "/.dockerenv")
+    monkeypatch.setattr(updates, "_dist_version", lambda name: "2.0.1")
+    assert updates._in_container() is True
+    assert updates.detect_install_method() == updates.DOCKER
+
+
+def _refused_for(name):
+    """Path.exists as it behaves when the host denies the stat of one path: it raises."""
+
+    def exists(self):
+        if self.as_posix() == name or self.name == name:
+            raise PermissionError(13, "Permission denied", str(self))
+        return False
+
+    return exists
+
+
+def test_a_marker_the_host_refuses_to_show_counts_as_absent(monkeypatch, tmp_path):
+    """A hardened host can deny the stat of /run outright; detection falls through instead."""
+    _fake_pid1_environ(monkeypatch, tmp_path, b"PATH=/usr/bin\x00")
+    monkeypatch.setattr(updates.Path, "exists", _refused_for("/run/.containerenv"))
+    assert updates._in_container() is False
+
+
+def test_a_refused_working_tree_probe_falls_through_to_the_distribution(monkeypatch):
+    monkeypatch.setattr(updates, "_in_container", lambda: False)
+    monkeypatch.setattr(updates.Path, "exists", _refused_for(".git"))
+    monkeypatch.setattr(updates, "_dist_version", lambda name: "2.0.1")
+    assert updates.detect_install_method() == updates.PIP
+
+
+def test_metadata_too_broken_to_read_is_no_distribution(monkeypatch, tmp_path):
+    def broken(name):
+        raise KeyError("Version")
+
+    monkeypatch.setattr(updates, "_in_container", lambda: False)
+    monkeypatch.setattr(updates, "_dist_version", broken)
+    monkeypatch.setattr(updates, "__file__", str(tmp_path / "core" / "updates.py"))
+    assert updates.detect_install_method() == updates.UNKNOWN
+
+
+def test_a_failed_install_detection_is_a_reason_not_an_exception(monkeypatch):
+    """The lookup promises never to raise, and choosing its channel is part of the lookup."""
+
+    def broken():
+        raise RuntimeError("detection failed")
+
+    opened = []
+    monkeypatch.setattr(updates, "detect_install_method", broken)
+    monkeypatch.setattr(updates, "_urlopen", lambda request, timeout: opened.append(request))
+    probe = updates.fetch_latest()
+    assert probe.error == "invalid_response"
+    assert probe.source == updates.UNKNOWN
+    assert opened == []
+
+
 # --- changelog parsing --------------------------------------------------------------------------
 
 SAMPLE = """# Changelog
@@ -234,7 +388,7 @@ def test_empty_input_yields_no_entries():
 def _stub_fetch(monkeypatch, payload):
     calls = []
 
-    def fake(url, accept, timeout):
+    def fake(url, accept, timeout, cancel=None):
         calls.append(url)
         return payload
 
@@ -379,7 +533,7 @@ def test_every_failure_comes_back_as_a_reason_not_an_exception(monkeypatch, rais
     """An air-gapped or firewalled instance is an ordinary state, not an incident: it must not
     produce recurring tracebacks in the operator's log."""
 
-    def boom(url, accept, timeout):
+    def boom(url, accept, timeout, cancel=None):
         raise raised
 
     monkeypatch.setattr(updates, "_fetch", boom)
@@ -388,17 +542,59 @@ def test_every_failure_comes_back_as_a_reason_not_an_exception(monkeypatch, rais
     assert probe.latest_version is None
 
 
+class _DroppedResponse:
+    """A response whose connection fails while its body is being read."""
+
+    def __init__(self, error: BaseException):
+        self.error = error
+
+    def read(self, n=-1):
+        raise self.error
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+@pytest.mark.parametrize(
+    "dropped",
+    [
+        ConnectionResetError(104, "Connection reset by peer"),
+        ConnectionAbortedError(103, "Software caused connection abort"),
+        ssl.SSLEOFError(8, "EOF occurred in violation of protocol"),
+        ssl.SSLError(1, "record layer failure"),
+    ],
+    ids=["reset", "aborted", "tls-eof", "tls-error"],
+)
+def test_a_connection_lost_while_reading_the_body_is_unreachable(monkeypatch, dropped):
+    """urllib wraps failures while connecting, not while reading, so these arrive bare. They
+    say the network failed, not that the endpoint answered with something malformed."""
+    monkeypatch.setattr(updates, "_urlopen", lambda *a, **k: _DroppedResponse(dropped))
+    probe = updates.fetch_latest(updates.PIP)
+    assert probe.error == "unreachable"
+    assert probe.latest_version is None
+
+
+@pytest.mark.parametrize("body", [b'{"versions": ["2.0', b"\xff\xfe\x00", b"<html>portal</html>"])
+def test_a_malformed_body_is_still_an_invalid_response(monkeypatch, body):
+    _serve(monkeypatch, body)
+    assert updates.fetch_latest(updates.PIP).error == "invalid_response"
+
+
 def test_an_oversized_response_is_refused(monkeypatch):
-    """The body is valid JSON, so only the size bound can refuse it; and the read itself has to
-    be bounded, or the check runs after the memory is already spent."""
-    head, tail = b'{"versions": ["0.0.1"], "padding": "', b'"}'
-    body = head + b"x" * (updates._MAX_RESPONSE_BYTES + 1 - len(head) - len(tail)) + tail
-    assert len(body) == updates._MAX_RESPONSE_BYTES + 1
-    assert json.loads(body)["versions"] == ["0.0.1"]
+    """A valid object followed by whitespace past the bound: any prefix a read could stop at,
+    including the bound itself and one byte more, still parses as valid JSON. So only the size
+    check can refuse it, and only a read of exactly one byte past the bound can feed that check
+    without spending the memory the bound exists to protect."""
+    head = b'{"versions": ["0.0.1"]}'
+    body = head + b" " * (updates._MAX_RESPONSE_BYTES + 1024 - len(head))
+    for bound in (updates._MAX_RESPONSE_BYTES, updates._MAX_RESPONSE_BYTES + 1, len(body)):
+        assert json.loads(body[:bound])["versions"] == ["0.0.1"]
     response = _serve(monkeypatch, body)
     assert updates.fetch_latest(updates.PIP).error == "invalid_response"
-    assert response.requested, "the body was never read"
-    assert all(0 <= n <= updates._MAX_RESPONSE_BYTES + 1 for n in response.requested)
+    assert response.requested == [updates._MAX_RESPONSE_BYTES + 1]
 
 
 def test_the_request_carries_no_install_identifier(monkeypatch):
@@ -440,7 +636,7 @@ def test_the_outbound_address_is_logged_before_the_socket_opens(monkeypatch, cap
 def _stub_channels(monkeypatch, channel_payload, release_payload=None, release_error=None):
     calls = []
 
-    def fake(url, accept, timeout):
+    def fake(url, accept, timeout, cancel=None):
         calls.append(url)
         if "/releases/tags/" in url:
             if release_error is not None:
@@ -540,11 +736,140 @@ def test_a_stable_install_is_not_offered_a_prerelease(monkeypatch, channel, payl
     assert len(calls) == 1, "no release lookup when there is no update to describe"
 
 
-def test_a_prerelease_install_is_offered_newer_prereleases(monkeypatch):
+@pytest.mark.parametrize(
+    "channel, payload",
+    [
+        (updates.PIP, {"versions": ["2.0.1", "2.1.0a1", "2.1.0a2"]}),
+        (updates.DOCKER, {"results": [{"name": n} for n in ("2.1.0a2", "2.1.0a1", "2.0.1")]}),
+    ],
+)
+def test_a_prerelease_install_is_offered_newer_prereleases(monkeypatch, channel, payload):
     """Running a pre-release is the operator's own opt-in to them."""
     monkeypatch.setattr(updates, "VERSION", "2.1.0a1")
-    _stub_channels(monkeypatch, {"versions": ["2.0.1", "2.1.0a1", "2.1.0a2"]}, {"body": ""})
-    assert updates.fetch_latest(updates.PIP).latest_version == "2.1.0a2"
+    _stub_channels(monkeypatch, payload, {"body": ""})
+    assert updates.fetch_latest(channel).latest_version == "2.1.0a2"
+
+
+# --- pre-releases on the release channel --------------------------------------------------------
+
+_PRERELEASE_TAG = {
+    "tag_name": "v2.1.0rc1",
+    "body": "### Security\n\n- Fixed.",
+    "html_url": updates.RELEASES_URL + "/tag/v2.1.0rc1",
+}
+
+
+@pytest.mark.parametrize("channel", [updates.GIT, updates.UNKNOWN])
+def test_a_stable_install_is_not_offered_a_prerelease_tag(monkeypatch, channel):
+    """The same rule as the index and the registry: a clone, or a source tree nobody can place,
+    running a final release is not told to move to a release candidate."""
+    monkeypatch.setattr(updates, "VERSION", "2.0.1")
+    _stub_fetch(monkeypatch, _PRERELEASE_TAG)
+    probe = updates.fetch_latest(channel)
+    # Not a failed check: the newest release this install would be offered is the one it runs.
+    assert probe.error is None
+    assert probe.latest_version == "2.0.1"
+    assert probe.is_security is False
+    assert not updates.is_newer(probe.latest_version, updates.VERSION)
+
+
+@pytest.mark.parametrize("channel", [updates.GIT, updates.UNKNOWN])
+def test_a_prerelease_install_is_offered_a_prerelease_tag(monkeypatch, channel):
+    monkeypatch.setattr(updates, "VERSION", "2.1.0a1")
+    _stub_fetch(monkeypatch, _PRERELEASE_TAG)
+    probe = updates.fetch_latest(channel)
+    assert probe.error is None
+    assert probe.latest_version == "v2.1.0rc1"
+    assert probe.is_security is True
+    assert updates.is_newer(probe.latest_version, updates.VERSION)
+
+
+@pytest.mark.parametrize("tag", ["nightly", "v2", "release-2.1.0", "2.1", ""])
+def test_a_release_tag_that_is_not_a_version_counts_as_absent(monkeypatch, tag):
+    _stub_fetch(monkeypatch, {"tag_name": tag, "body": "### Security", "html_url": RELEASE_PAGE})
+    probe = updates.fetch_latest(updates.GIT)
+    assert probe.latest_version is None
+    assert probe.error == "no_release_found"
+    assert probe.is_security is False
+
+
+# --- withdrawing a lookup -----------------------------------------------------------------------
+
+
+def _recording_opener(monkeypatch, payload, on_open=None):
+    """Answer every request with ``payload`` and record its address; ``on_open`` runs first."""
+    opened = []
+
+    def fake_urlopen(request, timeout):
+        opened.append(request.full_url)
+        if on_open is not None:
+            on_open()
+        return _FakeResponse(json.dumps(payload).encode())
+
+    monkeypatch.setattr(updates, "_urlopen", fake_urlopen)
+    return opened
+
+
+@pytest.mark.parametrize("channel", [updates.PIP, updates.DOCKER, updates.GIT, updates.UNKNOWN])
+def test_a_lookup_withdrawn_before_it_starts_opens_no_socket(monkeypatch, caplog, channel):
+    opened = _recording_opener(monkeypatch, {"versions": ["99.0.0"]})
+    cancel = threading.Event()
+    cancel.set()
+    with caplog.at_level("INFO", logger="ipmideck.updates"):
+        probe = updates.fetch_latest(channel, cancel=cancel)
+    assert probe.error == "cancelled"
+    assert probe.latest_version is None
+    assert opened == []
+    # The audit log lists the addresses contacted; a request that was never made is not one.
+    assert not any("requesting" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.parametrize(
+    "channel, payload", [(updates.PIP, _PIP_NEWER), (updates.DOCKER, _DOCKER_NEWER)]
+)
+def test_a_lookup_withdrawn_mid_way_asks_for_no_release_notes(monkeypatch, channel, payload):
+    """Withdrawn while the index answer is in flight: that request finishes, the follow-up
+    request for the found version's release notes is never made."""
+    cancel = threading.Event()
+    opened = _recording_opener(monkeypatch, payload, on_open=cancel.set)
+    probe = updates.fetch_latest(channel, cancel=cancel)
+    assert probe.error == "cancelled"
+    assert len(opened) == 1
+    assert not any("/releases/tags/" in url for url in opened)
+
+
+def test_a_lookup_left_alone_still_asks_for_the_release_notes(monkeypatch):
+    """The counterpart of the test above: an event that is never set changes nothing."""
+    opened = _recording_opener(monkeypatch, _PIP_NEWER)
+    probe = updates.fetch_latest(updates.PIP, cancel=threading.Event())
+    assert probe.error is None
+    assert probe.latest_version == "99.0.0"
+    assert opened[-1] == updates.GITHUB_TAG_URL.format(tag="v99.0.0")
+
+
+def test_a_withdrawn_lookup_follows_no_further_redirect(monkeypatch):
+    """A redirect opens another socket, so it is a request like any other. The first hop is
+    followed; the lookup is withdrawn; the second hop is refused."""
+    cancel = threading.Event()
+    handler = updates._UpdateEndpointRedirects()
+    hops = []
+
+    def redirected_twice(request, timeout):
+        first = handler.redirect_request(
+            request, None, 301, "Moved", {}, "https://api.github.com/repositories/1/releases/latest"
+        )
+        hops.append(first.full_url)
+        cancel.set()
+        second = handler.redirect_request(
+            first, None, 301, "Moved", {}, "https://api.github.com/repositories/2/releases/latest"
+        )
+        hops.append(second.full_url)
+        return _FakeResponse(json.dumps({"tag_name": "v99.0.0"}).encode())
+
+    monkeypatch.setattr(updates, "_urlopen", redirected_twice)
+    probe = updates.fetch_latest(updates.GIT, cancel=cancel)
+    assert probe.error == "cancelled"
+    assert hops == ["https://api.github.com/repositories/1/releases/latest"]
 
 
 # --- release links and redirects ----------------------------------------------------------------

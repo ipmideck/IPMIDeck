@@ -23,6 +23,8 @@ import logging
 import os
 import re
 import socket
+import ssl
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -86,6 +88,19 @@ INSTALL_METHODS = (DOCKER, PIP, GIT, UNKNOWN)
 _APP_CONTAINER_RUNTIMES = frozenset({b"docker", b"podman", b"oci"})
 
 
+def _marker_present(path: str) -> bool:
+    """True when a marker file exists. A probe the host refuses to answer counts as absent.
+
+    ``Path.exists`` only absorbs "no such file"; a permission error on the stat (a hardened host,
+    a restricted /run) is raised. Install detection runs on every lookup and every status read,
+    so a marker nobody can see must not become an exception there.
+    """
+    try:
+        return Path(path).exists()
+    except OSError:
+        return False
+
+
 def _in_container() -> bool:
     """True when this process is running inside an application container built from an image.
 
@@ -93,10 +108,10 @@ def _in_container() -> bool:
     writes /run/.containerenv, while other rootless runtimes write neither and instead set
     ``container=`` in PID 1's environment. That variable is only trusted for the runtimes in
     ``_APP_CONTAINER_RUNTIMES``; an LXC or systemd-nspawn system container sets it too, but is
-    updated like a host, not by pulling a new image. Reading /proc/1/environ can fail (non-Linux,
-    restricted /proc), which is not an error — it just means that marker is unavailable.
+    updated like a host, not by pulling a new image. Any marker that cannot be read (non-Linux,
+    restricted /proc, a denied stat) is not an error — it just means that marker is unavailable.
     """
-    if Path("/.dockerenv").exists() or Path("/run/.containerenv").exists():
+    if _marker_present("/.dockerenv") or _marker_present("/run/.containerenv"):
         return True
     try:
         with open("/proc/1/environ", "rb") as fh:
@@ -124,47 +139,116 @@ def detect_install_method() -> str:
     is updated with a pull, not by reinstalling from the index. The tree it sits in is the
     stronger signal about how a new version actually arrives. A container image never carries a
     working tree (the build context excludes it), so the two cases cannot collide.
+
+    Never raises: a probe that cannot be answered counts as that marker being absent, and the
+    answer falls through to the next one.
     """
     if _in_container():
         return DOCKER
-    if (Path(__file__).resolve().parent.parent.parent / ".git").exists():
+    if _in_working_tree():
         return GIT
     try:
         _dist_version("ipmideck")
     except PackageNotFoundError:
         return UNKNOWN
+    except Exception as exc:  # noqa: BLE001 — metadata too broken to read is no distribution
+        logger.debug("Could not read the installed distribution's metadata: %r", exc)
+        return UNKNOWN
     return PIP
+
+
+def _in_working_tree() -> bool:
+    """True when the package sits in a git working tree. Unanswerable counts as no tree."""
+    try:
+        return (Path(__file__).resolve().parent.parent.parent / ".git").exists()
+    except (OSError, RuntimeError):
+        # RuntimeError is what a symlink loop raises from resolve() before Python 3.13.
+        return False
 
 
 # --- version comparison -----------------------------------------------------------------------
 
-# MAJOR.MINOR.PATCH with an optional pre-release suffix. Deliberately strict: a moving tag such as
-# `latest` or `2.0`, or a commit tag such as `sha-eb8452f`, carries no ordering information, and
-# guessing one would let a rolling tag masquerade as a release.
-_VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-.]?([0-9A-Za-z.\-]+))?$")
+# MAJOR.MINOR.PATCH with an optional suffix. Deliberately strict: a moving tag such as `latest` or
+# `2.0`, or a commit tag such as `sha-eb8452f`, carries no ordering information, and guessing one
+# would let a rolling tag masquerade as a release.
+#
+# Every string parsed here comes from a remote answer, so the pattern must fail fast on hostile
+# input. Each number is at most nine digits, which int() always accepts and no release will need.
+# The suffix has to start with a separator or a letter, so there is exactly one place where the
+# patch number can end; were a digit allowed there, a long run of digits could be split between
+# the two in every possible way, and a failing match would try them all.
+_VERSION_RE = re.compile(r"v?([0-9]{1,9})\.([0-9]{1,9})\.([0-9]{1,9})([-.A-Za-z][-.0-9A-Za-z]*)?")
+
+# Longer than any real version tag. Refused before the pattern runs, so a remote answer padded
+# with a megabyte of digits costs a length check rather than a scan.
+_MAX_VERSION_LENGTH = 64
+
+# One release phase and its optional number, in the PEP 440 spellings the index publishes (`rc1`,
+# `.dev2`, `.post1`) and the semantic-versioning ones a tag may use (`-rc.1`, `-beta`).
+_SUFFIX_RE = re.compile(r"[-.]?([a-z]+)[-.]?([0-9]{1,9})?")
+
+# How a suffix ranks against the final release of the same number, in PEP 440's phase order:
+# development < alpha < beta < release candidate < final < post-release. A suffix of any other
+# kind ranks below all of them: nobody can say where it belongs, so it is treated as the least
+# finished thing there is, and an install running a final release is never offered it.
+_UNKNOWN_PHASE = 0
+_PRERELEASE_PHASES = {
+    "dev": 1,
+    "a": 2,
+    "alpha": 2,
+    "b": 3,
+    "beta": 3,
+    "c": 4,
+    "rc": 4,
+    "pre": 4,
+    "preview": 4,
+}
+_FINAL = 5
+# A post-release republishes a final release with a packaging or documentation fix. It is a final
+# release itself, ordered after the one it follows.
+_POST_PHASES = frozenset({"post", "rev", "r"})
+
+
+def _release_phase(suffix: str | None) -> tuple[int, int]:
+    """Rank a version suffix as (phase, number), so plain tuple comparison orders it correctly.
+
+    A final release is (_FINAL, -1): its post-releases, numbered from 0, follow it, and every
+    pre-release phase precedes it whatever its number, so rc10 > rc9 and a1 > dev1 > anything
+    unrecognised.
+    """
+    if not suffix:
+        return (_FINAL, -1)
+    match = _SUFFIX_RE.fullmatch(suffix.lower())
+    if not match:
+        return (_UNKNOWN_PHASE, 0)
+    phase, number = match.groups()
+    count = int(number) if number else 0
+    if phase in _POST_PHASES:
+        return (_FINAL, count)
+    if phase in _PRERELEASE_PHASES:
+        return (_PRERELEASE_PHASES[phase], count)
+    return (_UNKNOWN_PHASE, 0)
 
 
 def parse_version(raw: str | None) -> tuple | None:
-    """Parse a strict semantic version into a comparable tuple, or None if it is not one.
+    """Parse a strict version into a comparable tuple, or None if it is not one. Never raises.
 
-    The fourth element orders pre-releases below the matching final release: a final release gets
-    a sentinel that sorts after any suffix, so 2.1.0 > 2.1.0-rc1 without special-casing callers.
+    The fourth element is the release phase (see ``_release_phase``), which orders pre-releases
+    below the matching final release and post-releases above it: 2.1.0rc1 < 2.1.0 < 2.1.0.post1,
+    without special-casing callers.
     """
-    if not raw or not isinstance(raw, str):
+    if not isinstance(raw, str) or len(raw) > _MAX_VERSION_LENGTH:
         return None
-    match = _VERSION_RE.match(raw.strip())
+    match = _VERSION_RE.fullmatch(raw.strip())
     if not match:
         return None
     major, minor, patch, suffix = match.groups()
-    # (0, suffix) for a pre-release, (1, "") for a final release — tuples compare element-wise, so
-    # the leading flag alone decides the ordering between the two.
-    tail = (0, suffix.lower()) if suffix else (1, "")
-    return (int(major), int(minor), int(patch), tail)
+    return (int(major), int(minor), int(patch), _release_phase(suffix))
 
 
 def _is_prerelease(parsed: tuple) -> bool:
-    """True for a parsed version that carries a pre-release suffix (see ``parse_version``)."""
-    return parsed[3][0] == 0
+    """True for a parsed version that ranks below a final release (see ``parse_version``)."""
+    return parsed[3][0] < _FINAL
 
 
 def is_newer(candidate: str | None, current: str | None) -> bool:
@@ -326,6 +410,15 @@ def _check_target(url: str) -> None:
         raise ValueError(f"refusing to contact {url}")
 
 
+class _Cancelled(Exception):
+    """The caller withdrew the lookup, so the next request was not made."""
+
+
+def _raise_if_cancelled(cancel: threading.Event | None) -> None:
+    if cancel is not None and cancel.is_set():
+        raise _Cancelled()
+
+
 class _UpdateEndpointRedirects(urllib.request.HTTPRedirectHandler):
     """Follow a redirect only to https on one of the update endpoints, and log it like a request.
 
@@ -335,8 +428,15 @@ class _UpdateEndpointRedirects(urllib.request.HTTPRedirectHandler):
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         _check_target(newurl)
+        # Following a redirect opens another socket, so a withdrawn lookup stops here as well.
+        # The event travels on the request, and is handed on to the next one for a chain.
+        cancel = getattr(req, "update_cancel", None)
+        _raise_if_cancelled(cancel)
         logger.info("Update check: following a redirect to %s", newurl)
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
+        followed = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if followed is not None:
+            followed.update_cancel = cancel
+        return followed
 
 
 _OPENER = urllib.request.build_opener(_UpdateEndpointRedirects)
@@ -347,19 +447,24 @@ def _urlopen(request: urllib.request.Request, timeout: float):
     return _OPENER.open(request, timeout=timeout)
 
 
-def _fetch(url: str, accept: str, timeout: float) -> dict:
+def _fetch(url: str, accept: str, timeout: float, cancel: threading.Event | None = None) -> dict:
     """GET a JSON document with the standard library only.
 
     Logged verbatim before the socket opens so an operator auditing their own logs can see every
     address this process contacts, without having to run a packet capture to trust the claim.
+    ``cancel`` is read first, so a withdrawn lookup neither opens the socket nor logs a request
+    that was never made.
     """
     _check_target(url)
+    _raise_if_cancelled(cancel)
     logger.info("Update check: requesting %s", url)
     request = urllib.request.Request(  # noqa: S310 — https on an allow-listed host, checked above
         url,
         headers={"Accept": accept, "User-Agent": USER_AGENT},
         method="GET",
     )
+    # Carried on the request so the redirect handler, which sees only the request, can read it.
+    request.update_cancel = cancel
     with _urlopen(request, timeout) as response:
         raw = response.read(_MAX_RESPONSE_BYTES + 1)
     if len(raw) > _MAX_RESPONSE_BYTES:
@@ -396,10 +501,15 @@ def _running_prerelease() -> bool:
     return running is not None and _is_prerelease(running)
 
 
-def _latest_from_pypi(timeout: float) -> UpdateProbe:
+def _latest_from_pypi(timeout: float, cancel: threading.Event | None = None) -> UpdateProbe:
     """The index API returns the file list; the simple JSON form is an order of magnitude
     smaller than the project JSON route for the same answer."""
-    data = _fetch(timeout=timeout, url=PYPI_URL, accept="application/vnd.pypi.simple.v1+json")
+    data = _fetch(
+        timeout=timeout,
+        url=PYPI_URL,
+        accept="application/vnd.pypi.simple.v1+json",
+        cancel=cancel,
+    )
     versions = data.get("versions")
     latest = _newest(
         versions if isinstance(versions, list) else [],
@@ -408,10 +518,10 @@ def _latest_from_pypi(timeout: float) -> UpdateProbe:
     return UpdateProbe(source=PIP, latest_version=latest, release_url=RELEASES_URL)
 
 
-def _latest_from_dockerhub(timeout: float) -> UpdateProbe:
+def _latest_from_dockerhub(timeout: float, cancel: threading.Event | None = None) -> UpdateProbe:
     """Tags come back newest-first, but the newest is usually a moving tag (`latest`, `2.0`) or a
     commit tag (`sha-…`). Only strictly semantic tags are ordered; the rest are discarded."""
-    data = _fetch(timeout=timeout, url=DOCKERHUB_URL, accept="application/json")
+    data = _fetch(timeout=timeout, url=DOCKERHUB_URL, accept="application/json", cancel=cancel)
     results = data.get("results")
     entries = results if isinstance(results, list) else []
     names = [entry.get("name") for entry in entries if isinstance(entry, dict)]
@@ -419,20 +529,37 @@ def _latest_from_dockerhub(timeout: float) -> UpdateProbe:
     return UpdateProbe(source=DOCKER, latest_version=latest, release_url=RELEASES_URL)
 
 
-def _latest_from_github(timeout: float) -> UpdateProbe:
+def _latest_from_github(timeout: float, cancel: threading.Event | None = None) -> UpdateProbe:
     """The releases endpoint carries the release body as well as the tag, which is the only
-    channel that can tell a security release from an ordinary one."""
-    data = _fetch(timeout=timeout, url=GITHUB_URL, accept="application/vnd.github+json")
+    channel that can tell a security release from an ordinary one.
+
+    The tag is held to the same rules as a version from the index or the registry: one that does
+    not parse carries no ordering and counts as absent, and a pre-release is offered only to an
+    install that already runs one.
+    """
+    data = _fetch(
+        timeout=timeout, url=GITHUB_URL, accept="application/vnd.github+json", cancel=cancel
+    )
     tag = data.get("tag_name")
+    parsed = parse_version(tag)
+    if parsed is None:
+        return UpdateProbe(source=GIT, release_url=RELEASES_URL)
+    if _is_prerelease(parsed) and not _running_prerelease():
+        # Nothing this install should move to was published after it. That is an answer, not a
+        # failed lookup: reported as a failure it would show "the check could not be completed"
+        # and drive the retry backoff for as long as the candidate stays the latest release.
+        return UpdateProbe(source=GIT, latest_version=VERSION, release_url=RELEASES_URL)
     return UpdateProbe(
         source=GIT,
-        latest_version=tag if isinstance(tag, str) and tag else None,
+        latest_version=tag,
         release_url=safe_release_url(data.get("html_url")),
         is_security=_is_security_body(data.get("body")),
     )
 
 
-def _mark_security_from_release(probe: UpdateProbe, timeout: float) -> None:
+def _mark_security_from_release(
+    probe: UpdateProbe, timeout: float, cancel: threading.Event | None = None
+) -> None:
     """Ask the published release of a newer version found on the index or registry whether it
     is a security release. Those two channels carry no release notes of their own.
 
@@ -445,7 +572,13 @@ def _mark_security_from_release(probe: UpdateProbe, timeout: float) -> None:
     tag = "v" + probe.latest_version.lstrip("v")
     url = GITHUB_TAG_URL.format(tag=urllib.parse.quote(tag, safe=""))
     try:
-        data = _fetch(timeout=timeout, url=url, accept="application/vnd.github+json")
+        data = _fetch(
+            timeout=timeout, url=url, accept="application/vnd.github+json", cancel=cancel
+        )
+    except _Cancelled:
+        # Withdrawn rather than failed. The caller asked for no further request, and the answer
+        # has to say so instead of passing off a half-finished lookup as a complete one.
+        raise
     except Exception as exc:  # noqa: BLE001 — see docstring
         logger.debug("Could not read the release notes of %s: %s", tag, exc)
         probe.security_unresolved = True
@@ -468,25 +601,54 @@ _CHANNELS = {
 }
 
 
-def fetch_latest(method: str | None = None, timeout: float = DEFAULT_TIMEOUT) -> UpdateProbe:
+def fetch_latest(
+    method: str | None = None,
+    timeout: float = DEFAULT_TIMEOUT,
+    *,
+    cancel: threading.Event | None = None,
+) -> UpdateProbe:
     """Look up the newest published version for this install's channel.
 
     Never raises. Every failure — no route to host, DNS failure, rate limit, malformed payload —
     comes back as ``error`` on the probe, because the failure modes here are ordinary on an
     air-gapped or firewalled box and must not produce recurring tracebacks in an operator's log.
+
+    ``cancel`` lets a caller withdraw a lookup running in a worker thread, which cannot be
+    interrupted from outside. It is read immediately before every request, so once it is set no
+    further socket is opened and the probe comes back with ``error="cancelled"``; a request
+    already under way is not cut short, and ends within ``timeout``.
     """
-    channel = method or detect_install_method()
-    fetcher = _CHANNELS.get(channel, _latest_from_github)
+    # Named before anything can fail, so every outcome below can say which channel it was for.
+    channel = method or UNKNOWN
     try:
-        probe = fetcher(timeout)
+        channel = method or detect_install_method()
+        fetcher = _CHANNELS.get(channel, _latest_from_github)
+        probe = fetcher(timeout, cancel)
+        if probe.latest_version is None:
+            probe.error = "no_release_found"
+        elif probe.source in (PIP, DOCKER) and is_newer(probe.latest_version, VERSION):
+            _mark_security_from_release(probe, timeout, cancel)
+        return probe
+    except _Cancelled:
+        logger.debug("Update check withdrawn before its next request")
+        return UpdateProbe(source=channel, error="cancelled")
     except urllib.error.HTTPError as exc:
         # 403 from the releases API is nearly always the anonymous hourly budget, which is a
         # different situation for the operator than the endpoint being broken.
         reason = "rate_limited" if exc.code in (403, 429) else f"http_{exc.code}"
         return UpdateProbe(source=channel, error=reason)
-    except (urllib.error.URLError, socket.timeout, TimeoutError, http.client.HTTPException):
-        # A body cut short (IncompleteRead) is raised while reading the response, where urllib no
-        # longer wraps errors, and it is an HTTPException rather than an OSError.
+    except (
+        urllib.error.URLError,
+        socket.timeout,
+        TimeoutError,
+        http.client.HTTPException,
+        ConnectionError,
+        ssl.SSLError,
+    ):
+        # Failures while reading the body are raised where urllib no longer wraps errors: a body
+        # cut short (IncompleteRead) is an HTTPException rather than an OSError, and a reset
+        # connection or a TLS session torn down mid-body arrives as a bare ConnectionError or
+        # SSLError. All of them say the network failed, not that the answer was malformed.
         return UpdateProbe(source=channel, error="unreachable")
     except (ValueError, OSError) as exc:
         logger.debug("Update check failed: %s", exc)
@@ -494,11 +656,6 @@ def fetch_latest(method: str | None = None, timeout: float = DEFAULT_TIMEOUT) ->
     except Exception as exc:  # noqa: BLE001 — see docstring: a lookup must never raise
         logger.debug("Update check failed unexpectedly: %r", exc)
         return UpdateProbe(source=channel, error="invalid_response")
-    if probe.latest_version is None:
-        probe.error = "no_release_found"
-    elif probe.source in (PIP, DOCKER) and is_newer(probe.latest_version, VERSION):
-        _mark_security_from_release(probe, timeout)
-    return probe
 
 
 def env_flag(name: str, default: bool) -> bool:
