@@ -114,12 +114,15 @@ export default function SetupPage() {
       // gone through. Deliberately not allowed to block the wizard: a preference write that
       // fails must not trap someone on this step. Nothing is stored in that case, which means no
       // unattended check runs whatever the box showed, so the operator is told where to set it.
-      // A 404 is not a failure: the configuration has switched update checks off entirely and
-      // the route does not exist, so there is nothing to record.
+      // A 405 or a 404 is not a failure: the configuration has switched update checks off
+      // entirely and the route does not exist, so there is nothing to record. The server answers
+      // 405 in that case, because the page fallback still matches the path for GET only; 404 is
+      // accepted too so the outcome does not hinge on how the fallback is mounted.
       try {
         await put("/api/updates/consent", { enabled: allowUpdateChecks });
       } catch (e: any) {
-        if (!String(e?.message ?? "").includes(" 404 ")) {
+        const message = String(e?.message ?? "");
+        if (!message.includes(" 404 ") && !message.includes(" 405 ")) {
           toast.warning(
             t("setup.auth.updateChecksSaveFailed", {
               where: `${t("nav.settings")} → ${t("settings.sections.about")}`,

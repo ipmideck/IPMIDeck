@@ -134,16 +134,21 @@ describe("the setup wizard's update question", () => {
     await waitFor(() => expect(toast.warning).toHaveBeenCalledTimes(1));
   });
 
-  it("says nothing when update checks are switched off in the configuration", async () => {
-    // The route does not exist then, and there is nothing to record.
-    (put as unknown as { mockRejectedValueOnce: (e: Error) => void }).mockRejectedValueOnce(
-      new Error("API error: 404 Not Found"),
-    );
-    const user = userEvent.setup();
-    renderWizardAtAuthStep();
-    await goToAuthStep(user);
-    await answerAndContinue(user);
-    await waitFor(() => expect(screen.getByRole("combobox")).toBeTruthy());
-    expect(toast.warning).not.toHaveBeenCalled();
-  });
+  // The route does not exist then, and there is nothing to record. What the server actually
+  // answers is 405: the page fallback still matches the path, for GET only. A 404 means the
+  // same thing and is covered too.
+  it.each([["405 Method Not Allowed"], ["404 Not Found"]])(
+    "says nothing when update checks are switched off in the configuration (%s)",
+    async (status) => {
+      (put as unknown as { mockRejectedValueOnce: (e: Error) => void }).mockRejectedValueOnce(
+        new Error(`API error: ${status}`),
+      );
+      const user = userEvent.setup();
+      renderWizardAtAuthStep();
+      await goToAuthStep(user);
+      await answerAndContinue(user);
+      await waitFor(() => expect(screen.getByRole("combobox")).toBeTruthy());
+      expect(toast.warning).not.toHaveBeenCalled();
+    },
+  );
 });

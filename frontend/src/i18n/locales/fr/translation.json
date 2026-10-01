@@ -424,7 +424,7 @@
       "credentialsRequired": "Le nom d'utilisateur et le mot de passe sont requis.",
       "applyFailed": "Échec de l'application du paramètre d'authentification.",
       "updateChecksLabel": "Autoriser IPMIDeck à rechercher de nouvelles versions",
-      "updateChecksHint": "Une fois par jour, IPMIDeck demande à l'index public des versions si une version plus récente existe. La requête ne contient que le nom du produit et la version utilisée — aucun identifiant, rien sur vos serveurs. Vous pouvez désactiver cela à tout moment dans les Réglages.",
+      "updateChecksHint": "Au démarrage puis une fois par jour, IPMIDeck demande à la source où cette installation est publiée (l'index des paquets Python, le registre de conteneurs ou les versions GitHub) si une version plus récente existe. Si la recherche dans l'index des paquets ou le registre en trouve une, il demande aussi à GitHub s'il s'agit d'une version de sécurité. Chaque requête ne contient que le nom du produit et la version utilisée — aucun identifiant, rien sur vos serveurs. Vous pouvez désactiver cela à tout moment dans les Paramètres.",
       "updateChecksSaveFailed": "Votre choix concernant la vérification des mises à jour n'a pas pu être enregistré. Vous pourrez le définir plus tard dans {{where}}."
     },
     "server": {
@@ -690,7 +690,7 @@
     "releaseNotes": "Notes de version",
     "settingsTitle": "Mises à jour",
     "settingsDescription": "Si IPMIDeck peut consulter les versions publiées, et ce qu'il a trouvé.",
-    "suppressedByConfig": "La vérification des mises à jour est désactivée dans le fichier de configuration (updates.enabled). Tant que cela n'est pas modifié, rien ici ne peut contacter le réseau.",
+    "suppressedByConfig": "La vérification des mises à jour est désactivée dans la configuration (updates.enabled dans config.yaml, ou la variable d'environnement IPMIDECK_UPDATES_ENABLED). Tant que cela n'est pas modifié, rien ici ne peut contacter le réseau.",
     "consentLabel": "Rechercher automatiquement de nouvelles versions",
     "consentHint": "Au démarrage puis une fois par jour. Seuls le nom du produit et votre version sont envoyés. Rien ne s'affiche tant que vous êtes à jour.",
     "consentFailed": "Le réglage n'a pas pu être enregistré.",

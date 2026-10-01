@@ -424,7 +424,7 @@
       "credentialsRequired": "ユーザー名とパスワードは必須です。",
       "applyFailed": "認証設定の適用に失敗しました。",
       "updateChecksLabel": "IPMIDeck が新しいバージョンを確認することを許可する",
-      "updateChecksHint": "IPMIDeck は 1 日に 1 回、公開されているリリース一覧に新しいバージョンがあるか問い合わせます。送信されるのは製品名と実行中のバージョンだけで、識別子もサーバーの情報も含みません。設定からいつでも無効にできます。",
+      "updateChecksHint": "IPMIDeck は起動時と 1 日に 1 回、このインストールの公開元（Python パッケージインデックス、コンテナレジストリ、または GitHub のリリース）に新しいバージョンがあるか問い合わせます。パッケージインデックスまたはレジストリで新しいバージョンが見つかった場合は、それがセキュリティリリースかどうかを GitHub にも問い合わせます。どのリクエストにも含まれるのは製品名と実行中のバージョンだけで、識別子もサーバーの情報も含みません。設定からいつでも無効にできます。",
       "updateChecksSaveFailed": "更新チェックに関する選択を保存できませんでした。後で {{where}} から設定できます。"
     },
     "server": {
@@ -688,7 +688,7 @@
     "releaseNotes": "リリースノート",
     "settingsTitle": "更新",
     "settingsDescription": "IPMIDeck が公開バージョンを照会してよいか、そして何が見つかったか。",
-    "suppressedByConfig": "更新確認は設定ファイルで無効になっています（updates.enabled）。変更されるまで、ここから通信が行われることはありません。",
+    "suppressedByConfig": "更新確認は設定ファイル（config.yaml の updates.enabled）または環境変数 IPMIDECK_UPDATES_ENABLED で無効になっています。変更されるまで、ここから通信が行われることはありません。",
     "consentLabel": "新しいバージョンを自動的に確認する",
     "consentHint": "起動時と 1 日に 1 回。送信されるのは製品名とバージョンだけです。最新の場合は何も表示されません。",
     "consentFailed": "設定を保存できませんでした。",

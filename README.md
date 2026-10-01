@@ -169,26 +169,35 @@ used to turn the login off.
 
 ### Update checks
 
-IPMIDeck can tell you when a newer version has been published. Nothing is contacted until you
-have answered: first-run setup asks the question once, with the box already ticked, and you
-confirm or untick it. You can change your mind at any time under **Settings → About → Updates**.
+IPMIDeck can tell you when a newer version has been published. It contacts nothing on its own
+before you have answered, nor after you untick the box: first-run setup asks the question once,
+with the box already ticked, and you confirm or untick it. An existing installation that
+upgrades does not go through setup again, so it is not asked: there the unattended check stays
+off until you turn it on under **Settings → About → Updates**, which is also where you can
+change your mind at any time.
 
 - **What it does.** With your answer recorded, IPMIDeck looks up the newest published version at
-  start-up and once every 24 hours. The **Check now** button and the console `[g]` key check on
-  demand, when you press them.
+  start-up and once every 24 hours. If a check fails (no route out, rate limited, an endpoint
+  error) it tries again after a growing delay, from 15 minutes up to once every 6 hours, until one
+  succeeds.
+- **On demand.** The **Check now** button and the console `[g]` key check when you press them,
+  whatever was answered during setup. Both are refused when `updates.enabled` is off.
 - **What it sends.** One `GET`, to the index matching how you installed (the Python package
   index, the container registry, or the published releases). The request carries the product
   name and the version you are running, and nothing else — no identifier, no hostname, nothing
   about your servers. Like any request, it shows the endpoint your public IP address. When a
   package-index or container-registry lookup finds a newer version, one more `GET` asks the
-  published releases whether it is a security release. Every request is logged verbatim before
-  the socket opens, so you can audit it in your own logs.
+  published releases whether it is a security release: a release is marked as one when its
+  release notes have a `### Security` section. If those notes cannot be read yet, that question
+  is asked again after an hour. Every request is logged verbatim before the socket opens, so you
+  can audit it in your own logs.
 - **What it never does.** It does not download or install anything, and it shows nothing at all
   while you are on the latest version.
 - **Turning it off completely.** Set `updates.enabled: false` in `config.yaml` (or
   `IPMIDECK_UPDATES_ENABLED=false`). With that set, the endpoints that could open a socket are
   never registered and the periodic check never starts — whatever was answered during setup.
-  The version history keeps working: it is read from a file inside the package, not fetched.
+  A value that reads as neither on nor off counts as off, with a warning in the log. The version
+  history keeps working: it is read from a file inside the package, not fetched.
 
 ---
 

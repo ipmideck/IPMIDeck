@@ -424,7 +424,7 @@
       "credentialsRequired": "需要用户名和密码。",
       "applyFailed": "应用身份验证设置失败。",
       "updateChecksLabel": "允许 IPMIDeck 检查新版本",
-      "updateChecksHint": "IPMIDeck 每天一次向公开的发布索引询问是否有更新的版本。请求只包含产品名称和你正在运行的版本，不含任何标识符，也不含服务器信息。你可以随时在设置中关闭。",
+      "updateChecksHint": "IPMIDeck 会在启动时以及每天一次，向本安装的发布来源（Python 包索引、容器仓库或 GitHub 发布）询问是否有更新的版本。如果在包索引或仓库中找到了新版本，还会向 GitHub 询问它是否为安全发布。每个请求只包含产品名称和你正在运行的版本，不含任何标识符，也不含服务器信息。你可以随时在设置中关闭。",
       "updateChecksSaveFailed": "无法保存你关于更新检查的选择。你可以稍后在 {{where}} 中设置。"
     },
     "server": {
@@ -688,7 +688,7 @@
     "releaseNotes": "发布说明",
     "settingsTitle": "更新",
     "settingsDescription": "IPMIDeck 是否可以查询已发布的版本，以及查询结果。",
-    "suppressedByConfig": "更新检查已在配置文件中关闭（updates.enabled）。在此更改之前，这里的任何操作都不会联网。",
+    "suppressedByConfig": "更新检查已通过配置文件（config.yaml 中的 updates.enabled）或环境变量 IPMIDECK_UPDATES_ENABLED 关闭。在此更改之前，这里的任何操作都不会联网。",
     "consentLabel": "自动检查新版本",
     "consentHint": "启动时以及每天一次。只发送产品名称和你的版本。已是最新时不会显示任何内容。",
     "consentFailed": "无法保存该设置。",

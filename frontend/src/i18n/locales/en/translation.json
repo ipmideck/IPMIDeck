@@ -424,7 +424,7 @@
       "credentialsRequired": "Username and password are required.",
       "applyFailed": "Failed to apply authentication setting.",
       "updateChecksLabel": "Let IPMIDeck check for new versions",
-      "updateChecksHint": "Once a day, IPMIDeck asks the public release index whether a newer version exists. The request carries only the product name and the version you are running — no identifier, nothing about your servers. You can turn this off at any time in Settings.",
+      "updateChecksHint": "At start-up and once a day, IPMIDeck asks where this install is published (the Python package index, the container registry or GitHub releases) whether a newer version exists. If a package-index or registry lookup finds one, it also asks GitHub whether that is a security release. Each request carries only the product name and the version you are running — no identifier, nothing about your servers. You can turn this off at any time in Settings.",
       "updateChecksSaveFailed": "Your answer about update checks could not be saved. You can set it later in {{where}}."
     },
     "server": {
@@ -690,7 +690,7 @@
     "releaseNotes": "Release notes",
     "settingsTitle": "Updates",
     "settingsDescription": "Whether IPMIDeck may look up published versions, and what it found.",
-    "suppressedByConfig": "Update checks are switched off in the configuration file (updates.enabled). Nothing here can contact the network until that is changed.",
+    "suppressedByConfig": "Update checks are switched off in the configuration (updates.enabled in config.yaml, or the IPMIDECK_UPDATES_ENABLED environment variable). Nothing here can contact the network until that is changed.",
     "consentLabel": "Check for new versions automatically",
     "consentHint": "At start-up and once a day. Only the product name and your version are sent. Nothing is shown while you are up to date.",
     "consentFailed": "The setting could not be saved.",

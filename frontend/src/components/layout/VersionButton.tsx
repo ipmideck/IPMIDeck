@@ -23,11 +23,17 @@ export function VersionButton({ className, onOpen }: VersionButtonProps) {
   const setChangelogOpen = useUIOverlayStore((s) => s.setChangelogOpen);
   const state = useUpdateStore((s) => s.state);
   const loadState = useUpdateStore((s) => s.loadState);
+  const watchState = useUpdateStore((s) => s.watchState);
 
   // Reads a cached row on the server; it never triggers a lookup of its own.
   useEffect(() => {
     if (state === null) void loadState();
   }, [state, loadState]);
+
+  // Loading once is not enough on a page left open: the unattended check runs on the server and
+  // its result would otherwise never reach this badge. Re-reads the same cached row when the tab
+  // is shown again and, while the unattended check is on, once an hour.
+  useEffect(() => watchState(), [watchState]);
 
   const version = state?.current_version ?? null;
   const updateAvailable = Boolean(state?.update_available);

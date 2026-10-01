@@ -424,7 +424,7 @@
       "credentialsRequired": "Nome utente e password sono obbligatori.",
       "applyFailed": "Impossibile applicare l'impostazione di autenticazione.",
       "updateChecksLabel": "Consenti a IPMIDeck di cercare nuove versioni",
-      "updateChecksHint": "Una volta al giorno IPMIDeck chiede all'indice pubblico delle release se esiste una versione più recente. La richiesta contiene solo il nome del prodotto e la versione in uso: nessun identificativo, nulla sui tuoi server. Puoi disattivarla quando vuoi dalle Impostazioni.",
+      "updateChecksHint": "All'avvio e una volta al giorno IPMIDeck chiede alla fonte da cui è distribuita questa installazione (l'indice dei pacchetti Python, il registro dei container o le release su GitHub) se esiste una versione più recente. Se la ricerca nell'indice dei pacchetti o nel registro ne trova una, chiede anche a GitHub se si tratta di un rilascio di sicurezza. Ogni richiesta contiene solo il nome del prodotto e la versione in uso: nessun identificativo, nulla sui tuoi server. Puoi disattivare il controllo quando vuoi dalle Impostazioni.",
       "updateChecksSaveFailed": "Non è stato possibile salvare la tua scelta sui controlli degli aggiornamenti. Puoi impostarla più tardi in {{where}}."
     },
     "server": {
@@ -690,7 +690,7 @@
     "releaseNotes": "Note di rilascio",
     "settingsTitle": "Aggiornamenti",
     "settingsDescription": "Se IPMIDeck può consultare le versioni pubblicate, e cosa ha trovato.",
-    "suppressedByConfig": "Il controllo aggiornamenti è disattivato nel file di configurazione (updates.enabled). Finché non viene cambiato, nulla qui può contattare la rete.",
+    "suppressedByConfig": "Il controllo aggiornamenti è disattivato nella configurazione (updates.enabled in config.yaml, oppure la variabile d'ambiente IPMIDECK_UPDATES_ENABLED). Finché non viene cambiato, nulla qui può contattare la rete.",
     "consentLabel": "Cerca automaticamente nuove versioni",
     "consentHint": "All'avvio e una volta al giorno. Vengono inviati solo il nome del prodotto e la tua versione. Se sei aggiornato non compare nulla.",
     "consentFailed": "Non è stato possibile salvare l'impostazione.",

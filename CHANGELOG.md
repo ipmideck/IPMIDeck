@@ -151,26 +151,34 @@ into a new dated `## [<version>] - YYYY-MM-DD` section.
 - **See what changed, from inside the app.** The version in the sidebar now shows the version
   you are actually running and opens the full release history over whatever page you are on.
   The history ships inside the package and is read from disk, so it works on an air-gapped
-  install with no network at all. A security release is marked as one.
+  install with no network at all. A release whose notes have a `### Security` section is marked
+  as a security release.
 - **Optional update checks, asked once during first-run setup.** Setup asks whether IPMIDeck may
   look up published versions, as one question you confirm (the box starts ticked). Nothing is
-  contacted before you answer, and nothing ever if you untick it. With it on, it checks at
+  contacted on its own before you answer, nor after you untick it. With it on, it checks at
   start-up and once a day and stays silent unless there is genuinely something newer; it can be
-  turned off at any time under **Settings → About**. There is also a **Check now** button there,
-  and the console `[g]` key now performs a real check instead of printing a promise that one
-  would arrive in a later release.
+  turned off at any time under **Settings → About → Updates**. A check that fails (no route out,
+  rate limited, an endpoint error) is retried after a growing delay, from 15 minutes up to once
+  every 6 hours, until one succeeds. There is also a **Check now** button there, and the console
+  `[g]` key now performs a real check instead of printing a promise that one would arrive in a
+  later release. Both check when pressed, whatever was answered during setup.
+
+  An existing installation that upgrades does not go through setup again, so it is not asked:
+  the unattended check stays off until you turn it on under **Settings → About → Updates**.
 
   The request is a single `GET` carrying the product name and your version and nothing else: no
   identifier, no hostname, nothing about your servers. Like any request, it shows the endpoint
   your public IP address. It is logged verbatim before the socket opens so you can audit it
   yourself. A PyPI or Docker install that finds a newer version makes one more such request, to
-  GitHub, to learn whether it is a security release. Nothing is downloaded or installed. The
-  lookup uses the standard library only — the runtime dependencies still contain no HTTP client.
+  GitHub, to learn whether it is a security release, meaning its release notes have a
+  `### Security` section; if those notes cannot be read yet, it asks again after an hour.
+  Nothing is downloaded or installed. The lookup uses the standard library only — the runtime
+  dependencies still contain no HTTP client.
 
   Setting `updates.enabled: false` in `config.yaml` (or `IPMIDECK_UPDATES_ENABLED=false`) turns
-  it off outright: the endpoints that could open a socket are not registered at all and the
-  periodic check never starts, regardless of what was answered during setup. The version
-  history keeps working.
+  it off outright: the endpoints that could open a socket are not registered at all, so
+  **Check now** and `[g]` are refused too, and the periodic check never starts, regardless of
+  what was answered during setup. The version history keeps working.
 - The startup log now names the running version and where to read what changed, so a report
   from `docker logs` identifies itself.
 

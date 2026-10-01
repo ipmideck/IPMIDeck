@@ -75,8 +75,11 @@ export function AboutSection({ headingRef }: AboutSectionProps) {
   async function handleCheck() {
     setResult(null);
     const next = await checkNow();
-    if (next === null || next.error) setResult("failed");
-    else setResult(next.update_available ? "available" : "upToDate");
+    // A failed check still carries the update an earlier one found; that answer stays true, so
+    // it is shown rather than hidden behind the failure.
+    if (next?.update_available) setResult("available");
+    else if (next === null || next.error) setResult("failed");
+    else setResult("upToDate");
   }
 
   async function handleConsent(next: boolean) {

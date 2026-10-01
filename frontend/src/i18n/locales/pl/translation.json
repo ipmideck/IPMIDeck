@@ -424,7 +424,7 @@
       "credentialsRequired": "Nazwa użytkownika i hasło są wymagane.",
       "applyFailed": "Nie udało się zastosować ustawienia uwierzytelniania.",
       "updateChecksLabel": "Zezwól IPMIDeck na sprawdzanie nowych wersji",
-      "updateChecksHint": "Raz dziennie IPMIDeck pyta publiczny indeks wydań, czy istnieje nowsza wersja. Zapytanie zawiera wyłącznie nazwę produktu i używaną wersję — żadnego identyfikatora, nic o Twoich serwerach. Możesz to wyłączyć w każdej chwili w Ustawieniach.",
+      "updateChecksHint": "Przy starcie i raz dziennie IPMIDeck sprawdza w miejscu publikacji tej instalacji (w indeksie pakietów Python, rejestrze kontenerów lub wydaniach na GitHubie), czy istnieje nowsza wersja. Jeśli w indeksie pakietów lub rejestrze znajdzie nowszą, pyta też GitHuba, czy jest to wydanie zabezpieczeń. Każde zapytanie zawiera wyłącznie nazwę produktu i używaną wersję — żadnego identyfikatora, nic o Twoich serwerach. Możesz to wyłączyć w każdej chwili w Ustawieniach.",
       "updateChecksSaveFailed": "Nie udało się zapisać Twojego wyboru dotyczącego sprawdzania aktualizacji. Możesz ustawić go później w {{where}}."
     },
     "server": {
@@ -694,7 +694,7 @@
     "releaseNotes": "Informacje o wydaniu",
     "settingsTitle": "Aktualizacje",
     "settingsDescription": "Czy IPMIDeck może sprawdzać opublikowane wersje i co znalazł.",
-    "suppressedByConfig": "Sprawdzanie aktualizacji jest wyłączone w pliku konfiguracyjnym (updates.enabled). Dopóki się to nie zmieni, nic tutaj nie może połączyć się z siecią.",
+    "suppressedByConfig": "Sprawdzanie aktualizacji jest wyłączone w konfiguracji (updates.enabled w config.yaml lub zmienna środowiskowa IPMIDECK_UPDATES_ENABLED). Dopóki się to nie zmieni, nic tutaj nie może połączyć się z siecią.",
     "consentLabel": "Automatycznie sprawdzaj nowe wersje",
     "consentHint": "Przy starcie i raz dziennie. Wysyłana jest tylko nazwa produktu i Twoja wersja. Gdy masz najnowszą, nic się nie pojawia.",
     "consentFailed": "Nie udało się zapisać ustawienia.",
