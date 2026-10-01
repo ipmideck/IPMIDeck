@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -61,6 +62,21 @@ _BACKOFF_CEILING_SECONDS = 6 * 60 * 60
 # it is a security release. That is usually a release whose notes are not published yet; asking
 # again on the daily cadence would leave a security badge missing for up to a day after they are.
 _SECURITY_RETRY_SECONDS = 60 * 60
+
+# How many of those hourly re-asks one found version gets before the daily cadence resumes. Notes
+# still unreadable after six hours are more likely never coming (a release left unpublished, an
+# endpoint that keeps refusing us) than late, and asking every hour for ever would spend the shared
+# request budget on nothing.
+_SECURITY_RETRY_LIMIT = 6
+
+
+async def _sleep_unless_woken(wake: asyncio.Event, delay: float) -> bool:
+    """Sleep up to ``delay`` seconds; True if ``wake`` was set before they ran out."""
+    try:
+        await asyncio.wait_for(wake.wait(), timeout=max(delay, 0))
+    except TimeoutError:
+        return False
+    return True
 
 
 @dataclass
@@ -125,6 +141,17 @@ class UpdateService:
         self._last_attempt: float | None = None
         self._backoff = _BACKOFF_START_SECONDS
         self._consecutive_failures = 0
+        # The found version whose release notes could not be read, and how many lookups in a row
+        # have found it so. Every lookup counts, the unattended ones and those made on request
+        # alike, so the hourly re-asks stop at the limit whoever made them.
+        self._unresolved_version: str | None = None
+        self._unresolved_lookups = 0
+        # Set when a lookup leaves a security question open, so that a check made on request can
+        # cut the unattended check's wait short instead of leaving the question for up to a day.
+        self._wake = asyncio.Event()
+        # Handed to the unattended check's current lookup. Cancelling the task cannot stop the
+        # worker thread the lookup runs in; setting this tells it not to send its next request.
+        self._unattended_cancel: threading.Event | None = None
 
     # --- consent -------------------------------------------------------------------------
 
@@ -207,12 +234,21 @@ class UpdateService:
         age = (datetime.now(timezone.utc) - then).total_seconds()
         return 0 <= age < minimum
 
-    async def check_now(self, minimum_interval: float = MIN_MANUAL_INTERVAL_SECONDS) -> UpdateStatus:
+    async def check_now(
+        self,
+        minimum_interval: float = MIN_MANUAL_INTERVAL_SECONDS,
+        *,
+        cancel: threading.Event | None = None,
+    ) -> UpdateStatus:
         """Look up the published version, honouring the rate limit.
 
         Inside the rate-limit window the cached answer is returned with ``from_cache`` set, so a
         caller can tell "nothing changed" from "we did not ask". When there is no stored answer to
         repeat, the error is ``not_checked`` rather than a blank status that looks like success.
+
+        ``cancel`` reaches the worker thread that makes the requests, which checks it before each
+        one. A caller that may abandon the lookup passes its own, so it can stop the thread ahead
+        of cancelling the task; otherwise one is made here, and set if this call is cancelled.
         """
         if not self._config.updates.enabled:
             # Reached only if a caller bypasses the route gating; refuse rather than assume.
@@ -225,16 +261,27 @@ class UpdateService:
                 status = await self.cached_status()
                 status.from_cache = True
                 if status.checked_at is None:
-                    # The attempt holding the rate limit never stored an answer, as when it is
-                    # cancelled mid-lookup. The blank default would otherwise read as "you are up
-                    # to date" when nobody knows.
+                    # The attempt holding the rate limit never stored an answer, as when the
+                    # database refused the write. The blank default would otherwise read as "you
+                    # are up to date" when nobody knows.
                     status.error = "not_checked"
                 return status
 
-            self._last_attempt = time.monotonic()
+            previous_attempt, self._last_attempt = self._last_attempt, time.monotonic()
             method = detect_install_method()
+            if cancel is None:
+                cancel = threading.Event()
             try:
-                probe = await asyncio.to_thread(fetch_latest, method)
+                probe = await asyncio.to_thread(fetch_latest, method, cancel=cancel)
+            except asyncio.CancelledError:
+                # Abandoned mid-lookup: the answer was withdrawn, the server is stopping, or the
+                # caller went away. The worker thread cannot be cancelled, only told not to send
+                # its next request. And an attempt that will never store an answer must not hold
+                # the rate limit, or turning the check back on would be served a result nobody
+                # wrote instead of checking.
+                cancel.set()
+                self._last_attempt = previous_attempt
+                raise
             except Exception:
                 # The lookup is written never to raise. If it does anyway, record it as a failed
                 # attempt like any other, so it is stored and backed off rather than leaving the
@@ -259,18 +306,43 @@ class UpdateService:
                 status.update_available = is_newer(status.latest_version, VERSION)
                 self._consecutive_failures += 1
                 logger.info("Update check did not complete (%s)", probe.error)
-            else:
-                self._consecutive_failures = 0
-                self._backoff = _BACKOFF_START_SECONDS
-                if status.update_available:
-                    logger.info(
-                        "A newer version is published: %s (running %s)",
-                        status.latest_version,
-                        VERSION,
-                    )
+            elif status.update_available:
+                logger.info(
+                    "A newer version is published: %s (running %s)",
+                    status.latest_version,
+                    VERSION,
+                )
 
             await self._store(status)
+            if not probe.error:
+                # Only once the answer is stored. A database that refuses the write fails this
+                # check as surely as the network can, and has to back off like it rather than
+                # restart every retry from the shortest wait.
+                self._consecutive_failures = 0
+                self._backoff = _BACKOFF_START_SECONDS
+                self._track_security_question(status)
             return status
+
+    def _track_security_question(self, status: UpdateStatus) -> None:
+        """Count the lookups that found a newer version without readable release notes."""
+        if not (status.update_available and status.security_unresolved):
+            # Answered, or nothing newer to ask about: a later open question starts afresh.
+            self._unresolved_version = None
+            self._unresolved_lookups = 0
+            return
+        if status.latest_version != self._unresolved_version:
+            self._unresolved_version = status.latest_version
+            self._unresolved_lookups = 0
+        self._unresolved_lookups += 1
+        if self._security_retry_due():
+            # A check made on request may find this while the unattended check sleeps through a
+            # day-long wait; waking it brings the re-ask within the hour.
+            self._wake.set()
+
+    def _security_retry_due(self) -> bool:
+        # The lookup that found the question open, then one per hourly re-ask: the re-asks stop
+        # once the limit of them has been made.
+        return 0 < self._unresolved_lookups <= _SECURITY_RETRY_LIMIT
 
     # --- the unattended check ------------------------------------------------------------
 
@@ -288,13 +360,19 @@ class UpdateService:
                 # instead of making one more request.
                 if not await self.consent_given():
                     return
-                status = await self.check_now(minimum_interval=MIN_AUTO_INTERVAL_SECONDS)
+                # A fresh one per lookup, kept where stop() can reach it.
+                cancel = self._unattended_cancel = threading.Event()
+                status = await self.check_now(
+                    minimum_interval=MIN_AUTO_INTERVAL_SECONDS, cancel=cancel
+                )
                 if status.from_cache:
                     # A previous run checked moments ago: try again once the floor has passed.
                     delay = MIN_AUTO_INTERVAL_SECONDS
                 elif status.error:
+                    # Before the security retry: a failure keeps the question an earlier lookup
+                    # left open, and an endpoint that is down must not be asked every hour.
                     delay = self._take_backoff()
-                elif status.update_available and status.security_unresolved:
+                elif self._security_retry_due():
                     delay = _SECURITY_RETRY_SECONDS
                 else:
                     delay = CHECK_INTERVAL_SECONDS
@@ -304,7 +382,23 @@ class UpdateService:
                 # A version check is never worth taking the process down for.
                 logger.exception("The update check task hit an unexpected error")
                 delay = self._take_backoff()
-            await asyncio.sleep(delay)
+            await self._pause(delay)
+
+    async def _pause(self, delay: float) -> None:
+        """Wait ``delay`` seconds before the next pass.
+
+        A check made on request in the meantime that leaves a security question open brings the
+        next pass forward to an hour after it, as if this loop had found the question itself. It
+        only ever shortens the wait.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + delay
+        # A wake set before now came from this pass's own lookup, or from a check on request made
+        # while this pass ran, which turned this pass into a cache read and so a short wait.
+        self._wake.clear()
+        while await _sleep_unless_woken(self._wake, delay):
+            self._wake.clear()
+            delay = min(deadline - loop.time(), _SECURITY_RETRY_SECONDS)
 
     def running(self) -> bool:
         return self._task is not None and not self._task.done()
@@ -326,6 +420,11 @@ class UpdateService:
 
     async def stop(self) -> None:
         """Stop the unattended check. Safe to call when it was never started."""
+        # The lookup in flight is told first, before the task is cancelled: a cancellation reaches
+        # the task only on its next turn of the event loop, and the worker thread could open its
+        # next connection in between.
+        if self._unattended_cancel is not None:
+            self._unattended_cancel.set()
         task, self._task = self._task, None
         if task is None:
             return

@@ -113,6 +113,8 @@ def _reset_update_state(bm) -> None:
     _run(bm.update_service.stop())
     bm.update_service._last_attempt = None
     bm.update_service._backoff = svc_mod._BACKOFF_START_SECONDS
+    bm.update_service._unresolved_version = None
+    bm.update_service._unresolved_lookups = 0
 
 
 # --- the offline routes -------------------------------------------------------------------------
@@ -198,7 +200,7 @@ def test_a_check_reports_the_resolved_versions(open_client, monkeypatch):
     client, bm = open_client
     monkeypatch.setattr(
         "backend.core.update_service.fetch_latest",
-        lambda method: UpdateProbe(source=method, latest_version="99.0.0", release_url="u"),
+        lambda method, **_: UpdateProbe(source=method, latest_version="99.0.0", release_url="u"),
     )
     body = client.post("/api/updates/check").json()
     assert body["success"] is True
@@ -211,7 +213,7 @@ def test_a_second_check_inside_the_window_is_served_from_cache(open_client, monk
     client, bm = open_client
     calls = []
 
-    def counted(method):
+    def counted(method, **_):
         calls.append(method)
         return UpdateProbe(source=method, latest_version="99.0.0")
 
@@ -227,7 +229,7 @@ def test_a_failed_check_reports_a_reason_rather_than_an_error_page(open_client, 
     client, _ = open_client
     monkeypatch.setattr(
         "backend.core.update_service.fetch_latest",
-        lambda method: UpdateProbe(source=method, error="unreachable"),
+        lambda method, **_: UpdateProbe(source=method, error="unreachable"),
     )
     body = client.post("/api/updates/check").json()
     assert body["success"] is False
@@ -238,7 +240,7 @@ def test_a_security_release_is_carried_through_the_check(open_client, monkeypatc
     client, _ = open_client
     monkeypatch.setattr(
         "backend.core.update_service.fetch_latest",
-        lambda method: UpdateProbe(source=method, latest_version="99.0.0", is_security=True),
+        lambda method, **_: UpdateProbe(source=method, latest_version="99.0.0", is_security=True),
     )
     assert client.post("/api/updates/check").json()["is_security"] is True
 
@@ -247,7 +249,7 @@ def test_an_unknown_security_answer_is_carried_through_the_check(open_client, mo
     client, _ = open_client
     monkeypatch.setattr(
         "backend.core.update_service.fetch_latest",
-        lambda method: UpdateProbe(
+        lambda method, **_: UpdateProbe(
             source=method, latest_version="99.0.0", security_unresolved=True
         ),
     )
@@ -262,7 +264,7 @@ def test_consent_is_persisted_and_takes_effect_immediately(open_client, monkeypa
     client, bm = open_client
     monkeypatch.setattr(
         "backend.core.update_service.fetch_latest",
-        lambda method: UpdateProbe(source=method, latest_version="1.0.0"),
+        lambda method, **_: UpdateProbe(source=method, latest_version="1.0.0"),
     )
     body = client.put("/api/updates/consent", json={"enabled": True}).json()
     assert body["success"] is True and body["running"] is True
@@ -278,7 +280,7 @@ def test_the_cached_result_survives_a_read_and_reports_the_stored_version(open_c
     client, bm = open_client
     monkeypatch.setattr(
         "backend.core.update_service.fetch_latest",
-        lambda method: UpdateProbe(source=method, latest_version="99.0.0", release_url="u"),
+        lambda method, **_: UpdateProbe(source=method, latest_version="99.0.0", release_url="u"),
     )
     client.post("/api/updates/check")
     stored = _run(bm.db.get_config("updates.last_result"))
@@ -301,7 +303,7 @@ def test_the_consent_key_is_readable_through_the_generic_config_route(open_clien
     # Consenting starts the unattended check, whose first act is a lookup.
     monkeypatch.setattr(
         "backend.core.update_service.fetch_latest",
-        lambda method: UpdateProbe(source=method, latest_version="1.0.0"),
+        lambda method, **_: UpdateProbe(source=method, latest_version="1.0.0"),
     )
     client.put("/api/updates/consent", json={"enabled": True})
     body = client.get("/api/system/app-config/updates.check_enabled").json()
@@ -316,7 +318,7 @@ def test_the_consent_key_is_not_writable_through_the_generic_config_route(
     client, bm = open_client
     monkeypatch.setattr(
         "backend.core.update_service.fetch_latest",
-        lambda method: UpdateProbe(source=method, latest_version="1.0.0"),
+        lambda method, **_: UpdateProbe(source=method, latest_version="1.0.0"),
     )
     client.put("/api/updates/consent", json={"enabled": True})
     refused = client.put(
@@ -344,7 +346,9 @@ def test_every_update_route_requires_a_session(open_client, monkeypatch, method,
     client, bm = open_client
     monkeypatch.setattr(
         "backend.core.update_service.fetch_latest",
-        lambda m: (_ for _ in ()).throw(AssertionError("an anonymous caller reached the network")),
+        lambda m, **_: (_ for _ in ()).throw(
+            AssertionError("an anonymous caller reached the network")
+        ),
     )
     _run(bm.auth.set_auth_enabled(True))
     try:
