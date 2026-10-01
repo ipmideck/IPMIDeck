@@ -424,7 +424,8 @@
       "credentialsRequired": "Nazwa użytkownika i hasło są wymagane.",
       "applyFailed": "Nie udało się zastosować ustawienia uwierzytelniania.",
       "updateChecksLabel": "Zezwól IPMIDeck na sprawdzanie nowych wersji",
-      "updateChecksHint": "Raz dziennie IPMIDeck pyta publiczny indeks wydań, czy istnieje nowsza wersja. Zapytanie zawiera wyłącznie nazwę produktu i używaną wersję — żadnego identyfikatora, nic o Twoich serwerach. Możesz to wyłączyć w każdej chwili w Ustawieniach."
+      "updateChecksHint": "Raz dziennie IPMIDeck pyta publiczny indeks wydań, czy istnieje nowsza wersja. Zapytanie zawiera wyłącznie nazwę produktu i używaną wersję — żadnego identyfikatora, nic o Twoich serwerach. Możesz to wyłączyć w każdej chwili w Ustawieniach.",
+      "updateChecksSaveFailed": "Nie udało się zapisać Twojego wyboru dotyczącego sprawdzania aktualizacji. Możesz ustawić go później w {{where}}."
     },
     "server": {
       "title": "Dodaj swój pierwszy serwer",

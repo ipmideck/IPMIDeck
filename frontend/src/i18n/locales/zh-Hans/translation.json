@@ -424,7 +424,8 @@
       "credentialsRequired": "需要用户名和密码。",
       "applyFailed": "应用身份验证设置失败。",
       "updateChecksLabel": "允许 IPMIDeck 检查新版本",
-      "updateChecksHint": "IPMIDeck 每天一次向公开的发布索引询问是否有更新的版本。请求只包含产品名称和你正在运行的版本，不含任何标识符，也不含服务器信息。你可以随时在设置中关闭。"
+      "updateChecksHint": "IPMIDeck 每天一次向公开的发布索引询问是否有更新的版本。请求只包含产品名称和你正在运行的版本，不含任何标识符，也不含服务器信息。你可以随时在设置中关闭。",
+      "updateChecksSaveFailed": "无法保存你关于更新检查的选择。你可以稍后在 {{where}} 中设置。"
     },
     "server": {
       "title": "添加您的第一台服务器",

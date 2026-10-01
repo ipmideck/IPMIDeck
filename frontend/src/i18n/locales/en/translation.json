@@ -424,7 +424,8 @@
       "credentialsRequired": "Username and password are required.",
       "applyFailed": "Failed to apply authentication setting.",
       "updateChecksLabel": "Let IPMIDeck check for new versions",
-      "updateChecksHint": "Once a day, IPMIDeck asks the public release index whether a newer version exists. The request carries only the product name and the version you are running — no identifier, nothing about your servers. You can turn this off at any time in Settings."
+      "updateChecksHint": "Once a day, IPMIDeck asks the public release index whether a newer version exists. The request carries only the product name and the version you are running — no identifier, nothing about your servers. You can turn this off at any time in Settings.",
+      "updateChecksSaveFailed": "Your answer about update checks could not be saved. You can set it later in {{where}}."
     },
     "server": {
       "title": "Add Your First Server",

@@ -35,7 +35,7 @@ function useInstallLabel(method: string | undefined) {
 }
 
 /**
- * About section — live version (/api/health), creator attribution (VERBATIM,
+ * About section — live version (/api/config), creator attribution (VERBATIM,
  * preserved from the monolith; no new/duplicated personal data), and sponsor.
  *
  * It also carries the update controls, because this is where an operator already comes to ask

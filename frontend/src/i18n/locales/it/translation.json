@@ -424,7 +424,8 @@
       "credentialsRequired": "Nome utente e password sono obbligatori.",
       "applyFailed": "Impossibile applicare l'impostazione di autenticazione.",
       "updateChecksLabel": "Consenti a IPMIDeck di cercare nuove versioni",
-      "updateChecksHint": "Una volta al giorno IPMIDeck chiede all'indice pubblico delle release se esiste una versione più recente. La richiesta contiene solo il nome del prodotto e la versione in uso: nessun identificativo, nulla sui tuoi server. Puoi disattivarla quando vuoi dalle Impostazioni."
+      "updateChecksHint": "Una volta al giorno IPMIDeck chiede all'indice pubblico delle release se esiste una versione più recente. La richiesta contiene solo il nome del prodotto e la versione in uso: nessun identificativo, nulla sui tuoi server. Puoi disattivarla quando vuoi dalle Impostazioni.",
+      "updateChecksSaveFailed": "Non è stato possibile salvare la tua scelta sui controlli degli aggiornamenti. Puoi impostarla più tardi in {{where}}."
     },
     "server": {
       "title": "Aggiungi il tuo primo server",

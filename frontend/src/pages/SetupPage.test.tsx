@@ -20,7 +20,12 @@ vi.mock("@/api/client", () => ({
   api: vi.fn(() => Promise.resolve({})),
 }));
 
+vi.mock("sonner", () => ({
+  toast: { warning: vi.fn(), error: vi.fn(), success: vi.fn(), info: vi.fn() },
+}));
+
 import { put } from "@/api/client";
+import { toast } from "sonner";
 import SetupPage from "@/pages/SetupPage";
 
 function renderWizardAtAuthStep() {
@@ -110,5 +115,35 @@ describe("the setup wizard's update question", () => {
     // The wizard moved on to the add-server step regardless: the vendor selector only exists
     // on that step.
     await waitFor(() => expect(screen.getByRole("combobox")).toBeTruthy());
+  });
+
+  async function answerAndContinue(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByText(/setup\.auth\.noTitle|open access/i));
+    await user.click(screen.getByRole("button", { name: /common\.continue|continue/i }));
+  }
+
+  it("tells the operator when the answer could not be saved", async () => {
+    // Nothing is stored in that case, so no unattended check will run whatever the box showed.
+    (put as unknown as { mockRejectedValueOnce: (e: Error) => void }).mockRejectedValueOnce(
+      new Error("API error: 500 Internal Server Error"),
+    );
+    const user = userEvent.setup();
+    renderWizardAtAuthStep();
+    await goToAuthStep(user);
+    await answerAndContinue(user);
+    await waitFor(() => expect(toast.warning).toHaveBeenCalledTimes(1));
+  });
+
+  it("says nothing when update checks are switched off in the configuration", async () => {
+    // The route does not exist then, and there is nothing to record.
+    (put as unknown as { mockRejectedValueOnce: (e: Error) => void }).mockRejectedValueOnce(
+      new Error("API error: 404 Not Found"),
+    );
+    const user = userEvent.setup();
+    renderWizardAtAuthStep();
+    await goToAuthStep(user);
+    await answerAndContinue(user);
+    await waitFor(() => expect(screen.getByRole("combobox")).toBeTruthy());
+    expect(toast.warning).not.toHaveBeenCalled();
   });
 });

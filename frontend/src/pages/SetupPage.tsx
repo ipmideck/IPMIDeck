@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { post, get, put } from "@/api/client";
 import { useServerStore } from "@/stores/server-store";
 import { useAuthStore } from "@/stores/auth-store";
@@ -111,12 +112,20 @@ export default function SetupPage() {
       }
       // The operator's answer to the update question, recorded once the account decision has
       // gone through. Deliberately not allowed to block the wizard: a preference write that
-      // fails must not trap someone on this step, and the default it falls back to is the same
-      // value the box was showing.
+      // fails must not trap someone on this step. Nothing is stored in that case, which means no
+      // unattended check runs whatever the box showed, so the operator is told where to set it.
+      // A 404 is not a failure: the configuration has switched update checks off entirely and
+      // the route does not exist, so there is nothing to record.
       try {
         await put("/api/updates/consent", { enabled: allowUpdateChecks });
-      } catch {
-        // Adjustable at any time in Settings.
+      } catch (e: any) {
+        if (!String(e?.message ?? "").includes(" 404 ")) {
+          toast.warning(
+            t("setup.auth.updateChecksSaveFailed", {
+              where: `${t("nav.settings")} → ${t("settings.sections.about")}`,
+            }),
+          );
+        }
       }
       setStep(2);
     } catch (e: any) {

@@ -424,7 +424,8 @@
       "credentialsRequired": "Le nom d'utilisateur et le mot de passe sont requis.",
       "applyFailed": "Échec de l'application du paramètre d'authentification.",
       "updateChecksLabel": "Autoriser IPMIDeck à rechercher de nouvelles versions",
-      "updateChecksHint": "Une fois par jour, IPMIDeck demande à l'index public des versions si une version plus récente existe. La requête ne contient que le nom du produit et la version utilisée — aucun identifiant, rien sur vos serveurs. Vous pouvez désactiver cela à tout moment dans les Réglages."
+      "updateChecksHint": "Une fois par jour, IPMIDeck demande à l'index public des versions si une version plus récente existe. La requête ne contient que le nom du produit et la version utilisée — aucun identifiant, rien sur vos serveurs. Vous pouvez désactiver cela à tout moment dans les Réglages.",
+      "updateChecksSaveFailed": "Votre choix concernant la vérification des mises à jour n'a pas pu être enregistré. Vous pourrez le définir plus tard dans {{where}}."
     },
     "server": {
       "title": "Ajoutez votre premier serveur",

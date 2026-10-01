@@ -424,7 +424,8 @@
       "credentialsRequired": "Benutzername und Passwort sind erforderlich.",
       "applyFailed": "Authentifizierungseinstellung konnte nicht angewendet werden.",
       "updateChecksLabel": "IPMIDeck darf nach neuen Versionen suchen",
-      "updateChecksHint": "Einmal täglich fragt IPMIDeck beim öffentlichen Release-Index nach, ob eine neuere Version vorliegt. Die Anfrage enthält nur den Produktnamen und Ihre laufende Version — keine Kennung, nichts über Ihre Server. Sie können das jederzeit in den Einstellungen abschalten."
+      "updateChecksHint": "Einmal täglich fragt IPMIDeck beim öffentlichen Release-Index nach, ob eine neuere Version vorliegt. Die Anfrage enthält nur den Produktnamen und Ihre laufende Version — keine Kennung, nichts über Ihre Server. Sie können das jederzeit in den Einstellungen abschalten.",
+      "updateChecksSaveFailed": "Ihre Auswahl zur Update-Prüfung konnte nicht gespeichert werden. Sie können sie später unter {{where}} festlegen."
     },
     "server": {
       "title": "Füge deinen ersten Server hinzu",

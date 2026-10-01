@@ -424,7 +424,8 @@
       "credentialsRequired": "El usuario y la contraseña son obligatorios.",
       "applyFailed": "No se pudo aplicar el ajuste de autenticación.",
       "updateChecksLabel": "Permitir que IPMIDeck busque versiones nuevas",
-      "updateChecksHint": "Una vez al día IPMIDeck pregunta al índice público de versiones si existe una más reciente. La petición solo lleva el nombre del producto y la versión que usas: ningún identificador, nada sobre tus servidores. Puedes desactivarlo cuando quieras en los Ajustes."
+      "updateChecksHint": "Una vez al día IPMIDeck pregunta al índice público de versiones si existe una más reciente. La petición solo lleva el nombre del producto y la versión que usas: ningún identificador, nada sobre tus servidores. Puedes desactivarlo cuando quieras en los Ajustes.",
+      "updateChecksSaveFailed": "No se pudo guardar tu respuesta sobre la búsqueda de actualizaciones. Puedes ajustarla más tarde en {{where}}."
     },
     "server": {
       "title": "Añade tu primer servidor",
