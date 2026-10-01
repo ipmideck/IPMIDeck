@@ -23,6 +23,7 @@ import os
 import re
 import socket
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError, version as _dist_version
@@ -51,8 +52,8 @@ _MAX_RESPONSE_BYTES = 256 * 1024
 DEFAULT_TIMEOUT = 6.0
 
 # Sent verbatim on every outbound request. It carries the product name and the running version and
-# nothing else — no install identifier, no hostname, no counter — so two installs of the same
-# version are indistinguishable to the endpoint.
+# nothing else — no install identifier, no hostname, no counter. The endpoint still sees the
+# caller's IP address, as with any request.
 USER_AGENT = f"{APP_NAME}/{VERSION}"
 
 PYPI_URL = "https://pypi.org/simple/ipmideck/"
@@ -61,6 +62,9 @@ DOCKERHUB_URL = (
     "?page_size=25&ordering=last_updated"
 )
 GITHUB_URL = "https://api.github.com/repos/ipmideck/IPMIDeck/releases/latest"
+# One named release, by tag. Asked only after an index or registry lookup found a newer version,
+# because those two channels carry no release notes and so cannot tell a security release apart.
+GITHUB_TAG_URL = "https://api.github.com/repos/ipmideck/IPMIDeck/releases/tags/{tag}"
 RELEASES_URL = "https://github.com/ipmideck/IPMIDeck/releases"
 CHANGELOG_URL = "https://github.com/ipmideck/IPMIDeck/blob/main/CHANGELOG.md"
 
@@ -246,6 +250,25 @@ def parse_changelog(text: str) -> list[ChangelogEntry]:
 
 # --- published version lookup -------------------------------------------------------------------
 
+# The only hosts a lookup may reach, redirects included.
+_ALLOWED_HOSTS = frozenset({"pypi.org", "hub.docker.com", "api.github.com"})
+
+
+def safe_release_url(candidate) -> str:
+    """A release link from an endpoint's answer, or the releases page if it is anything else.
+
+    The link is stored and rendered as an anchor, so only a page of this project's releases is
+    accepted; a ``javascript:`` or foreign URL in a response never reaches the interface.
+    """
+    if isinstance(candidate, str) and candidate.startswith(RELEASES_URL + "/"):
+        return candidate
+    return RELEASES_URL
+
+
+def _is_security_body(body) -> bool:
+    text = body if isinstance(body, str) else ""
+    return bool(_SECURITY_RE.search(text)) or "security release" in text.lower()
+
 
 @dataclass
 class UpdateProbe:
@@ -270,19 +293,47 @@ class UpdateProbe:
         }
 
 
+def _check_target(url: str) -> None:
+    target = urllib.parse.urlsplit(url)
+    if target.scheme != "https" or target.hostname not in _ALLOWED_HOSTS:
+        raise ValueError(f"refusing to contact {url}")
+
+
+class _UpdateEndpointRedirects(urllib.request.HTTPRedirectHandler):
+    """Follow a redirect only to https on one of the update endpoints, and log it like a request.
+
+    The default handler follows up to ten redirects to http, https or ftp, which would let a
+    redirecting endpoint move the request, version string included, to a cleartext host.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _check_target(newurl)
+        logger.info("Update check: following a redirect to %s", newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_OPENER = urllib.request.build_opener(_UpdateEndpointRedirects)
+
+
+def _urlopen(request: urllib.request.Request, timeout: float):
+    """The single place a socket is opened. Tests replace it to forbid or fake the network."""
+    return _OPENER.open(request, timeout=timeout)
+
+
 def _fetch(url: str, accept: str, timeout: float) -> dict:
     """GET a JSON document with the standard library only.
 
     Logged verbatim before the socket opens so an operator auditing their own logs can see every
     address this process contacts, without having to run a packet capture to trust the claim.
     """
+    _check_target(url)
     logger.info("Update check: requesting %s", url)
-    request = urllib.request.Request(  # noqa: S310 — literal https URLs defined in this module
+    request = urllib.request.Request(  # noqa: S310 — https on an allow-listed host, checked above
         url,
         headers={"Accept": accept, "User-Agent": USER_AGENT},
         method="GET",
     )
-    with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+    with _urlopen(request, timeout) as response:
         raw = response.read(_MAX_RESPONSE_BYTES + 1)
     if len(raw) > _MAX_RESPONSE_BYTES:
         raise ValueError("response larger than expected")
@@ -320,14 +371,32 @@ def _latest_from_github(timeout: float) -> UpdateProbe:
     """The releases endpoint carries the release body as well as the tag, which is the only
     channel that can tell a security release from an ordinary one."""
     data = _fetch(timeout=timeout, url=GITHUB_URL, accept="application/vnd.github+json")
-    tag = data.get("tag_name")
-    body = data.get("body") or ""
     return UpdateProbe(
         source=GIT,
-        latest_version=tag,
-        release_url=data.get("html_url") or RELEASES_URL,
-        is_security=bool(_SECURITY_RE.search(body)) or "security release" in body.lower(),
+        latest_version=data.get("tag_name"),
+        release_url=safe_release_url(data.get("html_url")),
+        is_security=_is_security_body(data.get("body")),
     )
+
+
+def _mark_security_from_release(probe: UpdateProbe, timeout: float) -> None:
+    """Ask the published release of a newer version found on the index or registry whether it
+    is a security release. Those two channels carry no release notes of their own.
+
+    Best effort: any failure leaves the probe as it was. The version is already known, and a
+    missing badge is better than turning a found update into an error.
+    """
+    tag = "v" + probe.latest_version.lstrip("v")
+    url = GITHUB_TAG_URL.format(tag=urllib.parse.quote(tag, safe=""))
+    try:
+        data = _fetch(timeout=timeout, url=url, accept="application/vnd.github+json")
+    except Exception as exc:  # noqa: BLE001 — see docstring
+        logger.debug("Could not read the release notes of %s: %s", tag, exc)
+        return
+    if not isinstance(data, dict):
+        return
+    probe.is_security = _is_security_body(data.get("body"))
+    probe.release_url = safe_release_url(data.get("html_url"))
 
 
 _CHANNELS = {
@@ -363,6 +432,8 @@ def fetch_latest(method: str | None = None, timeout: float = DEFAULT_TIMEOUT) ->
         return UpdateProbe(source=channel, error="invalid_response")
     if probe.latest_version is None:
         probe.error = "no_release_found"
+    elif probe.source in (PIP, DOCKER) and is_newer(probe.latest_version, VERSION):
+        _mark_security_from_release(probe, timeout)
     return probe
 
 

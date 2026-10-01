@@ -6,12 +6,14 @@ import json
 import pathlib
 import tomllib
 import urllib.error
+import urllib.request
 
 import pytest
 
 from backend.core import updates
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+RELEASE_PAGE = updates.RELEASES_URL + "/tag/v2.0.2"
 
 
 # --- the public no-HTTP-client claim ------------------------------------------------------------
@@ -223,12 +225,12 @@ def test_the_registry_channel_discards_moving_tags(monkeypatch):
 def test_the_release_channel_reports_a_security_release(monkeypatch):
     _stub_fetch(
         monkeypatch,
-        {"tag_name": "v2.0.2", "body": "### Security\n\n- Fixed a traversal.", "html_url": "u"},
+        {"tag_name": "v2.0.2", "body": "### Security\n\n- Fixed a traversal.", "html_url": RELEASE_PAGE},
     )
     probe = updates.fetch_latest(updates.GIT)
     assert probe.latest_version == "v2.0.2"
     assert probe.is_security is True
-    assert probe.release_url == "u"
+    assert probe.release_url == RELEASE_PAGE
 
 
 def test_an_ordinary_release_is_not_marked_as_security(monkeypatch):
@@ -278,7 +280,7 @@ def test_an_oversized_response_is_refused(monkeypatch):
         def __exit__(self, *a):
             return False
 
-    monkeypatch.setattr(updates.urllib.request, "urlopen", lambda *a, **k: FakeResponse())
+    monkeypatch.setattr(updates, "_urlopen", lambda *a, **k: FakeResponse())
     assert updates.fetch_latest(updates.PIP).error == "invalid_response"
 
 
@@ -300,7 +302,7 @@ def test_the_request_carries_no_install_identifier(monkeypatch):
         captured["url"] = request.full_url
         return FakeResponse()
 
-    monkeypatch.setattr(updates.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(updates, "_urlopen", fake_urlopen)
     updates.fetch_latest(updates.PIP)
     agent = captured["headers"]["User-agent"]
     assert agent == f"IPMIDeck/{updates.VERSION}"
@@ -309,9 +311,143 @@ def test_the_request_carries_no_install_identifier(monkeypatch):
 
 
 def test_the_outbound_address_is_logged_before_the_socket_opens(monkeypatch, caplog):
-    monkeypatch.setattr(
-        updates.urllib.request, "urlopen", lambda *a, **k: (_ for _ in ()).throw(TimeoutError())
-    )
+    monkeypatch.setattr(updates, "_urlopen", lambda *a, **k: (_ for _ in ()).throw(TimeoutError()))
     with caplog.at_level("INFO", logger="ipmideck.updates"):
         updates.fetch_latest(updates.PIP)
     assert any(updates.PYPI_URL in r.getMessage() for r in caplog.records)
+
+
+# --- security marker for the index and registry channels ----------------------------------------
+
+
+def _stub_channels(monkeypatch, channel_payload, release_payload=None, release_error=None):
+    calls = []
+
+    def fake(url, accept, timeout):
+        calls.append(url)
+        if "/releases/tags/" in url:
+            if release_error is not None:
+                raise release_error
+            return release_payload
+        return channel_payload
+
+    monkeypatch.setattr(updates, "_fetch", fake)
+    return calls
+
+
+_PIP_NEWER = {"versions": ["99.0.0"]}
+_DOCKER_NEWER = {"results": [{"name": "latest"}, {"name": "99.0.0"}]}
+_NEWER_PAGE = updates.RELEASES_URL + "/tag/v99.0.0"
+
+
+@pytest.mark.parametrize(
+    "channel, payload", [(updates.PIP, _PIP_NEWER), (updates.DOCKER, _DOCKER_NEWER)]
+)
+def test_a_newer_index_version_is_checked_for_a_security_release(monkeypatch, channel, payload):
+    """The index and the registry carry no release notes, so the release of the version they
+    found is asked whether it is a security release; otherwise most installs never see the
+    badge."""
+    release = {"body": "### Security\n\n- Fixed.", "html_url": _NEWER_PAGE}
+    calls = _stub_channels(monkeypatch, payload, release)
+    probe = updates.fetch_latest(channel)
+    assert probe.error is None
+    assert probe.is_security is True
+    assert probe.release_url == _NEWER_PAGE
+    assert calls[-1] == updates.GITHUB_TAG_URL.format(tag="v99.0.0")
+
+
+def test_an_ordinary_newer_release_stays_ordinary(monkeypatch):
+    _stub_channels(monkeypatch, _PIP_NEWER, {"body": "### Added\n\n- A feature."})
+    assert updates.fetch_latest(updates.PIP).is_security is False
+
+
+def test_no_release_lookup_when_nothing_newer_was_found(monkeypatch):
+    calls = _stub_channels(monkeypatch, {"versions": ["0.0.1"]}, {"body": "### Security"})
+    probe = updates.fetch_latest(updates.PIP)
+    assert probe.is_security is False
+    assert len(calls) == 1, "only the index may be contacted when there is nothing newer"
+
+
+def test_a_failed_release_lookup_keeps_the_found_version(monkeypatch):
+    _stub_channels(monkeypatch, _PIP_NEWER, release_error=urllib.error.URLError("down"))
+    probe = updates.fetch_latest(updates.PIP)
+    assert probe.error is None
+    assert probe.latest_version == "99.0.0"
+    assert probe.is_security is False
+
+
+# --- release links and redirects ----------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "candidate, accepted",
+    [
+        (updates.RELEASES_URL + "/tag/v2.1.0", True),
+        ("javascript:alert(1)", False),
+        ("https://evil.example/ipmideck/IPMIDeck/releases/tag/v2", False),
+        (updates.RELEASES_URL + ".evil.example/x", False),
+        ("http://github.com/ipmideck/IPMIDeck/releases/tag/v2", False),
+        (None, False),
+        (42, False),
+    ],
+)
+def test_only_a_release_page_of_this_project_is_kept_as_a_link(candidate, accepted):
+    expected = candidate if accepted else updates.RELEASES_URL
+    assert updates.safe_release_url(candidate) == expected
+
+
+def test_a_foreign_link_in_the_release_answer_is_not_passed_on(monkeypatch):
+    _stub_fetch(monkeypatch, {"tag_name": "v9.9.9", "body": "", "html_url": "javascript:alert(1)"})
+    assert updates.fetch_latest(updates.GIT).release_url == updates.RELEASES_URL
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "http://pypi.org/simple/ipmideck/",
+        "https://evil.example/simple/ipmideck/",
+        "ftp://pypi.org/simple/ipmideck/",
+    ],
+)
+def test_a_redirect_off_the_update_endpoints_is_refused(target):
+    handler = updates._UpdateEndpointRedirects()
+    request = urllib.request.Request(updates.PYPI_URL)
+    with pytest.raises(ValueError):
+        handler.redirect_request(request, None, 302, "Found", {}, target)
+
+
+def test_a_redirect_between_update_endpoints_is_followed_and_logged(caplog):
+    handler = updates._UpdateEndpointRedirects()
+    request = urllib.request.Request(updates.GITHUB_URL)
+    target = "https://api.github.com/repositories/1/releases/latest"
+    with caplog.at_level("INFO", logger="ipmideck.updates"):
+        followed = handler.redirect_request(request, None, 301, "Moved", {}, target)
+    assert followed.full_url == target
+    assert any(target in r.getMessage() for r in caplog.records)
+
+
+def test_a_redirect_off_the_endpoints_ends_as_a_reason_not_a_request(monkeypatch):
+    def redirected(request, timeout):
+        return updates._UpdateEndpointRedirects().redirect_request(
+            request, None, 302, "Found", {}, "http://pypi.org/simple/ipmideck/"
+        )
+
+    monkeypatch.setattr(updates, "_urlopen", redirected)
+    assert updates.fetch_latest(updates.PIP).error == "invalid_response"
+
+
+def test_a_target_off_the_endpoints_is_never_opened(monkeypatch):
+    opened = []
+    monkeypatch.setattr(updates, "_urlopen", lambda *a, **k: opened.append(a))
+    with pytest.raises(ValueError):
+        updates._fetch("https://evil.example/x", "application/json", 1.0)
+    assert opened == []
+
+
+def test_the_opener_uses_the_restricted_redirect_handler():
+    handlers = updates._OPENER.handlers
+    assert any(isinstance(h, updates._UpdateEndpointRedirects) for h in handlers)
+    # The stock handler would follow anything; it must not sit beside ours.
+    assert not any(
+        type(h) is urllib.request.HTTPRedirectHandler for h in handlers
+    )
