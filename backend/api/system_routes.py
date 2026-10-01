@@ -54,9 +54,13 @@ _ALLOWED_APP_CONFIG_KEYS = {
     "currency",
     "alerting.notifications_enabled",
     "data.retention_days",
-    # Whether IPMIDeck may check for a newer version on its own. Readable here so the setup
-    # wizard and Settings can show the current answer; the write that also starts or stops the
-    # check has its own endpoint.
+}
+
+# Readable here but NOT writable. Whether IPMIDeck may check for a newer version on its own is
+# shown by the setup wizard and Settings from this route, but a write here would store the answer
+# without starting or stopping the check, so "off" would not hold until a restart. The write goes
+# through PUT /api/updates/consent, which does both.
+_READ_ONLY_APP_CONFIG_KEYS = {
     "updates.check_enabled",
 }
 
@@ -65,7 +69,7 @@ _ALLOWED_APP_CONFIG_KEYS = {
 async def get_app_config_value(key: str):
     """Read a single app_config value. Returns {success, key, value}.
 
-    SEC-07 (F11): the key must be in the SAME allow-list the PUT path enforces.
+    The key must be allow-listed: the PUT path's list plus the read-only keys above.
     Without it the endpoint served any app_config row by name — `session_secret`
     included — to any caller holding a session (real, stolen, or forged).
 
@@ -73,7 +77,7 @@ async def get_app_config_value(key: str):
     coerced back to JSON booleans in the response so the frontend can use
     them directly. Missing rows return value=None (not an error).
     """
-    if key not in _ALLOWED_APP_CONFIG_KEYS:
+    if key not in _ALLOWED_APP_CONFIG_KEYS and key not in _READ_ONLY_APP_CONFIG_KEYS:
         return {"success": False, "error": "key_not_allowed"}
     from backend.main import db
     raw = await db.get_config(key, default=None)

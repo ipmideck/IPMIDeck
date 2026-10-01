@@ -26,12 +26,8 @@ def _run(coro):
 
 # Booting the application is deliberately NOT done once per test.
 #
-# Two facts force this. Entering the lifespan re-runs the module-route mount and the
-# single-page-app fallback mount, and neither is removed on exit, so every boot leaves routes
-# behind on the shared application object — enough boots in one session and request handling
-# recurses past the interpreter's limit, which this file would otherwise walk the whole suite
-# into. And backend.main keeps its database, config and services in module-level globals, so two
-# live instances cannot coexist: the second boot's globals are the ones every route handler sees.
+# backend.main keeps its database, config and services in module-level globals, so two live
+# instances cannot coexist: the second boot's globals are the ones every route handler sees.
 #
 # So there is exactly ONE live instance at a time, rebooted only when a test needs the other
 # configuration. Tests are grouped by configuration below, which makes that two boots in
@@ -127,7 +123,7 @@ def test_the_version_history_is_served_without_touching_the_network(open_client,
     def forbidden(*args, **kwargs):
         raise AssertionError("the version history must not perform a lookup")
 
-    monkeypatch.setattr("backend.core.updates.urllib.request.urlopen", forbidden)
+    monkeypatch.setattr("backend.core.updates._urlopen", forbidden)
     body = client.get("/api/updates/changelog").json()
     assert body["success"] is True
     versions = [e["version"] for e in body["entries"]]
@@ -157,7 +153,7 @@ def test_the_state_route_performs_no_lookup(open_client, monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("reading the cached state must not perform a lookup")
 
-    monkeypatch.setattr("backend.core.updates.urllib.request.urlopen", forbidden)
+    monkeypatch.setattr("backend.core.updates._urlopen", forbidden)
     assert client.get("/api/updates/state").json()["success"] is True
 
 
@@ -188,6 +184,9 @@ def test_the_history_still_reads_when_suppressed(suppressed_client):
 
 def test_the_unattended_check_is_not_running_when_suppressed(suppressed_client):
     client, bm = suppressed_client
+    # Consent given, so only the configuration switch can be what keeps it off.
+    _run(bm.db.set_config("updates.check_enabled", "true"))
+    assert _run(bm.update_service.start()) is False
     assert bm.update_service.running() is False
 
 
@@ -289,3 +288,45 @@ def test_the_consent_key_is_readable_through_the_generic_config_route(open_clien
     client.put("/api/updates/consent", json={"enabled": True})
     body = client.get("/api/system/app-config/updates.check_enabled").json()
     assert body["success"] is True and body["value"] is True
+
+
+def test_the_consent_key_is_not_writable_through_the_generic_config_route(open_client):
+    """A write there would store the answer without starting or stopping the check, so "off"
+    would not hold until a restart. Only the dedicated route may change it."""
+    client, bm = open_client
+    client.put("/api/updates/consent", json={"enabled": True})
+    refused = client.put(
+        "/api/system/app-config/updates.check_enabled", json={"value": False}
+    ).json()
+    assert refused == {"success": False, "error": "key_not_allowed"}
+    assert client.get("/api/updates/state").json()["consent"] is True
+    assert bm.update_service.running() is True
+    _run(bm.update_service.stop())
+
+
+# --- authentication -----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "method, path, body",
+    [
+        ("GET", "/api/updates/changelog", None),
+        ("GET", "/api/updates/state", None),
+        ("POST", "/api/updates/check", None),
+        ("PUT", "/api/updates/consent", {"enabled": True}),
+    ],
+)
+def test_every_update_route_requires_a_session(open_client, monkeypatch, method, path, body):
+    client, bm = open_client
+    monkeypatch.setattr(
+        "backend.core.update_service.fetch_latest",
+        lambda m: (_ for _ in ()).throw(AssertionError("an anonymous caller reached the network")),
+    )
+    _run(bm.auth.set_auth_enabled(True))
+    try:
+        client.cookies.clear()
+        response = client.request(method, path, json=body)
+    finally:
+        _run(bm.auth.set_auth_enabled(False))
+    assert response.status_code == 401
+    assert _run(bm.db.get_config("updates.check_enabled")) == "false"
