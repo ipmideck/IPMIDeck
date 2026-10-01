@@ -123,3 +123,34 @@ def test_the_help_bar_still_advertises_the_key():
     out.print(console_ui.render_header())
     header = out.export_text()
     assert "[g]" in header and "update" in header
+
+
+# --- what the key reports -----------------------------------------------------------------------
+
+
+def _report(caplog, **fields):
+    from backend.core.update_service import UpdateStatus
+    from backend.main import _report_update_status
+
+    caplog.clear()
+    with caplog.at_level("INFO", logger="ipmideck"):
+        _report_update_status(UpdateStatus(**fields))
+    return [r.getMessage() for r in caplog.records]
+
+
+def test_a_failed_check_still_reports_the_update_an_earlier_one_found(caplog):
+    lines = _report(
+        caplog, error="rate_limited", update_available=True, latest_version="99.0.0"
+    )
+    assert any("rate_limited" in line for line in lines)
+    assert any("99.0.0" in line for line in lines)
+
+
+def test_a_failed_check_with_nothing_known_does_not_claim_to_be_up_to_date(caplog):
+    lines = _report(caplog, error="unreachable")
+    assert any("unreachable" in line for line in lines)
+    assert not any("latest published" in line for line in lines)
+
+
+def test_a_clean_check_with_nothing_newer_says_so(caplog):
+    assert any("latest published" in line for line in _report(caplog))

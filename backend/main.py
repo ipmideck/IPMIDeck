@@ -800,6 +800,23 @@ def _mount_spa(app: FastAPI) -> None:
 
 # === CLI entry point ===
 
+def _report_update_status(status) -> None:
+    """Log the outcome of a console-requested update check; the console shows log records."""
+    if status.error:
+        logger.warning("Update check did not complete: %s", status.error)
+    # A failed check keeps the update an earlier one found, so it is still reported.
+    if status.update_available:
+        kind = "security release" if status.is_security else "release"
+        logger.warning(
+            "Version %s is available (%s) — %s",
+            status.latest_version,
+            kind,
+            status.release_url,
+        )
+    elif not status.error:
+        logger.info("Version %s is the latest published release", VERSION)
+
+
 def _build_arg_parser() -> argparse.ArgumentParser:
     """Build the cli() argument parser (factored out so the subcommand routing is unit-testable).
 
@@ -1191,18 +1208,7 @@ def cli():
                 except Exception:
                     logger.warning("The update check could not be completed")
                     return
-                if status.error:
-                    logger.warning("Update check did not complete: %s", status.error)
-                elif status.update_available:
-                    kind = "security release" if status.is_security else "release"
-                    logger.warning(
-                        "Version %s is available (%s) — %s",
-                        status.latest_version,
-                        kind,
-                        status.release_url,
-                    )
-                else:
-                    logger.info("Version %s is the latest published release", VERSION)
+                _report_update_status(status)
 
             loop.call_soon_threadsafe(lambda: asyncio.ensure_future(_check()))
 

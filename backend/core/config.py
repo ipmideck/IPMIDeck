@@ -66,6 +66,34 @@ def _clamp_duration(seconds: int, written: str | int) -> int:
     return seconds
 
 
+_TRUE_WORDS = frozenset({"true", "1", "yes", "on"})
+_FALSE_WORDS = frozenset({"false", "0", "no", "off", ""})
+
+
+def parse_switch(value: object, name: str) -> bool:
+    """Read an on/off setting from the configuration file or the environment.
+
+    YAML turns an unquoted ``false`` into a boolean but keeps a quoted ``"false"`` as text, and
+    any non-empty text is true in Python, so ``bool("false")`` would switch the setting ON. The
+    usual spellings are recognised in either form. Anything else is read as off, with a warning
+    naming the value: this guards the switch that keeps the update check from opening a socket,
+    and a value nobody can interpret must not be taken as permission.
+    """
+    if isinstance(value, bool):
+        return value
+    # bool is an int subclass and was handled above; only a literal 1 or 0 counts here.
+    if isinstance(value, int) and value in (0, 1):
+        return value == 1
+    if isinstance(value, str):
+        word = value.strip().lower()
+        if word in _TRUE_WORDS:
+            return True
+        if word in _FALSE_WORDS:
+            return False
+    logger.warning("Unrecognised value %r for %s — treating it as off", value, name)
+    return False
+
+
 def _data_dir() -> Path:
     return Path(os.environ.get("IPMIDECK_DATA_DIR", "/data" if os.name != "nt" else "./data"))
 
@@ -163,6 +191,11 @@ class UpdatesConfig:
 
     enabled: bool = True
 
+    def __post_init__(self):
+        # A quoted "false" (or "no", "off", "0") loads as text, and text is truthy: read as-is,
+        # the switch written to keep the socket closed would leave it open.
+        self.enabled = parse_switch(self.enabled, "updates.enabled")
+
 
 @dataclass
 class AppConfig:
@@ -200,7 +233,7 @@ def _apply_env_overrides(config: AppConfig) -> None:
         "IPMIDECK_DATA_RETENTION_DAYS": ("data", "retention_days", int),
         "IPMIDECK_LOGGING_LEVEL": ("logging", "level"),
         "IPMIDECK_UPDATES_ENABLED": (
-            "updates", "enabled", lambda v: v.lower() in ("true", "1", "yes")
+            "updates", "enabled", lambda v: parse_switch(v, "IPMIDECK_UPDATES_ENABLED")
         ),
         "IPMIDECK_DEMO": ("demo", None, lambda v: v.lower() in ("true", "1", "yes")),
     }
@@ -243,6 +276,10 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
             config.logging = LoggingConfig(**{k: v for k, v in raw["logging"].items() if k in LoggingConfig.__dataclass_fields__})
         if "updates" in raw and isinstance(raw["updates"], dict):
             config.updates = UpdatesConfig(**{k: v for k, v in raw["updates"].items() if k in UpdatesConfig.__dataclass_fields__})
+        elif raw.get("updates") is not None:
+            # "updates: false" written as a value rather than a section: honour it as the
+            # switch instead of ignoring it, which would leave the check on.
+            config.updates = UpdatesConfig(enabled=parse_switch(raw["updates"], "updates"))
         if "demo" in raw:
             config.demo = bool(raw["demo"])
         if "modules" in raw and isinstance(raw["modules"], dict):
