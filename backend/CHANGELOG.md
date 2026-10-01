@@ -158,10 +158,10 @@ into a new dated `## [<version>] - YYYY-MM-DD` section.
   contacted on its own before you answer, nor after you untick it. With it on, it checks at
   start-up and once a day and stays silent unless there is genuinely something newer; it can be
   turned off at any time under **Settings → About → Updates**. A check that fails (no route out,
-  rate limited, an endpoint error) is retried after a growing delay, from 15 minutes up to once
-  every 6 hours, until one succeeds. There is also a **Check now** button there, and the console
-  `[g]` key now performs a real check instead of printing a promise that one would arrive in a
-  later release. Both check when pressed, whatever was answered during setup.
+  rate limited, an endpoint error) is retried after 15 minutes, then after a wait that doubles
+  each time up to 6 hours, until one succeeds. There is also a **Check now** button there, and
+  the console `[g]` key now performs a real check instead of printing a promise that one would
+  arrive in a later release. Both check when pressed, whatever was answered during setup.
 
   An existing installation that upgrades does not go through setup again, so it is not asked:
   the unattended check stays off until you turn it on under **Settings → About → Updates**.
@@ -171,9 +171,10 @@ into a new dated `## [<version>] - YYYY-MM-DD` section.
   your public IP address. It is logged verbatim before the socket opens so you can audit it
   yourself. A PyPI or Docker install that finds a newer version makes one more such request, to
   GitHub, to learn whether it is a security release, meaning its release notes have a
-  `### Security` section; if those notes cannot be read yet, it asks again after an hour.
-  Nothing is downloaded or installed. The lookup uses the standard library only — the runtime
-  dependencies still contain no HTTP client.
+  `### Security` section. If those notes cannot be read yet, the whole check (both requests) is
+  repeated every hour, at most 6 times, and then goes back to once a day. An install running a
+  stable release is never offered a pre-release. Nothing is downloaded or installed. The lookup
+  uses the standard library only — the runtime dependencies still contain no HTTP client.
 
   Setting `updates.enabled: false` in `config.yaml` (or `IPMIDECK_UPDATES_ENABLED=false`) turns
   it off outright: the endpoints that could open a socket are not registered at all, so

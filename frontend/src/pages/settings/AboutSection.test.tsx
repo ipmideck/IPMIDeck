@@ -85,7 +85,10 @@ describe("the Check now outcome", () => {
   it("reports up to date only after a clean check", async () => {
     answerCheckWith({});
     await pressCheck();
-    expect(await screen.findByRole("status")).toBeTruthy();
+    expect(await screen.findByText(/updates\.upToDate|is the latest/)).toBeTruthy();
+    expect(
+      screen.queryByText(/updates\.(update|securityUpdate)Available|is available/),
+    ).toBeNull();
     expect(screen.queryByText(/updates\.checkFailed|could not be completed/i)).toBeNull();
   });
 });

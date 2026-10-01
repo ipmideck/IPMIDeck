@@ -20,7 +20,7 @@ const statePayload = {
   is_security: false,
   release_url: "https://example.invalid/releases",
   install_method: "pip",
-  checked_at: null,
+  checked_at: null as string | null,
   error: null,
 };
 
@@ -36,10 +36,12 @@ vi.mock("@/api/client", () => ({
 import { get, post, put } from "@/api/client";
 import { VersionButton } from "@/components/layout/VersionButton";
 import {
-  FIRST_CHECK_SETTLE_MS,
+  FIRST_CHECK_READS_MS,
   STATE_REFRESH_MS,
   useUpdateStore,
 } from "@/stores/update-store";
+
+const [FIRST_READ, SECOND_READ, LAST_READ] = FIRST_CHECK_READS_MS;
 
 let visibility: DocumentVisibilityState = "visible";
 
@@ -81,6 +83,26 @@ function withConsent(consent: boolean) {
     checking: false,
   });
 }
+
+/** The next state read answers with this. */
+function answerReadWith(body: Partial<typeof statePayload>) {
+  vi.mocked(get).mockResolvedValueOnce({ ...statePayload, ...body });
+}
+
+/** A request whose answer the test hands over when it chooses, to put answers out of order. */
+function held() {
+  let resolve!: (body: typeof statePayload) => void;
+  const promise = new Promise<typeof statePayload>((r) => {
+    resolve = r;
+  });
+  return {
+    promise,
+    answer: (body: Partial<typeof statePayload>) => resolve({ ...statePayload, ...body }),
+  };
+}
+
+const EARLIER = "2026-10-01T06:00:00+00:00";
+const LATER = "2026-10-01T12:00:00+00:00";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -127,23 +149,42 @@ describe("keeping the update state current on an open page", () => {
     expect(stateReads()).toBe(0);
   });
 
-  it("reads the result a few seconds after the unattended check is switched on", async () => {
+  it("reads at 15, 30 and 60 seconds after the unattended check is switched on", async () => {
+    expect(FIRST_CHECK_READS_MS).toEqual([15_000, 30_000, 60_000]);
     withConsent(false);
     await useUpdateStore.getState().setConsent(true);
     expect(put).toHaveBeenCalledWith("/api/updates/consent", { enabled: true });
-    await vi.advanceTimersByTimeAsync(FIRST_CHECK_SETTLE_MS - 1);
+    await vi.advanceTimersByTimeAsync(FIRST_READ - 1);
     expect(stateReads()).toBe(0);
     await vi.advanceTimersByTimeAsync(1);
     expect(stateReads()).toBe(1);
-    // Once, not a new poll of its own.
-    await vi.advanceTimersByTimeAsync(10 * FIRST_CHECK_SETTLE_MS);
+    // A slow first check has not written its result yet, so the page asks again.
+    await vi.advanceTimersByTimeAsync(SECOND_READ - FIRST_READ - 1);
     expect(stateReads()).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(stateReads()).toBe(2);
+    await vi.advanceTimersByTimeAsync(LAST_READ - SECOND_READ);
+    expect(stateReads()).toBe(3);
+    // Three reads, not a new poll of its own.
+    await vi.advanceTimersByTimeAsync(10 * LAST_READ);
+    expect(stateReads()).toBe(3);
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("stops reading as soon as a read shows the first check has finished", async () => {
+    withConsent(false);
+    answerReadWith({ checked_at: null });
+    answerReadWith({ checked_at: LATER });
+    await useUpdateStore.getState().setConsent(true);
+    await vi.advanceTimersByTimeAsync(10 * LAST_READ);
+    expect(stateReads()).toBe(2);
+    expect(useUpdateStore.getState().state?.checked_at).toBe(LATER);
     expect(post).not.toHaveBeenCalled();
   });
 
   it("does not read after the unattended check is switched off", async () => {
     await useUpdateStore.getState().setConsent(false);
-    await vi.advanceTimersByTimeAsync(2 * FIRST_CHECK_SETTLE_MS);
+    await vi.advanceTimersByTimeAsync(2 * LAST_READ);
     expect(stateReads()).toBe(0);
   });
 
@@ -151,8 +192,31 @@ describe("keeping the update state current on an open page", () => {
     withConsent(false);
     await useUpdateStore.getState().setConsent(true);
     await useUpdateStore.getState().setConsent(false);
-    await vi.advanceTimersByTimeAsync(2 * FIRST_CHECK_SETTLE_MS);
+    await vi.advanceTimersByTimeAsync(2 * LAST_READ);
     expect(stateReads()).toBe(0);
+  });
+
+  it("drops the remaining reads when the check is switched off between them", async () => {
+    withConsent(false);
+    await useUpdateStore.getState().setConsent(true);
+    await vi.advanceTimersByTimeAsync(FIRST_READ);
+    expect(stateReads()).toBe(1);
+    await useUpdateStore.getState().setConsent(false);
+    await vi.advanceTimersByTimeAsync(10 * LAST_READ);
+    expect(stateReads()).toBe(1);
+  });
+
+  it("books no further read when the check is switched off while one is on its way", async () => {
+    withConsent(false);
+    const slow = held();
+    vi.mocked(get).mockReturnValueOnce(slow.promise);
+    await useUpdateStore.getState().setConsent(true);
+    await vi.advanceTimersByTimeAsync(FIRST_READ);
+    expect(stateReads()).toBe(1);
+    await useUpdateStore.getState().setConsent(false);
+    slow.answer({ consent: false });
+    await vi.advanceTimersByTimeAsync(10 * LAST_READ);
+    expect(stateReads()).toBe(1);
   });
 
   it("shares one listener and one timer between every caller", async () => {
@@ -178,6 +242,75 @@ describe("keeping the update state current on an open page", () => {
     second();
     setVisibility("visible");
     await vi.advanceTimersByTimeAsync(2 * STATE_REFRESH_MS);
+    expect(stateReads()).toBe(1);
+  });
+});
+
+describe("answers that come back out of order", () => {
+  it("does not let a read that started before Check now finished replace its result", async () => {
+    const stale = held();
+    vi.mocked(get).mockReturnValueOnce(stale.promise);
+    const reading = useUpdateStore.getState().loadState();
+    vi.mocked(post).mockResolvedValueOnce({
+      ...statePayload,
+      latest_version: "2.2.0",
+      checked_at: LATER,
+    });
+    await useUpdateStore.getState().checkNow();
+
+    stale.answer({ latest_version: "2.1.0", checked_at: EARLIER });
+    await reading;
+    expect(useUpdateStore.getState().state?.latest_version).toBe("2.2.0");
+    expect(useUpdateStore.getState().state?.checked_at).toBe(LATER);
+    expect(useUpdateStore.getState().stateLoading).toBe(false);
+  });
+
+  it("shows a read that started after Check now finished", async () => {
+    vi.mocked(post).mockResolvedValueOnce({ ...statePayload, checked_at: EARLIER });
+    await useUpdateStore.getState().checkNow();
+    answerReadWith({ latest_version: "2.3.0", checked_at: LATER });
+    await useUpdateStore.getState().loadState();
+    expect(useUpdateStore.getState().state?.latest_version).toBe("2.3.0");
+  });
+
+  it("does not let an older read that comes back last replace a newer one", async () => {
+    const older = held();
+    const newer = held();
+    vi.mocked(get).mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise);
+    const first = useUpdateStore.getState().loadState();
+    const second = useUpdateStore.getState().loadState();
+
+    newer.answer({ latest_version: "2.3.0", checked_at: LATER });
+    await second;
+    older.answer({ latest_version: "2.1.0", checked_at: EARLIER });
+    await first;
+    expect(useUpdateStore.getState().state?.checked_at).toBe(LATER);
+  });
+
+  it("does not let a read that started before consent was saved undo the switch", async () => {
+    withConsent(false);
+    const stale = held();
+    vi.mocked(get).mockReturnValueOnce(stale.promise);
+    const reading = useUpdateStore.getState().loadState();
+    await useUpdateStore.getState().setConsent(true);
+
+    stale.answer({ consent: false });
+    await reading;
+    expect(useUpdateStore.getState().state?.consent).toBe(true);
+  });
+
+  it("does not re-read on its own while Check now is running", async () => {
+    useUpdateStore.setState({ checking: true });
+    watch();
+    setVisibility("visible");
+    await settle();
+    expect(stateReads()).toBe(0);
+    await vi.advanceTimersByTimeAsync(STATE_REFRESH_MS);
+    expect(stateReads()).toBe(0);
+
+    useUpdateStore.setState({ checking: false });
+    setVisibility("visible");
+    await settle();
     expect(stateReads()).toBe(1);
   });
 });

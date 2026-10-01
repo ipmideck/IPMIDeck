@@ -424,7 +424,7 @@
       "credentialsRequired": "Gebruikersnaam en wachtwoord zijn vereist.",
       "applyFailed": "Kan de authenticatie-instelling niet toepassen.",
       "updateChecksLabel": "IPMIDeck mag naar nieuwe versies zoeken",
-      "updateChecksHint": "Bij het starten en eens per dag vraagt IPMIDeck aan de plek waar deze installatie wordt gepubliceerd (de Python-pakketindex, het containerregister of de GitHub-releases) of er een nieuwere versie bestaat. Vindt de pakketindex of het register er een, dan vraagt het ook aan GitHub of het om een beveiligingsrelease gaat. Elk verzoek bevat alleen de productnaam en de versie die je draait — geen kenmerk, niets over je servers. Je kunt dit altijd uitzetten in de Instellingen.",
+      "updateChecksHint": "Bij het starten en eens per dag vraagt IPMIDeck aan de plek waar deze installatie wordt gepubliceerd (de Python-pakketindex, het containerregister of de GitHub-releases) of er een nieuwere versie bestaat. Vindt de pakketindex of het register er een, dan vraagt het ook aan GitHub of het om een beveiligingsrelease gaat. Een controle die mislukt of onvolledig blijft, wordt eerder herhaald dan de volgende dagelijkse controle. Elk verzoek bevat alleen de productnaam en de versie die je draait — geen kenmerk, niets over je servers. Je kunt dit altijd uitzetten in de Instellingen.",
       "updateChecksSaveFailed": "Je keuze voor updatecontroles kon niet worden opgeslagen. Je kunt dit later instellen via {{where}}."
     },
     "server": {

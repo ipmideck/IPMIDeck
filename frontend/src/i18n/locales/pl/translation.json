@@ -424,7 +424,7 @@
       "credentialsRequired": "Nazwa użytkownika i hasło są wymagane.",
       "applyFailed": "Nie udało się zastosować ustawienia uwierzytelniania.",
       "updateChecksLabel": "Zezwól IPMIDeck na sprawdzanie nowych wersji",
-      "updateChecksHint": "Przy starcie i raz dziennie IPMIDeck sprawdza w miejscu publikacji tej instalacji (w indeksie pakietów Python, rejestrze kontenerów lub wydaniach na GitHubie), czy istnieje nowsza wersja. Jeśli w indeksie pakietów lub rejestrze znajdzie nowszą, pyta też GitHuba, czy jest to wydanie zabezpieczeń. Każde zapytanie zawiera wyłącznie nazwę produktu i używaną wersję — żadnego identyfikatora, nic o Twoich serwerach. Możesz to wyłączyć w każdej chwili w Ustawieniach.",
+      "updateChecksHint": "Przy starcie i raz dziennie IPMIDeck sprawdza w miejscu publikacji tej instalacji (w indeksie pakietów Python, rejestrze kontenerów lub wydaniach na GitHubie), czy istnieje nowsza wersja. Jeśli w indeksie pakietów lub rejestrze znajdzie nowszą, pyta też GitHuba, czy jest to wydanie zabezpieczeń. Nieudane lub niepełne sprawdzenie jest powtarzane wcześniej niż kolejne codzienne. Każde zapytanie zawiera wyłącznie nazwę produktu i używaną wersję — żadnego identyfikatora, nic o Twoich serwerach. Możesz to wyłączyć w każdej chwili w Ustawieniach.",
       "updateChecksSaveFailed": "Nie udało się zapisać Twojego wyboru dotyczącego sprawdzania aktualizacji. Możesz ustawić go później w {{where}}."
     },
     "server": {

@@ -59,20 +59,36 @@ const DEFAULT_RELEASES = "https://github.com/ipmideck/IPMIDeck/releases";
 export const STATE_REFRESH_MS = 60 * 60 * 1000;
 
 /**
- * How long after the unattended check is switched on before the page re-reads the state.
- * Switching it on starts the first check at once on the server, and that check may make two
- * lookups of up to six seconds each, so this waits long enough for both to have finished.
+ * When, counted from the moment the unattended check is switched on, the page re-reads the state.
+ * Switching it on starts the first check at once on the server. That check may make two lookups
+ * of up to six seconds each, and on a slow link it can take longer than one read would wait, so
+ * the page reads more than once and stops as soon as a read shows that the check has finished.
  */
-export const FIRST_CHECK_SETTLE_MS = 15 * 1000;
+export const FIRST_CHECK_READS_MS = [15 * 1000, 30 * 1000, 60 * 1000];
 
 // Shared by every caller of watchState: one visibility listener and one interval, however many
 // version buttons are mounted (the sidebar's and the mobile drawer's can be at the same time).
 let watchers = 0;
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
 let onVisible: (() => void) | null = null;
-// The one-off read after consent is given. Kept apart from the watchers because it belongs to
-// the answer, not to whichever component happens to be mounted when it fires.
-let settleTimer: ReturnType<typeof setTimeout> | null = null;
+// The reads after consent is given. Kept apart from the watchers because they belong to the
+// answer, not to whichever component happens to be mounted when they fire. The run number lets a
+// read that was already on its way when the answer changed see that it must not book another.
+let firstCheckTimer: ReturnType<typeof setTimeout> | null = null;
+let firstCheckRun = 0;
+
+function stopFirstCheckReads() {
+  firstCheckRun += 1;
+  if (firstCheckTimer !== null) clearTimeout(firstCheckTimer);
+  firstCheckTimer = null;
+}
+
+// Which answer about the update state is newest. A read takes a ticket when it starts; a check,
+// and a change of consent, take one when they finish, because what they leave behind is as new as
+// that moment. A read that comes back holding an older ticket than the answer on screen was served
+// from what the server had before that answer existed, so it is dropped rather than shown.
+let ticket = 0;
+let shownTicket = 0;
 
 /**
  * Update state and the packaged version history.
@@ -98,9 +114,17 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
   checking: false,
 
   loadState: async () => {
+    const mine = ++ticket;
     set({ stateLoading: true });
     try {
       const body = await apiGet<UpdateState & { success: boolean }>("/api/updates/state");
+      if (mine < shownTicket) {
+        // A newer answer (a Check now result, a change of consent, a later read) arrived while
+        // this one was on its way; showing this one would put the older answer back on screen.
+        set({ stateLoading: false });
+        return;
+      }
+      shownTicket = mine;
       set({ state: body, stateLoading: false });
     } catch {
       // The banner and the badge simply stay absent; there is nothing useful to say to the
@@ -136,6 +160,7 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
       const body = await post<UpdateState & { success: boolean }>("/api/updates/check");
       const previous = get().state;
       const merged = { ...body, enabled: previous?.enabled ?? true, consent: previous?.consent ?? false };
+      shownTicket = ++ticket;
       set({ state: merged, checking: false });
       return merged;
     } catch {
@@ -145,21 +170,40 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
   },
 
   setConsent: async (enabled: boolean) => {
+    // Taken before the answer is sent: the server starts the first check as soon as it has it.
+    const checkedBefore = get().state?.checked_at ?? null;
     await put("/api/updates/consent", { enabled });
     const previous = get().state;
-    if (previous) set({ state: { ...previous, consent: enabled } });
-    if (settleTimer !== null) {
-      clearTimeout(settleTimer);
-      settleTimer = null;
+    if (previous) {
+      // A read already on its way may carry the answer from before this one, undoing the switch.
+      shownTicket = ++ticket;
+      set({ state: { ...previous, consent: enabled } });
     }
-    if (enabled) {
-      // The first check has just started on the server. Without this read its result would
-      // only appear on the next hourly tick, which reads as "nothing happened".
-      settleTimer = setTimeout(() => {
-        settleTimer = null;
-        void get().loadState();
-      }, FIRST_CHECK_SETTLE_MS);
-    }
+    stopFirstCheckReads();
+    if (!enabled) return;
+
+    // The first check has just started on the server. Without these reads its result would only
+    // appear on the next hourly tick, which reads as "nothing happened". They only ever read: the
+    // check is already running, and asking for another is a person's action, not a timer's.
+    const run = firstCheckRun;
+    const startedAt = Date.now();
+    const finished = () => (get().state?.checked_at ?? null) !== checkedBefore;
+    const readAt = (step: number) => {
+      if (step >= FIRST_CHECK_READS_MS.length) return;
+      const wait = Math.max(0, FIRST_CHECK_READS_MS[step] - (Date.now() - startedAt));
+      firstCheckTimer = setTimeout(() => {
+        firstCheckTimer = null;
+        // The result is in, brought by the previous of these reads or by another one (the tab
+        // shown again, say): there is nothing left to wait for.
+        if (finished()) return;
+        void get()
+          .loadState()
+          .then(() => {
+            if (run === firstCheckRun) readAt(step + 1);
+          });
+      }, wait);
+    };
+    readAt(0);
   },
 
   watchState: () => {
@@ -167,8 +211,11 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
     if (watchers === 1) {
       // Coming back to the tab is when a stale badge would be noticed, and it also picks up a
       // check made from elsewhere (another browser, or the console key) while consent is off.
+      // Neither this nor the timer below reads while Check now is running: its answer is on the
+      // way, and a read made now could only return what that answer is about to replace.
       onVisible = () => {
-        if (document.visibilityState === "visible" && !get().stateLoading) {
+        const { stateLoading, checking } = get();
+        if (document.visibilityState === "visible" && !stateLoading && !checking) {
           void get().loadState();
         }
       };
@@ -176,8 +223,8 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
       // With consent off (or the configuration switch off) nothing on the server runs
       // unattended, so there is nothing new to read on a timer; the tick skips the request.
       refreshTimer = setInterval(() => {
-        const current = get().state;
-        if (current?.enabled && current.consent) void get().loadState();
+        const { state: current, checking } = get();
+        if (current?.enabled && current.consent && !checking) void get().loadState();
       }, STATE_REFRESH_MS);
     }
     let stopped = false;

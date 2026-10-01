@@ -424,7 +424,7 @@
       "credentialsRequired": "El usuario y la contraseña son obligatorios.",
       "applyFailed": "No se pudo aplicar el ajuste de autenticación.",
       "updateChecksLabel": "Permitir que IPMIDeck busque versiones nuevas",
-      "updateChecksHint": "Al arrancar y una vez al día, IPMIDeck pregunta allí donde se publica esta instalación (el índice de paquetes de Python, el registro de contenedores o las versiones de GitHub) si existe una versión más reciente. Si la consulta al índice de paquetes o al registro encuentra una, también pregunta a GitHub si es una entrega de seguridad. Cada petición solo lleva el nombre del producto y la versión que usas: ningún identificador, nada sobre tus servidores. Puedes desactivarlo cuando quieras en los Ajustes.",
+      "updateChecksHint": "Al arrancar y una vez al día, IPMIDeck pregunta allí donde se publica esta instalación (el índice de paquetes de Python, el registro de contenedores o las versiones de GitHub) si existe una versión más reciente. Si la consulta al índice de paquetes o al registro encuentra una, también pregunta a GitHub si es una entrega de seguridad. Una comprobación que falla o queda incompleta se repite antes de la siguiente comprobación diaria. Cada petición solo lleva el nombre del producto y la versión que usas: ningún identificador, nada sobre tus servidores. Puedes desactivarlo cuando quieras en los Ajustes.",
       "updateChecksSaveFailed": "No se pudo guardar tu respuesta sobre la búsqueda de actualizaciones. Puedes ajustarla más tarde en {{where}}."
     },
     "server": {

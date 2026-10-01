@@ -424,7 +424,7 @@
       "credentialsRequired": "Username and password are required.",
       "applyFailed": "Failed to apply authentication setting.",
       "updateChecksLabel": "Let IPMIDeck check for new versions",
-      "updateChecksHint": "At start-up and once a day, IPMIDeck asks where this install is published (the Python package index, the container registry or GitHub releases) whether a newer version exists. If a package-index or registry lookup finds one, it also asks GitHub whether that is a security release. Each request carries only the product name and the version you are running — no identifier, nothing about your servers. You can turn this off at any time in Settings.",
+      "updateChecksHint": "At start-up and once a day, IPMIDeck asks where this install is published (the Python package index, the container registry or GitHub releases) whether a newer version exists. If a package-index or registry lookup finds one, it also asks GitHub whether that is a security release. A check that fails or is left incomplete is repeated sooner than the next daily one. Each request carries only the product name and the version you are running — no identifier, nothing about your servers. You can turn this off at any time in Settings.",
       "updateChecksSaveFailed": "Your answer about update checks could not be saved. You can set it later in {{where}}."
     },
     "server": {

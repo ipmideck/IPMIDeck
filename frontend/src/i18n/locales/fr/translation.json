@@ -424,7 +424,7 @@
       "credentialsRequired": "Le nom d'utilisateur et le mot de passe sont requis.",
       "applyFailed": "Échec de l'application du paramètre d'authentification.",
       "updateChecksLabel": "Autoriser IPMIDeck à rechercher de nouvelles versions",
-      "updateChecksHint": "Au démarrage puis une fois par jour, IPMIDeck demande à la source où cette installation est publiée (l'index des paquets Python, le registre de conteneurs ou les versions GitHub) si une version plus récente existe. Si la recherche dans l'index des paquets ou le registre en trouve une, il demande aussi à GitHub s'il s'agit d'une version de sécurité. Chaque requête ne contient que le nom du produit et la version utilisée — aucun identifiant, rien sur vos serveurs. Vous pouvez désactiver cela à tout moment dans les Paramètres.",
+      "updateChecksHint": "Au démarrage puis une fois par jour, IPMIDeck demande à la source où cette installation est publiée (l'index des paquets Python, le registre de conteneurs ou les versions GitHub) si une version plus récente existe. Si la recherche dans l'index des paquets ou le registre en trouve une, il demande aussi à GitHub s'il s'agit d'une version de sécurité. Une vérification qui échoue ou reste incomplète est relancée avant la prochaine vérification quotidienne. Chaque requête ne contient que le nom du produit et la version utilisée — aucun identifiant, rien sur vos serveurs. Vous pouvez désactiver cela à tout moment dans les Paramètres.",
       "updateChecksSaveFailed": "Votre choix concernant la vérification des mises à jour n'a pas pu être enregistré. Vous pourrez le définir plus tard dans {{where}}."
     },
     "server": {

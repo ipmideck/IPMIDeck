@@ -178,8 +178,11 @@ change your mind at any time.
 
 - **What it does.** With your answer recorded, IPMIDeck looks up the newest published version at
   start-up and once every 24 hours. If a check fails (no route out, rate limited, an endpoint
-  error) it tries again after a growing delay, from 15 minutes up to once every 6 hours, until one
-  succeeds.
+  error) it is retried after 15 minutes, then after a wait that doubles each time up to 6 hours,
+  until one succeeds. If a check finds a newer version whose release notes cannot be read yet,
+  the whole check (both requests described below) is repeated every hour, at most 6 times, and
+  then goes back to once a day. An install running a stable release is never offered a
+  pre-release.
 - **On demand.** The **Check now** button and the console `[g]` key check when you press them,
   whatever was answered during setup. Both are refused when `updates.enabled` is off.
 - **What it sends.** One `GET`, to the index matching how you installed (the Python package
@@ -188,8 +191,8 @@ change your mind at any time.
   about your servers. Like any request, it shows the endpoint your public IP address. When a
   package-index or container-registry lookup finds a newer version, one more `GET` asks the
   published releases whether it is a security release: a release is marked as one when its
-  release notes have a `### Security` section. If those notes cannot be read yet, that question
-  is asked again after an hour. Every request is logged verbatim before the socket opens, so you
+  release notes have a `### Security` section. If those notes cannot be read yet, the whole check
+  is repeated as described above. Every request is logged verbatim before the socket opens, so you
   can audit it in your own logs.
 - **What it never does.** It does not download or install anything, and it shows nothing at all
   while you are on the latest version.

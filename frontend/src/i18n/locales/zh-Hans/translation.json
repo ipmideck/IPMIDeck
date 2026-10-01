@@ -424,7 +424,7 @@
       "credentialsRequired": "需要用户名和密码。",
       "applyFailed": "应用身份验证设置失败。",
       "updateChecksLabel": "允许 IPMIDeck 检查新版本",
-      "updateChecksHint": "IPMIDeck 会在启动时以及每天一次，向本安装的发布来源（Python 包索引、容器仓库或 GitHub 发布）询问是否有更新的版本。如果在包索引或仓库中找到了新版本，还会向 GitHub 询问它是否为安全发布。每个请求只包含产品名称和你正在运行的版本，不含任何标识符，也不含服务器信息。你可以随时在设置中关闭。",
+      "updateChecksHint": "IPMIDeck 会在启动时以及每天一次，向本安装的发布来源（Python 包索引、容器仓库或 GitHub 发布）询问是否有更新的版本。如果在包索引或仓库中找到了新版本，还会向 GitHub 询问它是否为安全发布。检查失败或未能完成时，会在下一次每日检查之前提前重试。每个请求只包含产品名称和你正在运行的版本，不含任何标识符，也不含服务器信息。你可以随时在设置中关闭。",
       "updateChecksSaveFailed": "无法保存你关于更新检查的选择。你可以稍后在 {{where}} 中设置。"
     },
     "server": {
