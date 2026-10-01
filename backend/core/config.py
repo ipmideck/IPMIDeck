@@ -263,6 +263,16 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
     if path.exists():
         with open(path) as f:
             raw = yaml.safe_load(f) or {}
+        if not isinstance(raw, dict):
+            # A file holding a list or a single value has no settings to read. Ignoring it lets the
+            # app start on the defaults instead of failing on the first section it looks up, and
+            # the warning says why the file appears to have no effect.
+            logger.warning(
+                "%s does not contain settings (its top level is not a set of names and values)"
+                " — ignoring it and using the defaults",
+                path,
+            )
+            raw = {}
 
         if "server" in raw:
             config.server = ServerConfig(**{k: v for k, v in raw["server"].items() if k in ServerConfig.__dataclass_fields__})
@@ -274,12 +284,15 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
             config.data = DataConfig(**{k: v for k, v in raw["data"].items() if k in DataConfig.__dataclass_fields__})
         if "logging" in raw:
             config.logging = LoggingConfig(**{k: v for k, v in raw["logging"].items() if k in LoggingConfig.__dataclass_fields__})
-        if "updates" in raw and isinstance(raw["updates"], dict):
-            config.updates = UpdatesConfig(**{k: v for k, v in raw["updates"].items() if k in UpdatesConfig.__dataclass_fields__})
-        elif raw.get("updates") is not None:
+        updates = raw.get("updates")
+        if isinstance(updates, dict):
+            config.updates = UpdatesConfig(
+                **{k: v for k, v in updates.items() if k in UpdatesConfig.__dataclass_fields__}
+            )
+        elif updates is not None:
             # "updates: false" written as a value rather than a section: honour it as the
             # switch instead of ignoring it, which would leave the check on.
-            config.updates = UpdatesConfig(enabled=parse_switch(raw["updates"], "updates"))
+            config.updates = UpdatesConfig(enabled=parse_switch(updates, "updates"))
         if "demo" in raw:
             config.demo = bool(raw["demo"])
         if "modules" in raw and isinstance(raw["modules"], dict):

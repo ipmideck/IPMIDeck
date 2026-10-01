@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
+import logging
 import threading
 
 import pytest
@@ -128,29 +130,147 @@ def test_the_help_bar_still_advertises_the_key():
 # --- what the key reports -----------------------------------------------------------------------
 
 
-def _report(caplog, **fields):
+def _report(**fields):
     from backend.core.update_service import UpdateStatus
     from backend.main import _report_update_status
 
-    caplog.clear()
-    with caplog.at_level("INFO", logger="ipmideck"):
-        _report_update_status(UpdateStatus(**fields))
-    return [r.getMessage() for r in caplog.records]
+    shown = []
+    _report_update_status(UpdateStatus(**fields), lambda line, style="": shown.append(line))
+    return shown
 
 
-def test_a_failed_check_still_reports_the_update_an_earlier_one_found(caplog):
-    lines = _report(
-        caplog, error="rate_limited", update_available=True, latest_version="99.0.0"
-    )
+def test_a_failed_check_still_reports_the_update_an_earlier_one_found():
+    lines = _report(error="rate_limited", update_available=True, latest_version="99.0.0")
     assert any("rate_limited" in line for line in lines)
     assert any("99.0.0" in line for line in lines)
 
 
-def test_a_failed_check_with_nothing_known_does_not_claim_to_be_up_to_date(caplog):
-    lines = _report(caplog, error="unreachable")
+def test_a_failed_check_with_nothing_known_does_not_claim_to_be_up_to_date():
+    lines = _report(error="unreachable")
     assert any("unreachable" in line for line in lines)
     assert not any("latest published" in line for line in lines)
 
 
-def test_a_clean_check_with_nothing_newer_says_so(caplog):
-    assert any("latest published" in line for line in _report(caplog))
+def test_a_clean_check_with_nothing_newer_says_so():
+    assert any("latest published" in line for line in _report())
+
+
+def test_a_security_release_is_called_one():
+    lines = _report(update_available=True, latest_version="99.0.0", is_security=True)
+    assert any("99.0.0" in line and "security release" in line for line in lines)
+
+
+def test_an_ordinary_release_is_not_called_a_security_release():
+    lines = _report(update_available=True, latest_version="99.0.0")
+    assert any("99.0.0" in line for line in lines)
+    assert not any("security release" in line for line in lines)
+
+
+def test_the_update_line_points_at_the_release():
+    from backend.core.updates import RELEASES_URL
+
+    release_url = RELEASES_URL + "/tag/v99.0.0"
+    lines = _report(update_available=True, latest_version="99.0.0", release_url=release_url)
+    assert any("99.0.0" in line and release_url in line for line in lines)
+
+
+# --- the answer reaches the operator whatever the verbosity -------------------------------------
+
+
+class _Service:
+    """Stands in for the update service: answers with ``status`` or raises ``error``."""
+
+    def __init__(self, status=None, error=None):
+        self.status = status
+        self.error = error
+
+    async def check_now(self):
+        if self.error is not None:
+            raise self.error
+        return self.status
+
+
+def _check_at(level, service):
+    """Run the console's check with the body wired the way run() wires it, at ``level``.
+
+    run() attaches a DequeLogHandler to the root logger and the verbosity key sets the root level,
+    so a log record below that level never reaches the body. Rebuilding that here is what lets
+    these tests tell an answer shown directly from one that was only logged.
+    """
+    from backend.console import DequeLogHandler
+    from backend.main import _run_console_update_check
+
+    console = _console(on_check_updates=lambda: None, verbosity=level)
+    root = logging.getLogger()
+    handler = DequeLogHandler(console.log_lines)
+    previous = root.level
+    root.addHandler(handler)
+    root.setLevel(level)
+    try:
+        asyncio.run(_run_console_update_check(service, console.report))
+    finally:
+        root.removeHandler(handler)
+        root.setLevel(previous)
+    return console
+
+
+@pytest.mark.parametrize("level", ["WARNING", "ERROR"])
+def test_the_up_to_date_answer_is_shown_at_a_quiet_verbosity(level):
+    """WARNING is the quietest step of the verbosity key and ERROR is what logging.level: error
+    gives. The "Checking…" line is shown at both, so the answer to it must be as well."""
+    from backend.core.update_service import UpdateStatus
+
+    console = _check_at(level, _Service(status=UpdateStatus()))
+    assert any("latest published" in line for line in _lines(console))
+
+
+def test_a_found_update_is_shown_at_a_quiet_verbosity():
+    from backend.core.update_service import UpdateStatus
+
+    status = UpdateStatus(update_available=True, latest_version="99.0.0")
+    console = _check_at("ERROR", _Service(status=status))
+    assert any("99.0.0" in line for line in _lines(console))
+
+
+def test_a_check_that_raises_is_still_answered():
+    console = _check_at("ERROR", _Service(error=RuntimeError("boom")))
+    assert any("could not be completed" in line for line in _lines(console))
+
+
+def test_an_answer_arriving_while_a_table_is_open_leaves_it_open():
+    """The answer comes some time after the key; the operator may have opened a table since."""
+    console = _console(on_check_updates=lambda: None)
+    console.view = "servers"
+    console.report("an answer")
+    assert console.view == "servers"
+    assert "an answer" in _lines(console)
+
+
+# --- whether the key is wired at all --------------------------------------------------------------
+
+
+def _wired(early_cfg):
+    from backend.main import _console_update_callback
+
+    def callback():
+        return None
+
+    return _console_update_callback(early_cfg, callback) is callback
+
+
+def test_the_key_is_wired_when_the_switch_is_on():
+    from backend.core.config import AppConfig, UpdatesConfig
+
+    assert _wired(AppConfig(updates=UpdatesConfig(enabled=True)))
+
+
+def test_the_key_is_not_wired_when_the_switch_is_off():
+    from backend.core.config import AppConfig, UpdatesConfig
+
+    assert not _wired(AppConfig(updates=UpdatesConfig(enabled=False)))
+
+
+def test_the_key_stays_wired_when_the_configuration_could_not_be_read():
+    """The service reads the switch again before every lookup and refuses when it is off, so
+    keeping the key wired here cannot open a socket the configuration forbids."""
+    assert _wired(None)

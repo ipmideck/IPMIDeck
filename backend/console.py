@@ -385,7 +385,7 @@ class ConsoleUI:
         # change-bind editor prompt. The editable buffer stays EMPTY (NOT pre-filled) so the typed
         # value shows immediately. None (default) just omits the "current:" label — backward compat.
         self.get_bind = get_bind
-        # OPTIONAL: schedules a real update check and reports back through the log. It must NOT
+        # OPTIONAL: schedules a real update check and answers through report(). It must NOT
         # perform the lookup itself — dispatch() runs on the key thread and a network round trip
         # there would freeze the render loop for the duration of the request. None (the default)
         # means the console cannot check, and the key says so instead of pretending.
@@ -458,6 +458,16 @@ class ConsoleUI:
         """
         self._push_log(line, style=style)
         self.view = "log"
+
+    def report(self, line: str, style: str = _PUSH_LOG_DEFAULT_STYLE) -> None:
+        """Show the answer to a key press that arrives later, such as the update check's.
+
+        It goes straight into the body, like the line the key printed when pressed, rather than
+        through a log record: the operator asked a question, and a reply sent as a record would be
+        hidden by a quieter verbosity. The view is left as it is, so an answer arriving while a
+        table is open does not pull the operator out of it.
+        """
+        self._push_log(line, style=style)
 
     @staticmethod
     def _validate_bind(host: str, port_str: str) -> tuple[str, int] | None:

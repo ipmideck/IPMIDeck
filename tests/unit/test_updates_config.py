@@ -40,18 +40,33 @@ def _write(tmp_path, updates_block: str):
     return path
 
 
+def _config_warnings(caplog) -> list[str]:
+    return [r.getMessage() for r in caplog.records if r.name == "ipmideck.config"]
+
+
+# An unrecognised value is read as off too, so the value alone cannot tell a recognised spelling
+# of off from one that fell through to the fallback. The fallback always warns and a recognised
+# spelling never does, so the spelling tests check that silence as well as the value.
+
+
 @pytest.mark.parametrize("written", OFF_SPELLINGS)
-def test_every_spelling_of_off_in_the_file_switches_it_off(tmp_path, monkeypatch, written):
+def test_every_spelling_of_off_in_the_file_switches_it_off(
+    tmp_path, monkeypatch, caplog, written
+):
     _isolate(tmp_path, monkeypatch)
     path = _write(tmp_path, f"  enabled: {written}\n")
-    assert load_config(path).updates.enabled is False, written
+    with caplog.at_level(logging.WARNING, logger="ipmideck.config"):
+        assert load_config(path).updates.enabled is False, written
+    assert _config_warnings(caplog) == [], written
 
 
 @pytest.mark.parametrize("written", ON_SPELLINGS)
-def test_every_spelling_of_on_in_the_file_switches_it_on(tmp_path, monkeypatch, written):
+def test_every_spelling_of_on_in_the_file_switches_it_on(tmp_path, monkeypatch, caplog, written):
     _isolate(tmp_path, monkeypatch)
     path = _write(tmp_path, f"  enabled: {written}\n")
-    assert load_config(path).updates.enabled is True, written
+    with caplog.at_level(logging.WARNING, logger="ipmideck.config"):
+        assert load_config(path).updates.enabled is True, written
+    assert _config_warnings(caplog) == [], written
 
 
 @pytest.mark.parametrize("written", ['"disabled"', "null", "", "2", "[false]"])
@@ -102,19 +117,49 @@ def test_no_file_at_all_keeps_the_default(tmp_path, monkeypatch):
     assert load_config(tmp_path / "absent.yaml").updates.enabled is True
 
 
+@pytest.mark.parametrize(
+    "content",
+    ["- port: 3000\n- host: 192.0.2.10\n", "left blank on purpose\n", "42\n"],
+    ids=["list", "text", "number"],
+)
+def test_a_file_without_settings_is_ignored_and_says_so(tmp_path, monkeypatch, caplog, content):
+    """A top level that is not a set of names and values has nothing to read. It is ignored with a
+    warning naming the file, so the app starts on the defaults instead of failing at start-up."""
+    _isolate(tmp_path, monkeypatch)
+    path = tmp_path / "config.yaml"
+    path.write_text(content, encoding="utf-8")
+    with caplog.at_level(logging.WARNING, logger="ipmideck.config"):
+        config = load_config(path)
+    assert config.updates.enabled is True
+    assert config.server.port == 3000
+    assert any(str(path) in line for line in _config_warnings(caplog))
+
+
+def test_a_file_without_settings_still_honours_the_environment(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    path = tmp_path / "config.yaml"
+    path.write_text("- port: 3000\n", encoding="utf-8")
+    monkeypatch.setenv("IPMIDECK_UPDATES_ENABLED", "false")
+    assert load_config(path).updates.enabled is False
+
+
 @pytest.mark.parametrize("value", ["false", "FALSE", "0", "no", "off", "Off", ""])
-def test_the_environment_switches_it_off(tmp_path, monkeypatch, value):
+def test_the_environment_switches_it_off(tmp_path, monkeypatch, caplog, value):
     _isolate(tmp_path, monkeypatch)
     monkeypatch.setenv("IPMIDECK_UPDATES_ENABLED", value)
-    assert load_config().updates.enabled is False, value
+    with caplog.at_level(logging.WARNING, logger="ipmideck.config"):
+        assert load_config().updates.enabled is False, value
+    assert _config_warnings(caplog) == [], value
 
 
 @pytest.mark.parametrize("value", ["true", "TRUE", "1", "yes", "on", " on "])
-def test_the_environment_switches_it_on(tmp_path, monkeypatch, value):
+def test_the_environment_switches_it_on(tmp_path, monkeypatch, caplog, value):
     _isolate(tmp_path, monkeypatch)
     _write(tmp_path, "  enabled: false\n")
     monkeypatch.setenv("IPMIDECK_UPDATES_ENABLED", value)
-    assert load_config().updates.enabled is True, value
+    with caplog.at_level(logging.WARNING, logger="ipmideck.config"):
+        assert load_config().updates.enabled is True, value
+    assert _config_warnings(caplog) == [], value
 
 
 def test_an_unreadable_environment_value_fails_closed_and_says_so(tmp_path, monkeypatch, caplog):
@@ -138,7 +183,9 @@ def test_a_quoted_false_removes_the_routes_that_can_open_a_socket(tmp_path, monk
     lookups = []
     monkeypatch.setattr(
         "backend.core.update_service.fetch_latest",
-        lambda method: lookups.append(method) or UpdateProbe(source=method, error="stubbed"),
+        lambda method, **kwargs: (
+            lookups.append(method) or UpdateProbe(source=method, error="stubbed")
+        ),
     )
     _write(tmp_path, '  enabled: "false"\n')
     import backend.main as bm

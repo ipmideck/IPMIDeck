@@ -800,21 +800,49 @@ def _mount_spa(app: FastAPI) -> None:
 
 # === CLI entry point ===
 
-def _report_update_status(status) -> None:
-    """Log the outcome of a console-requested update check; the console shows log records."""
+def _report_update_status(status, show) -> None:
+    """Describe the outcome of a console-requested update check through ``show(line, style)``.
+
+    The console passes its report(), which writes to the body whatever the verbosity. A log record
+    would not: at WARNING verbosity, or with ``logging.level: error``, the answer would be filtered
+    out while the "Checking…" line above it stayed, and the operator would never hear back. The
+    update service keeps its own log records of what it found.
+    """
     if status.error:
-        logger.warning("Update check did not complete: %s", status.error)
+        show(f"Update check did not complete: {status.error}", "yellow")
     # A failed check keeps the update an earlier one found, so it is still reported.
     if status.update_available:
         kind = "security release" if status.is_security else "release"
-        logger.warning(
-            "Version %s is available (%s) — %s",
-            status.latest_version,
-            kind,
-            status.release_url,
+        show(
+            f"Version {status.latest_version} is available ({kind}) — {status.release_url}",
+            "bold red" if status.is_security else "bold green",
         )
     elif not status.error:
-        logger.info("Version %s is the latest published release", VERSION)
+        show(f"Version {VERSION} is the latest published release", "green")
+
+
+async def _run_console_update_check(service, show) -> None:
+    """Run the check the console's update key asked for and show its outcome with ``show``."""
+    try:
+        status = await service.check_now()
+    except Exception:
+        logger.debug("The console update check raised unexpectedly", exc_info=True)
+        show("The update check could not be completed", "yellow")
+        return
+    _report_update_status(status, show)
+
+
+def _console_update_callback(early_cfg, callback):
+    """What the console's update key is wired to: ``callback``, or None when the switch is off.
+
+    Read from the same configuration the app will load, so the key and the routes agree about what
+    is permitted, and with None the key says checks are off instead of scheduling work that would
+    be refused. A configuration that could not be read here keeps the key wired: the service reads
+    the switch again before every lookup and refuses when it is off.
+    """
+    if early_cfg is None or early_cfg.updates.enabled:
+        return callback
+    return None
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -1197,20 +1225,15 @@ def cli():
             """Run a real update check off the console's key thread and report the outcome.
 
             The console calls this from the key thread, which must never block, so the work is
-            marshalled onto the event loop and the result is emitted as an ordinary log record —
-            the console renders log records in its body, so that is how the answer reaches the
-            operator with no extra plumbing.
+            marshalled onto the event loop. The answer goes into the console body through its
+            report(), like the "Checking…" line the key printed, because a log record would be
+            hidden whenever the verbosity in force is above its level.
             """
-
-            async def _check() -> None:
-                try:
-                    status = await update_service.check_now()
-                except Exception:
-                    logger.warning("The update check could not be completed")
-                    return
-                _report_update_status(status)
-
-            loop.call_soon_threadsafe(lambda: asyncio.ensure_future(_check()))
+            # Only the console's key calls this, so the console that asked is there to answer.
+            show = console.report
+            loop.call_soon_threadsafe(
+                lambda: asyncio.ensure_future(_run_console_update_check(update_service, show))
+            )
 
         def _on_set_verbosity(level: str) -> None:
             # Apply at runtime (basicConfig is a no-op once handlers exist) AND
@@ -1256,9 +1279,6 @@ def cli():
             app.state.host_splash_shown = True
 
             cur_level = (early_cfg.logging.level.upper() if early_cfg is not None else "INFO")
-            # Whether the update key can do anything at all. Read from the same config the app
-            # will load, so the console and the routes agree about what is permitted.
-            early_updates_enabled = early_cfg is None or early_cfg.updates.enabled
 
             # D-04/D-11 (04.1-04 gap-closure r4): ACTUALLY apply the initial verbosity on the
             # interactive path BEFORE the render thread starts. lifespan() does _setup_logging +
@@ -1291,7 +1311,7 @@ def cli():
                 get_bind=lambda: (effective_host, effective_port),
                 # None when the configuration forbids the lookup, so the key reports that
                 # instead of scheduling work that would be refused anyway.
-                on_check_updates=_on_check_updates if early_updates_enabled else None,
+                on_check_updates=_console_update_callback(early_cfg, _on_check_updates),
             )
             # Render loop on a DEDICATED (non-daemon) thread; key listener on a DAEMON
             # thread that marshals each key onto the loop via call_soon_threadsafe.
