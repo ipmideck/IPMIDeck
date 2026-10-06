@@ -10,7 +10,7 @@
  * Missing keys are check-i18n-parity.mjs's job, not this one.
  *
  * Skipped (exit 0) when <rev> is empty, all-zeros or unresolvable — a new branch without a
- * base, a tag push — or when a commit message in the range carries [i18n-skip], for a
+ * base, a tag push — or when a commit subject in the range carries [i18n-skip], for a
  * deliberate en-only change such as a typo fix.
  */
 
@@ -87,8 +87,8 @@ if (!since || !head) {
   console.log("i18n stale check skipped (no base revision)");
   process.exit(0);
 }
-if (git("log", "--format=%B", `${since}..${head}`).includes(SKIP_TOKEN)) {
-  console.log(`i18n stale check skipped (${SKIP_TOKEN} in a commit message)`);
+if (git("log", "--format=%s", `${since}..${head}`).includes(SKIP_TOKEN)) {
+  console.log(`i18n stale check skipped (${SKIP_TOKEN} in a commit subject)`);
   process.exit(0);
 }
 
@@ -111,7 +111,7 @@ if (failures.length > 0) {
   for (const f of failures) console.error("  " + f);
   console.error(
     `\n${failures.length} failure(s). Update the translations, or add ${SKIP_TOKEN} to a commit` +
-      " message if the en change needs no translation (e.g. a typo fix).",
+      " subject if the en change needs no translation (e.g. a typo fix).",
   );
   process.exit(1);
 }

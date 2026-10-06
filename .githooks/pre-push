@@ -3,7 +3,7 @@
 # stale (en changed, a language did not). CI runs the same checks (.github/workflows/gate.yml).
 # POSIX sh so it runs under the bundled Git-Bash on Windows. Activate per-clone with:
 #   git config core.hooksPath .githooks
-# Override a deliberate en-only change (e.g. a typo fix) with [i18n-skip] in a commit message.
+# Override a deliberate en-only change (e.g. a typo fix) with [i18n-skip] in a commit subject.
 zero=0000000000000000000000000000000000000000
 status=0
 
