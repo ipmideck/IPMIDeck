@@ -26,6 +26,11 @@ jobs:
       - run: python -m ruff check backend tests
       - run: python -m pytest --cov --cov-report=term-missing
       - run: node scripts/check-i18n-parity.mjs
+      - run: node scripts/check-i18n-stale.mjs --since "$BASE"
+        env:
+          # The caller's event: PR base on pull_request, previous tip on push. A tag push
+          # (release.yml) has no usable base, so the stale check skips itself there.
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
       - run: npm run test
         working-directory: frontend
       - run: npx tsc -b --noEmit

@@ -1,0 +1,29 @@
+#!/bin/sh
+# IPMIDeck pre-push i18n gate: blocks the push when a translation is missing, empty or left
+# stale (en changed, a language did not). CI runs the same checks (.github/workflows/gate.yml).
+# POSIX sh so it runs under the bundled Git-Bash on Windows. Activate per-clone with:
+#   git config core.hooksPath .githooks
+# Override a deliberate en-only change (e.g. a typo fix) with [i18n-skip] in a commit message.
+zero=0000000000000000000000000000000000000000
+status=0
+
+echo "[pre-push] i18n parity (frontend)"
+node scripts/check-i18n-parity.mjs || status=1
+echo "[pre-push] i18n parity (backend)"
+python -m pytest -q tests/unit/test_backend_i18n_parity.py || status=1
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue   # deleting a remote ref: nothing to check
+  if [ "$remote_sha" = "$zero" ]; then
+    base=$(git merge-base "$local_sha" origin/HEAD 2>/dev/null || git merge-base "$local_sha" origin/main 2>/dev/null || true)
+  else
+    base=$remote_sha
+  fi
+  echo "[pre-push] i18n stale check ($local_ref)"
+  node scripts/check-i18n-stale.mjs --since "$base" --head "$local_sha" || status=1
+done
+
+if [ "$status" -ne 0 ]; then
+  echo "[pre-push] i18n gate FAILED — push blocked." >&2
+fi
+exit $status
