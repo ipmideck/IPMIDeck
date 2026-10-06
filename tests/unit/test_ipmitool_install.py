@@ -103,6 +103,17 @@ def test_the_install_runs_when_privileged_and_allowed(monkeypatch, tmp_path, hos
     assert ipmitool.install_plan(True) == {"automatic": True, "reason": None, "elevate": elevate}
 
 
+def test_alpine_installs_from_a_fresh_index_but_shows_the_usual_command(tmp_path):
+    # A host or container that never ran apk update has no index to find the package in.
+    release = tmp_path / "os-release"
+    release.write_text("ID=alpine\n", encoding="utf-8")
+    assert ipmitool._package("Linux", release) == (
+        "sudo apk add ipmitool",
+        (("apk", "add", "--no-cache", "ipmitool"),),
+    )
+    assert ipmitool.install_command("Linux", release) == "sudo apk add ipmitool"
+
+
 def test_status_describes_the_install_only_while_missing(monkeypatch):
     monkeypatch.setattr(ipmitool, "find_ipmitool", lambda: None)
     monkeypatch.setattr(

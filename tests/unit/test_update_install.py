@@ -9,10 +9,14 @@ nothing newer to install.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import sqlite3
 import stat
+import subprocess
+import time
+import types
 from contextlib import closing
 import sys
 from pathlib import Path
@@ -360,6 +364,70 @@ async def test_windows_hands_over_to_a_helper_and_exits(monkeypatch, paths):
     assert exited == [True]
     assert spawned[0][1] == "-I"
     assert Path(spawned[0][2]).read_text(encoding="utf-8").startswith("\n\"\"\"Waits for IPMIDeck")
+
+
+# WAIT_OBJECT_0 is 0 and WAIT_TIMEOUT 0x102; ctypes returns a C int, so WAIT_FAILED arrives as -1.
+@pytest.mark.parametrize(
+    ("handle", "waited", "installs"),
+    [(1234, 0, True), (1234, 0x102, False), (1234, -1, False), (0, None, True)],
+)
+def test_the_windows_helper_installs_only_once_the_app_has_exited(
+    tmp_path, monkeypatch, handle, waited, installs
+):
+    helper = tmp_path / "update-helper.py"
+    helper.write_text(ui._HELPER, encoding="utf-8")
+    log = tmp_path / "update.log"
+    kernel = []
+
+    def open_process(access, inherit, pid):
+        kernel.append(("open", pid))
+        return handle
+
+    def wait(h, ms):
+        kernel.append(("wait", h, ms))
+        return waited
+
+    def close(h):
+        kernel.append(("close", h))
+        return 1
+
+    fake_ctypes = types.SimpleNamespace(
+        windll=types.SimpleNamespace(
+            kernel32=types.SimpleNamespace(
+                OpenProcess=open_process, WaitForSingleObject=wait, CloseHandle=close
+            )
+        )
+    )
+    monkeypatch.setitem(sys.modules, "ctypes", fake_ctypes)
+    ran = []
+
+    def fake_call(argv, **kwargs):
+        ran.append(argv)
+        return 0
+
+    monkeypatch.setattr(subprocess, "call", fake_call)
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    argv = ["pip", "install", "ipmideck==99.0.0"]
+    args = {"pid": 4242, "argv": argv, "target": "99.0.0", "log": str(log)}
+    monkeypatch.setattr(sys, "argv", [str(helper), json.dumps(args)])
+
+    exec(compile(ui._HELPER, str(helper), "exec"), {"__name__": "__main__"})  # noqa: S102
+
+    text = log.read_text(encoding="utf-8")
+    if installs:
+        assert ran == [argv]
+        assert "Installing IPMIDeck 99.0.0" in text
+        assert "Finished with exit code 0" in text
+    else:
+        assert ran == []
+        assert text.splitlines() == [
+            "IPMIDeck did not exit within two minutes; nothing was installed."
+        ]
+    if handle:
+        assert ("close", handle) in kernel
+    else:
+        assert not any(call[0] in ("wait", "close") for call in kernel)
+    assert not helper.exists()
 
 
 async def test_watchtower_is_asked_to_update(monkeypatch, paths):

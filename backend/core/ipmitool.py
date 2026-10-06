@@ -45,7 +45,13 @@ _LINUX_PACKAGES = (
         "sudo zypper install ipmitool",
         (("zypper", "--non-interactive", "install", "ipmitool"),),
     ),
-    (("alpine",), "sudo apk add ipmitool", (("apk", "add", "ipmitool"),)),
+    # --no-cache fetches a fresh index, so a container or host that never ran apk update still
+    # finds the package.
+    (
+        ("alpine",),
+        "sudo apk add ipmitool",
+        (("apk", "add", "--no-cache", "ipmitool"),),
+    ),
 )
 _FREEBSD = ("sudo pkg install ipmitool", (("pkg", "install", "-y", "ipmitool"),))
 _MACOS = ("brew install ipmitool", (("brew", "install", "ipmitool"),))

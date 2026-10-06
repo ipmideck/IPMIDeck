@@ -282,24 +282,43 @@ def _prune_backups(backups: Path, keep: Path) -> None:
 
 _HELPER = r'''
 """Waits for IPMIDeck to exit, then installs the update. Standard library only."""
-import ctypes, json, subprocess, sys, time
+import ctypes, json, os, subprocess, sys, time
 args = json.loads(sys.argv[1])
 SYNCHRONIZE = 0x00100000
-handle = ctypes.windll.kernel32.OpenProcess(SYNCHRONIZE, False, args["pid"])
-if handle:
-    ctypes.windll.kernel32.WaitForSingleObject(handle, 120000)
-    ctypes.windll.kernel32.CloseHandle(handle)
-time.sleep(1)
-with open(args["log"], "a", encoding="utf-8") as log:
-    log.write("Installing IPMIDeck %s\n" % args["target"])
-    log.flush()
+# ctypes returns a C int by default, so WAIT_FAILED (0xFFFFFFFF) arrives as -1. Anything other
+# than WAIT_OBJECT_0 (WAIT_TIMEOUT is 0x102) means the app may still be running.
+WAIT_OBJECT_0 = 0
+try:
+    # A zero handle means the process is already gone.
+    exited = True
+    handle = ctypes.windll.kernel32.OpenProcess(SYNCHRONIZE, False, args["pid"])
+    if handle:
+        waited = ctypes.windll.kernel32.WaitForSingleObject(handle, 120000)
+        ctypes.windll.kernel32.CloseHandle(handle)
+        exited = waited == WAIT_OBJECT_0
+    with open(args["log"], "a", encoding="utf-8") as log:
+        if not exited:
+            # Installing over files the running app still holds breaks both copies.
+            log.write("IPMIDeck did not exit within two minutes; nothing was installed.\n")
+        else:
+            time.sleep(1)
+            log.write("Installing IPMIDeck %s\n" % args["target"])
+            log.flush()
+            try:
+                code = subprocess.call(args["argv"], stdout=log, stderr=subprocess.STDOUT,
+                                       stdin=subprocess.DEVNULL, timeout=900)
+            except Exception as exc:
+                code = -1
+                log.write("Could not run the installer: %r\n" % (exc,))
+            log.write(
+                "Finished with exit code %s. Start IPMIDeck again with: ipmideck start\n" % code
+            )
+finally:
+    # Run with -I, so sys.argv[0] is this file's own path.
     try:
-        code = subprocess.call(args["argv"], stdout=log, stderr=subprocess.STDOUT,
-                               stdin=subprocess.DEVNULL, timeout=900)
-    except Exception as exc:
-        code = -1
-        log.write("Could not run the installer: %r\n" % (exc,))
-    log.write("Finished with exit code %s. Start IPMIDeck again with: ipmideck start\n" % code)
+        os.remove(sys.argv[0])
+    except OSError:
+        pass
 '''
 
 
