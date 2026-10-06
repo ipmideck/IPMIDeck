@@ -235,8 +235,10 @@ mind at any time. Once you untick the box, it contacts nothing on its own.
 When a check finds a newer version, the web UI says so once with a notice, and an **Upgrade**
 button stays next to the version in the sidebar until you install it. Both open the new version's
 release notes with a **Download and install** button. Before installing, IPMIDeck backs up the
-database, the encryption key and `config.yaml` to `backups/` in the data folder. What the button
-does depends on how IPMIDeck was installed:
+database, the encryption key and `config.yaml` into a new folder under `backups/` in the data
+folder; only the three most recent are kept, and the dialog shows where the copy went. They hold
+the BMC credentials, so keep them private. What the button does depends on how IPMIDeck was
+installed:
 
 | Installed with | What happens |
 |----------------|--------------|

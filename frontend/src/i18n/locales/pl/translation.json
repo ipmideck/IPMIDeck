@@ -105,6 +105,8 @@
     "notesMissing": "Nie udało się tu odczytać informacji o wydaniu.",
     "installHeading": "Instalacja",
     "backupFirst": "Najpierw tworzona jest kopia zapasowa bazy danych, klucza szyfrowania i config.yaml.",
+    "backupLocation": "Folder kopii zapasowej na serwerze:",
+    "backupPrivate": "Zawiera dane logowania BMC i klucz, który je odszyfrowuje, więc nie udostępniaj go nikomu. IPMIDeck przechowuje trzy najnowsze kopie zapasowe.",
     "after": {
       "automatic": "Następnie {{mechanism}} instaluje wersję {{version}}, a IPMIDeck sam się uruchamia ponownie; ta strona przeładuje się, gdy znów będzie działać.",
       "manual": "Następnie {{mechanism}} instaluje wersję {{version}}. Tutaj IPMIDeck nie może sam się zrestartować: uruchom go ponownie, gdy aktualizacja zostanie zainstalowana.",

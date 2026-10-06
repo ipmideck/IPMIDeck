@@ -105,6 +105,8 @@
     "notesMissing": "Impossibile caricare le note di rilascio.",
     "installHeading": "Installazione",
     "backupFirst": "Prima dell'installazione viene eseguito un backup del database, della chiave di cifratura e di config.yaml.",
+    "backupLocation": "Cartella del backup sul server:",
+    "backupPrivate": "Contiene le credenziali dei BMC e la chiave che le decifra: mantienila riservata. IPMIDeck conserva i tre backup più recenti.",
     "after": {
       "automatic": "Successivamente {{mechanism}} installa la versione {{version}} e IPMIDeck si riavvia automaticamente. La pagina si ricaricherà al termine.",
       "manual": "Successivamente {{mechanism}} installa la versione {{version}}. In questa configurazione IPMIDeck non può riavviarsi automaticamente: avvialo di nuovo al termine dell'installazione.",

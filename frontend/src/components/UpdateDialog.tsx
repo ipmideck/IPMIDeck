@@ -55,6 +55,14 @@ const REASONS = new Set([
   "not_possible",
 ]);
 
+/** The phases that come after the backup, when the server has said where it put it. */
+const SHOWS_BACKUP = new Set<InstallSnapshot["phase"]>([
+  "installing",
+  "restarting",
+  "restart_required",
+  "failed",
+]);
+
 function reasonOf(code: string | null | undefined): string {
   const reason = (code ?? "").replace(/^update_/, "");
   return REASONS.has(reason) ? reason : "failed";
@@ -358,6 +366,18 @@ export function UpdateDialog() {
                   </div>
                 )}
               </>
+            )}
+
+            {snapshot.backup && SHOWS_BACKUP.has(phase) && (
+              <div>
+                <p className="text-muted-foreground">{t("updateDialog.backupLocation")}</p>
+                <code className="mt-1 block select-all break-all font-mono text-xs text-foreground">
+                  {snapshot.backup}
+                </code>
+                <p className="mt-1 max-w-[70ch] text-xs text-muted-foreground">
+                  {t("updateDialog.backupPrivate")}
+                </p>
+              </div>
             )}
 
             {/* How each install method behaves, and how to set up Watchtower for Docker. */}

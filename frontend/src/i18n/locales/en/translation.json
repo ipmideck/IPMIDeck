@@ -105,6 +105,8 @@
     "notesMissing": "The release notes could not be read here.",
     "installHeading": "Install",
     "backupFirst": "A backup of the database, the encryption key and config.yaml is made first.",
+    "backupLocation": "Backup folder on the server:",
+    "backupPrivate": "It holds the BMC credentials and the key that decrypts them, so keep it private. IPMIDeck keeps the three most recent backups.",
     "after": {
       "automatic": "Then {{mechanism}} installs version {{version}} and IPMIDeck restarts by itself; this page reloads when it is back.",
       "manual": "Then {{mechanism}} installs version {{version}}. IPMIDeck cannot restart itself here, so start it again once the update is in.",

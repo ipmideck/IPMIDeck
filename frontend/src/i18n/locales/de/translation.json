@@ -105,6 +105,8 @@
     "notesMissing": "Die Versionshinweise konnten hier nicht gelesen werden.",
     "installHeading": "Installation",
     "backupFirst": "Zuerst wird eine Sicherung der Datenbank, des Verschlüsselungsschlüssels und der config.yaml angelegt.",
+    "backupLocation": "Sicherungsordner auf dem Server:",
+    "backupPrivate": "Er enthält die BMC-Zugangsdaten und den Schlüssel, der sie entschlüsselt. Halten Sie ihn daher privat. IPMIDeck behält die drei neuesten Sicherungen.",
     "after": {
       "automatic": "Danach installiert {{mechanism}} Version {{version}}, und IPMIDeck startet von selbst neu; diese Seite lädt neu, sobald es wieder läuft.",
       "manual": "Danach installiert {{mechanism}} Version {{version}}. IPMIDeck kann sich hier nicht selbst neu starten: Starten Sie es wieder, sobald das Update installiert ist.",

@@ -25,6 +25,8 @@ export interface InstallSnapshot {
   restart?: "automatic" | "manual" | "container";
   error_code?: string;
   output?: string;
+  /** The folder on the server the pre-update copies were written to, set once the backup is done. */
+  backup?: string;
 }
 
 interface UpdateInstallStore {

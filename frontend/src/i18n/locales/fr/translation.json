@@ -105,6 +105,8 @@
     "notesMissing": "Les notes de version n'ont pas pu être lues ici.",
     "installHeading": "Installation",
     "backupFirst": "Une sauvegarde de la base de données, de la clé de chiffrement et de config.yaml est d'abord effectuée.",
+    "backupLocation": "Dossier de sauvegarde sur le serveur :",
+    "backupPrivate": "Il contient les identifiants des BMC et la clé qui les déchiffre : gardez-le privé. IPMIDeck conserve les trois sauvegardes les plus récentes.",
     "after": {
       "automatic": "Ensuite {{mechanism}} installe la version {{version}} et IPMIDeck redémarre tout seul ; cette page se recharge lorsqu'il est de retour.",
       "manual": "Ensuite {{mechanism}} installe la version {{version}}. Ici IPMIDeck ne peut pas redémarrer tout seul : relancez-le une fois la mise à jour installée.",

@@ -105,6 +105,8 @@
     "notesMissing": "Não foi possível ler aqui as notas da versão.",
     "installHeading": "Instalação",
     "backupFirst": "Primeiro é feita uma cópia de segurança da base de dados, da chave de encriptação e do config.yaml.",
+    "backupLocation": "Pasta da cópia de segurança no servidor:",
+    "backupPrivate": "Contém as credenciais dos BMC e a chave que as desencripta, por isso mantenha-a privada. O IPMIDeck guarda as três cópias de segurança mais recentes.",
     "after": {
       "automatic": "Depois o {{mechanism}} instala a versão {{version}} e o IPMIDeck reinicia sozinho; esta página recarrega quando estiver de volta.",
       "manual": "Depois o {{mechanism}} instala a versão {{version}}. Aqui o IPMIDeck não consegue reiniciar sozinho: volte a iniciá-lo quando a atualização estiver instalada.",

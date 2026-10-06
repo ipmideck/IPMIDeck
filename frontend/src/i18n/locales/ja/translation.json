@@ -105,6 +105,8 @@
     "notesMissing": "ここではリリースノートを読み込めませんでした。",
     "installHeading": "インストール",
     "backupFirst": "最初にデータベース、暗号化キー、config.yaml のバックアップを作成します。",
+    "backupLocation": "サーバー上のバックアップフォルダー:",
+    "backupPrivate": "BMC の認証情報とそれを復号するキーが含まれているため、外部に公開しないでください。IPMIDeck は直近 3 件のバックアップを保持します。",
     "after": {
       "automatic": "その後 {{mechanism}} がバージョン {{version}} をインストールし、IPMIDeck は自動で再起動します。復帰するとこのページは再読み込みされます。",
       "manual": "その後 {{mechanism}} がバージョン {{version}} をインストールします。この環境では IPMIDeck は自動で再起動できないため、インストール完了後にもう一度起動してください。",

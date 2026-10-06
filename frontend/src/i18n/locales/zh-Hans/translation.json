@@ -105,6 +105,8 @@
     "notesMissing": "无法在此读取发行说明。",
     "installHeading": "安装",
     "backupFirst": "首先会备份数据库、加密密钥和 config.yaml。",
+    "backupLocation": "服务器上的备份文件夹：",
+    "backupPrivate": "其中包含 BMC 凭据以及用于解密它们的密钥，请妥善保管，切勿公开。IPMIDeck 会保留最近的三份备份。",
     "after": {
       "automatic": "然后由 {{mechanism}} 安装版本 {{version}}，IPMIDeck 会自动重启；恢复后此页面会重新加载。",
       "manual": "然后由 {{mechanism}} 安装版本 {{version}}。此处 IPMIDeck 无法自行重启：更新安装完成后请再次启动它。",

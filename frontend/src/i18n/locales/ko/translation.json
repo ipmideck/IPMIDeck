@@ -105,6 +105,8 @@
     "notesMissing": "여기서 릴리스 노트를 읽을 수 없습니다.",
     "installHeading": "설치",
     "backupFirst": "먼저 데이터베이스, 암호화 키, config.yaml을 백업합니다.",
+    "backupLocation": "서버의 백업 폴더:",
+    "backupPrivate": "BMC 자격 증명과 이를 복호화하는 키가 들어 있으므로 외부에 공개하지 마세요. IPMIDeck은 최근 백업 3개를 보관합니다.",
     "after": {
       "automatic": "그런 다음 {{mechanism}}이(가) 버전 {{version}}을(를) 설치하고 IPMIDeck이 자동으로 다시 시작됩니다. 다시 실행되면 이 페이지가 새로 고쳐집니다.",
       "manual": "그런 다음 {{mechanism}}이(가) 버전 {{version}}을(를) 설치합니다. 이 환경에서는 IPMIDeck이 스스로 다시 시작할 수 없으므로 설치가 끝나면 다시 실행하세요.",

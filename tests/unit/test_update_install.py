@@ -9,6 +9,7 @@ nothing newer to install.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import sqlite3
 import stat
@@ -158,6 +159,82 @@ def test_the_backup_folder_is_owner_only_and_still_enterable(tmp_path):
 
     assert stat.S_IMODE(folder.stat().st_mode) == 0o700
     assert {stat.S_IMODE(p.stat().st_mode) for p in folder.iterdir()} == {0o600}
+
+
+# === Only the most recent copies are kept ===
+
+
+def _old_backups(tmp_path, stamps):
+    """Earlier pre-update folders, one per stamp, each holding a stand-in key."""
+    folders = []
+    for i, stamp in enumerate(stamps):
+        folder = tmp_path / "backups" / f"pre-update-2.0.0-to-2.0.{i}-{stamp}"
+        folder.mkdir(parents=True)
+        (folder / "encryption.key").write_bytes(b"k" * 32)
+        folders.append(folder)
+    return folders
+
+
+_FIVE = [f"2020010{d}T000000Z" for d in range(1, 6)]
+
+
+def test_only_the_three_most_recent_backups_are_kept(tmp_path):
+    old = _old_backups(tmp_path, _FIVE)
+    folder = ui.back_up(tmp_path / "ipmideck.db", tmp_path, None, NEWER)
+    left = set((tmp_path / "backups").iterdir())
+    assert left == {folder, old[3], old[4]}
+
+
+def test_the_backups_are_ordered_by_the_stamp_in_their_name_not_mtime(tmp_path):
+    old = _old_backups(tmp_path, _FIVE)
+    # The oldest stamp gets the newest mtime: a restore or a copy rewrites mtimes.
+    for age, folder in enumerate(old):
+        stamp_time = 2_000_000_000 - age * 1000
+        os.utime(folder, (stamp_time, stamp_time))
+    folder = ui.back_up(tmp_path / "ipmideck.db", tmp_path, None, NEWER)
+    assert set((tmp_path / "backups").iterdir()) == {folder, old[3], old[4]}
+
+
+def test_anything_else_in_the_backups_folder_is_left_alone(tmp_path):
+    _old_backups(tmp_path, _FIVE)
+    backups = tmp_path / "backups"
+    foreign = [
+        backups / "manual-copy",
+        backups / "pre-update-1.0.0-to-2.0.0-notastamp",
+    ]
+    for folder in foreign:
+        folder.mkdir()
+    files = [
+        backups / "pre-update-notes.txt",
+        backups / "pre-update-1.0.0-to-1.0.1-20190101T000000Z",
+    ]
+    for item in files:
+        item.write_text("kept", encoding="utf-8")
+    ui.back_up(tmp_path / "ipmideck.db", tmp_path, None, NEWER)
+    for item in foreign + files:
+        assert item.exists()
+
+
+def test_a_backup_that_cannot_be_removed_never_fails_the_update(tmp_path, monkeypatch, caplog):
+    _old_backups(tmp_path, _FIVE)
+    (tmp_path / "encryption.key").write_bytes(b"k" * 32)
+
+    def refuse(path, *args, **kwargs):
+        raise OSError("in use")
+
+    monkeypatch.setattr(ui.shutil, "rmtree", refuse)
+    with caplog.at_level(logging.WARNING, logger="ipmideck.updates"):
+        folder = ui.back_up(tmp_path / "ipmideck.db", tmp_path, None, NEWER)
+    assert (folder / "encryption.key").read_bytes() == b"k" * 32
+    assert len(list((tmp_path / "backups").iterdir())) == 6
+    assert any("Could not remove the old pre-update backup" in r.message for r in caplog.records)
+
+
+def test_the_backup_just_made_is_kept_even_when_older_ones_look_newer(tmp_path):
+    # A clock that went backwards: the earlier folders carry later stamps.
+    later = _old_backups(tmp_path, [f"2099010{d}T000000Z" for d in range(1, 5)])
+    folder = ui.back_up(tmp_path / "ipmideck.db", tmp_path, None, NEWER)
+    assert set((tmp_path / "backups").iterdir()) == {folder, later[2], later[3]}
 
 
 # === Running it ===

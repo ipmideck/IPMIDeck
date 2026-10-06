@@ -41,6 +41,9 @@ from backend.core.updates import DOCKER, GIT, PIP, is_newer, parse_version, upgr
 logger = logging.getLogger("ipmideck.updates")
 
 _STEP_TIMEOUT = 900
+# Each pre-update folder is a full copy of the database and the key that decrypts its BMC
+# passwords, so only the most recent few are kept.
+_KEEP_BACKUPS = 3
 _OUTPUT_TAIL = 4000
 # Long enough for the answer to this request to reach the browser before the server goes away.
 _RESTART_DELAY = 1.5
@@ -212,7 +215,7 @@ def back_up(db_path: Path, data_dir: Path, config_path: Path | None, target: str
 
     The database is copied through SQLite's own backup, so a write in progress cannot leave a
     torn copy. The copies are credential-grade, like any backup of this app, and get the same
-    owner-only permissions.
+    owner-only permissions. Only the three most recent pre-update folders are kept.
     """
     from backend.core.crypto import _set_secure_permissions
 
@@ -235,7 +238,46 @@ def back_up(db_path: Path, data_dir: Path, config_path: Path | None, target: str
             shutil.copy2(extra, folder / Path(extra).name)
     for item in folder.iterdir():
         _set_secure_permissions(item)
+    _prune_backups(folder.parent, folder)
     return folder
+
+
+def _backup_stamp(entry: Path) -> datetime | None:
+    """The UTC time in a pre-update folder's name, or None for anything else in backups/."""
+    if not entry.name.startswith("pre-update-") or entry.is_symlink() or not entry.is_dir():
+        return None
+    # The versions in the name may carry dashes of their own; the stamp is always last.
+    stamp = entry.name.rsplit("-", 1)[-1]
+    try:
+        return datetime.strptime(stamp, "%Y%m%dT%H%M%SZ")
+    except ValueError:
+        return None
+
+
+def _prune_backups(backups: Path, keep: Path) -> None:
+    """Remove all but the most recent pre-update folders. Never raises.
+
+    Ordered by the stamp in the name, never by mtime: copy2 and a restore by hand both rewrite
+    mtimes. Only folders named exactly like the ones back_up makes are candidates, so anything an
+    operator keeps in backups/ is left alone, and so is the folder just made, whatever its stamp.
+    """
+    try:
+        candidates = []
+        for entry in backups.iterdir():
+            if entry == keep:
+                continue
+            stamp = _backup_stamp(entry)
+            if stamp is not None:
+                candidates.append((stamp, entry.name, entry))
+    except OSError as exc:
+        logger.warning("Could not list the pre-update backups in %s: %s", backups, exc)
+        return
+    candidates.sort(reverse=True)
+    for _stamp, _name, path in candidates[_KEEP_BACKUPS - 1 :]:
+        try:
+            shutil.rmtree(path)
+        except OSError as exc:
+            logger.warning("Could not remove the old pre-update backup %s: %s", path, exc)
 
 
 _HELPER = r'''

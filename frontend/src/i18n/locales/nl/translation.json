@@ -105,6 +105,8 @@
     "notesMissing": "De release notes konden hier niet worden gelezen.",
     "installHeading": "Installatie",
     "backupFirst": "Eerst wordt er een back-up gemaakt van de database, de encryptiesleutel en config.yaml.",
+    "backupLocation": "Back-upmap op de server:",
+    "backupPrivate": "Deze bevat de BMC-inloggegevens en de sleutel die ze ontsleutelt, dus houd hem privé. IPMIDeck bewaart de drie meest recente back-ups.",
     "after": {
       "automatic": "Daarna installeert {{mechanism}} versie {{version}} en start IPMIDeck vanzelf opnieuw; deze pagina herlaadt zodra het terug is.",
       "manual": "Daarna installeert {{mechanism}} versie {{version}}. IPMIDeck kan hier niet zelf herstarten: start het opnieuw zodra de update is geïnstalleerd.",

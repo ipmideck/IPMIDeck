@@ -193,6 +193,25 @@ describe("the update dialog", () => {
     expect(useUIOverlayStore.getState().updateOpen).toBe(true);
   });
 
+  it("says where the backup went once it is made, and that it holds the BMC credentials", async () => {
+    const folder = "/data/backups/pre-update-2.0.0-to-2.1.0-20261006T120000Z";
+    withState({});
+    useUpdateInstallStore.setState({
+      snapshot: { phase: "installing", target: "2.1.0", backup: folder },
+    });
+    openDialog();
+    await waitFor(() => expect(screen.getByText(folder)).toBeTruthy());
+    expect(screen.getByText("updateDialog.backupLocation")).toBeTruthy();
+    expect(screen.getByText("updateDialog.backupPrivate")).toBeTruthy();
+    cleanup();
+
+    useUpdateInstallStore.setState({ snapshot: { phase: "backing_up", target: "2.1.0" } });
+    openDialog();
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy());
+    expect(screen.queryByText("updateDialog.backupLocation")).toBeNull();
+    expect(screen.queryByText("updateDialog.backupPrivate")).toBeNull();
+  });
+
   it("tells the operator to start IPMIDeck again when it cannot restart itself", async () => {
     const user = userEvent.setup();
     withState({ upgrade: { ...automatic, restart: "manual" } });
