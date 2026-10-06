@@ -13,6 +13,8 @@ import { CommandPalette } from "@/components/CommandPalette";
 import { ShortcutsHelp } from "@/components/ShortcutsHelp";
 import { OnboardingTour } from "@/components/OnboardingTour";
 import { ChangelogDialog } from "@/components/ChangelogDialog";
+import { UpdateDialog } from "@/components/UpdateDialog";
+import { UpdateNotifier } from "@/components/UpdateNotifier";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { applyTheme, useThemeStore } from "@/stores/theme-store";
 import { useServerStore } from "@/stores/server-store";
@@ -178,6 +180,8 @@ function AppShell() {
       <CommandPalette />
       <ShortcutsHelp />
       <ChangelogDialog />
+      <UpdateDialog />
+      <UpdateNotifier />
       <Toaster
         theme="dark"
         position={isMobile ? "bottom-center" : "bottom-right"}

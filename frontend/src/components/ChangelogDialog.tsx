@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useTranslation } from "react-i18next";
 import {
@@ -9,6 +9,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ReleaseNotesBody } from "@/components/ReleaseNotes";
 import { useUIOverlayStore } from "@/stores/ui-overlay-store";
 import { useUpdateStore, type ChangelogEntry } from "@/stores/update-store";
 
@@ -24,74 +25,8 @@ import { useUpdateStore, type ChangelogEntry } from "@/stores/update-store";
  * machine that has never had a network route.
  */
 
-/** One parsed group inside an entry body: a "### Heading" and its bullet lines. */
-interface BodyGroup {
-  heading: string | null;
-  items: string[];
-  /** Prose that is not a bullet — the 2.0.0 entry opens with a paragraph. */
-  paragraphs: string[];
-}
-
-/**
- * Split an entry body into its groups. The changelog is written in one consistent shape
- * ("### Group" then "- item"), so a handful of line rules cover it — which is why there is no
- * markdown dependency here, and no raw HTML anywhere near operator-visible text.
- */
-function parseBody(body: string): BodyGroup[] {
-  const groups: BodyGroup[] = [];
-  let current: BodyGroup = { heading: null, items: [], paragraphs: [] };
-  let buffer = "";
-
-  const flushParagraph = () => {
-    const text = buffer.trim();
-    if (text) current.paragraphs.push(text);
-    buffer = "";
-  };
-  const flushGroup = () => {
-    flushParagraph();
-    if (current.heading || current.items.length || current.paragraphs.length) {
-      groups.push(current);
-    }
-    current = { heading: null, items: [], paragraphs: [] };
-  };
-
-  for (const rawLine of body.split("\n")) {
-    const line = rawLine.trimEnd();
-    const heading = line.match(/^#{3,}\s+(.*)$/);
-    if (heading) {
-      flushGroup();
-      current.heading = heading[1].trim();
-      continue;
-    }
-    const bullet = line.match(/^\s*[-*]\s+(.*)$/);
-    if (bullet) {
-      flushParagraph();
-      current.items.push(bullet[1].trim());
-      continue;
-    }
-    if (!line.trim()) {
-      flushParagraph();
-      continue;
-    }
-    // A continuation of the previous bullet keeps its indentation.
-    if (/^\s{2,}\S/.test(rawLine) && current.items.length) {
-      current.items[current.items.length - 1] += ` ${line.trim()}`;
-      continue;
-    }
-    buffer = buffer ? `${buffer} ${line.trim()}` : line.trim();
-  }
-  flushGroup();
-  return groups;
-}
-
-/** Strip the emphasis markers the changelog uses, since there is no markdown renderer here. */
-function plain(text: string): string {
-  return text.replace(/\*\*(.+?)\*\*/g, "$1").replace(/`([^`]+)`/g, "$1");
-}
-
 function EntryCard({ entry, isCurrent }: { entry: ChangelogEntry; isCurrent: boolean }) {
   const { t } = useTranslation();
-  const groups = useMemo(() => parseBody(entry.body), [entry.body]);
 
   return (
     <article
@@ -122,35 +57,7 @@ function EntryCard({ entry, isCurrent }: { entry: ChangelogEntry; isCurrent: boo
         )}
       </header>
 
-      <div className="mt-3 space-y-4">
-        {groups.map((group, gi) => (
-          <div key={gi}>
-            {group.heading && (
-              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                {group.heading}
-              </h4>
-            )}
-            {group.paragraphs.map((para, pi) => (
-              <p key={pi} className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                {plain(para)}
-              </p>
-            ))}
-            {group.items.length > 0 && (
-              <ul className="mt-2 space-y-1.5">
-                {group.items.map((item, ii) => (
-                  <li
-                    key={ii}
-                    className="flex gap-2 text-sm leading-relaxed text-muted-foreground"
-                  >
-                    <span aria-hidden="true" className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-muted-foreground/60" />
-                    <span>{plain(item)}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        ))}
-      </div>
+      <ReleaseNotesBody body={entry.body} className="mt-3" />
     </article>
   );
 }

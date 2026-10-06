@@ -7,6 +7,8 @@ import logging
 import time
 from datetime import datetime, timezone
 
+from backend.core.ipmitool import IpmitoolMissingError
+
 logger = logging.getLogger("ipmideck.modules.sensors")
 
 _running = True
@@ -120,8 +122,11 @@ async def _poll_one_server(server: dict, key) -> None:
         await ctx.db.commit()
         # Non-blocking cooldown — skip this server on subsequent cycles until it expires.
         _next_retry[server_id] = time.monotonic() + _COOLDOWN_SECONDS
-    except Exception:
-        logger.exception("Error polling server %s", server_id)
+    except Exception as e:
+        # A missing ipmitool was already reported once by the service; a traceback per poll
+        # per server would bury that one useful line.
+        if not isinstance(e, IpmitoolMissingError):
+            logger.exception("Error polling server %s", server_id)
         await ctx.db.execute(
             "UPDATE servers SET is_online = 0 WHERE id = ?", (server_id,)
         )

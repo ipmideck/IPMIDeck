@@ -11,6 +11,8 @@ from pydantic import BaseModel, Field
 
 from backend.core.i18n import get_lang, t
 from backend.core.ipmi_service import is_fan_capable
+from backend.core.ipmitool import ERROR_CODE as IPMITOOL_MISSING
+from backend.core.ipmitool import known_missing as ipmitool_known_missing
 from backend.modules import get_ctx
 from backend.modules.fanpilot.tasks import get_last_state, set_last_state, wake_loop
 from backend.modules.sensors.tasks import wake_loop as wake_sensor_loop
@@ -344,9 +346,13 @@ async def set_fanpilot_mode(server_id: str, body: FanMode, lang: str = Depends(g
     await ctx.db.commit()
 
     if not write_ok:
+        # A write that never reached the BMC because ipmitool is not installed is not a
+        # rejection, and saying so would send the operator looking at the wrong machine.
+        code = IPMITOOL_MISSING if ipmitool_known_missing() else "fan_write_rejected"
         return {
             "success": False,
             "mode": body.mode,
-            "error": t("fan_write_rejected", lang),
+            "error": t(code, lang),
+            **({"error_code": code} if code == IPMITOOL_MISSING else {}),
         }
     return {"success": True, "mode": body.mode}

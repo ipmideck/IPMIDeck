@@ -9,6 +9,8 @@ that a later refactor could quietly step past.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
@@ -56,12 +58,37 @@ async def get_update_state():
     from backend.main import config, update_service
 
     status = await update_service.cached_status()
+    plan = _plan(status) if status.update_available else None
     return {
         "success": True,
         "enabled": config.updates.enabled,
         "consent": await update_service.consent_given(),
         **status.as_dict(),
+        "upgrade": plan.public() if plan else None,
     }
+
+
+def _watchtower(config) -> tuple[str, str] | None:
+    url, token = config.updates.watchtower_url, config.updates.watchtower_token
+    if not (isinstance(url, str) and isinstance(token, str) and url.strip() and token.strip()):
+        return None
+    if not url.strip().lower().startswith(("http://", "https://")):
+        return None
+    return url.strip(), token.strip()
+
+
+def _plan(status):
+    """How the version on offer would be installed on this copy, as of now."""
+    from backend.core.update_install import plan_for
+    from backend.main import _app_control, config
+
+    return plan_for(
+        status.install_method,
+        status.latest_version if status.update_available else None,
+        watchtower=_watchtower(config) is not None,
+        can_restart=_app_control["restart"] is not None,
+        can_exit=_app_control["exit"] is not None,
+    )
 
 
 class ConsentBody(BaseModel):
@@ -79,6 +106,47 @@ async def check_for_updates():
 
     status = await update_service.check_now()
     return {"success": status.error is None, **status.as_dict()}
+
+
+@network_router.post("/install")
+async def install_update(user: str = Depends(require_auth)):
+    """Install the newer version the last check found, the way this copy was installed.
+
+    Takes no input: the version is the one this server found on the official channel, and the
+    way to install it is decided by the install itself. Refused in demo mode and with the login
+    switched off, since this replaces the running program.
+    """
+    from backend.core.config import _config_yaml_path
+    from backend.core.update_install import installer
+    from backend.main import _app_control, auth, config, update_service
+
+    if config.demo:
+        return {"success": False, "error_code": "update_demo"}
+    if not await auth.is_auth_enabled():
+        return {"success": False, "error_code": "update_needs_login"}
+    status = await update_service.cached_status()
+    if not status.update_available or not status.latest_version:
+        return {"success": False, "error_code": "update_no_update"}
+    db_path = Path(config.data.db_path)
+    return await installer.start(
+        plan=_plan(status),
+        target=status.latest_version,
+        db_path=db_path,
+        data_dir=db_path.parent,
+        config_path=_config_yaml_path(),
+        restart=_app_control["restart"],
+        exit_app=_app_control["exit"],
+        watchtower=_watchtower(config),
+        user=user,
+    )
+
+
+@network_router.get("/install", dependencies=[Depends(require_auth)])
+async def update_install_state():
+    """Where the update started from the web UI has got to."""
+    from backend.core.update_install import installer
+
+    return {"success": True, **installer.snapshot()}
 
 
 @network_router.put("/consent", dependencies=[Depends(require_auth)])

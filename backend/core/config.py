@@ -153,6 +153,15 @@ class IPMIConfig:
     power_poll_interval: int = 30
     command_timeout: int = 30  # real Dell BMCs: `sdr elist` can take ~16s; 15 was too tight
     backend: str = "ipmitool"
+    # Lets the web UI install ipmitool with the system package manager when it is missing. Off by
+    # default: it runs a package manager as root, so the operator turns it on knowingly, and it
+    # only works when the app already runs as root or has sudo without a password.
+    auto_install_ipmitool: bool = False
+
+    def __post_init__(self):
+        self.auto_install_ipmitool = parse_switch(
+            self.auto_install_ipmitool, "ipmi.auto_install_ipmitool"
+        )
 
 
 @dataclass
@@ -186,10 +195,15 @@ class UpdatesConfig:
     This is the kill switch, and it is deliberately coarser than the operator's own preference:
     with it false the check endpoint is never registered and the periodic task is never started,
     so suppression is structural rather than a runtime branch someone could regress past. The
-    per-operator opt-in lives in the database and only decides whether the check runs unattended.
+    per-operator preference lives in the database (on unless answered "no") and only decides
+    whether the check runs unattended.
     """
 
     enabled: bool = True
+    # A Watchtower running next to the container, with its HTTP API on: the only way a Docker
+    # install can be updated from the web UI, since a container cannot replace its own image.
+    watchtower_url: str | None = None
+    watchtower_token: str | None = None
 
     def __post_init__(self):
         # A quoted "false" (or "no", "off", "0") loads as text, and text is truthy: read as-is,
@@ -229,12 +243,19 @@ def _apply_env_overrides(config: AppConfig) -> None:
         "IPMIDECK_AUTH_SESSION_EXPIRY": ("auth", "session_expiry"),
         "IPMIDECK_IPMI_POLL_INTERVAL": ("ipmi", "poll_interval", int),
         "IPMIDECK_IPMI_POWER_POLL_INTERVAL": ("ipmi", "power_poll_interval", int),
+        "IPMIDECK_IPMI_AUTO_INSTALL_IPMITOOL": (
+            "ipmi",
+            "auto_install_ipmitool",
+            lambda v: parse_switch(v, "IPMIDECK_IPMI_AUTO_INSTALL_IPMITOOL"),
+        ),
         "IPMIDECK_DATA_DB_PATH": ("data", "db_path"),
         "IPMIDECK_DATA_RETENTION_DAYS": ("data", "retention_days", int),
         "IPMIDECK_LOGGING_LEVEL": ("logging", "level"),
         "IPMIDECK_UPDATES_ENABLED": (
             "updates", "enabled", lambda v: parse_switch(v, "IPMIDECK_UPDATES_ENABLED")
         ),
+        "IPMIDECK_UPDATES_WATCHTOWER_URL": ("updates", "watchtower_url"),
+        "IPMIDECK_UPDATES_WATCHTOWER_TOKEN": ("updates", "watchtower_token"),
         "IPMIDECK_DEMO": ("demo", None, lambda v: v.lower() in ("true", "1", "yes")),
     }
     for env_key, mapping in env_map.items():

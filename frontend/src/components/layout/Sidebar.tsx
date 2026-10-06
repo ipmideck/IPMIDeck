@@ -13,6 +13,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { NavLink, useNavigate } from "react-router-dom";
+import { UpgradeButton } from "./UpgradeButton";
 import { VersionButton } from "./VersionButton";
 import { useState, useRef, useEffect } from "react";
 
@@ -69,10 +70,11 @@ export function Sidebar() {
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-foreground text-background font-bold text-sm">
             ID
           </div>
-          <div className="min-w-0">
+          <div className="flex min-w-0 items-center whitespace-nowrap">
             <span className="text-sm font-semibold">IPMIDeck</span>
             <VersionButton />
           </div>
+          <UpgradeButton className="ml-auto" />
         </div>
       </div>
 

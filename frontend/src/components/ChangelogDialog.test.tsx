@@ -165,6 +165,67 @@ describe("the version history dialog", () => {
     );
   });
 
+  it("draws an upgrade note as a note, without the markdown markers", async () => {
+    useUpdateStore.setState({
+      changelogLoaded: true,
+      entries: [
+        {
+          version: "Unreleased",
+          date: null,
+          is_security: false,
+          is_unreleased: true,
+          body: [
+            "> ### Upgrading logs everyone out",
+            ">",
+            "> **Log in again** once after updating, then run `ipmideck doctor`.",
+            ">",
+            "> ```yaml",
+            "> server:",
+            ">   trusted_origins: []",
+            "> ```",
+            "",
+            "### Fixed",
+            "",
+            "- An ordinary fix.",
+          ].join("\n"),
+        },
+      ],
+    });
+    render(<ChangelogDialog />);
+    useUIOverlayStore.getState().setChangelogOpen(true);
+    const heading = await screen.findByRole("heading", { name: "Upgrading logs everyone out" });
+    const note = heading.closest("aside") as HTMLElement;
+    expect(note).toBeTruthy();
+    expect(within(note).getByText("Log in again").tagName).toBe("STRONG");
+    expect(within(note).getByText("ipmideck doctor").tagName).toBe("CODE");
+    expect(note.querySelector("pre")?.textContent).toBe("server:\n  trusted_origins: []");
+    expect(note.textContent).not.toMatch(/>|###|\*\*|```/);
+    // The section after the note is not drawn inside it.
+    expect(within(note).queryByText("An ordinary fix.")).toBeNull();
+    expect(screen.getByText("An ordinary fix.")).toBeTruthy();
+  });
+
+  it("boxes the Upgrade notes group the same way", async () => {
+    useUpdateStore.setState({
+      changelogLoaded: true,
+      entries: [
+        {
+          version: "Unreleased",
+          date: null,
+          is_security: false,
+          is_unreleased: true,
+          body: "### Upgrade notes\n\n- **Log in again once.** Nothing is lost.\n\n### Fixed\n\n- **A fix.**",
+        },
+      ],
+    });
+    render(<ChangelogDialog />);
+    useUIOverlayStore.getState().setChangelogOpen(true);
+    const heading = await screen.findByRole("heading", { name: "Upgrade notes" });
+    const note = heading.closest("aside") as HTMLElement;
+    expect(within(note).getByText("Log in again once.")).toBeTruthy();
+    expect(within(note).queryByText("A fix.")).toBeNull();
+  });
+
   it("closes on Escape", async () => {
     const user = userEvent.setup();
     render(<ChangelogDialog />);
@@ -195,14 +256,14 @@ describe("the sidebar version control", () => {
     expect(screen.queryByText(/updates\.new|^new$/i)).toBeNull();
   });
 
-  it("marks a newer version, and says so for a screen reader too", async () => {
+  it("leaves a newer version to the upgrade button beside it", async () => {
     useUpdateStore.setState({
       state: { ...statePayload, latest_version: "9.9.9", update_available: true },
     });
     render(<VersionButton />);
-    await waitFor(() => expect(screen.getByText(/updates\.new|^new$/i)).toBeTruthy());
-    const button = screen.getByRole("button");
-    expect(button.getAttribute("aria-describedby")).toBe("sidebar-update-hint");
+    await waitFor(() => expect(screen.getByText("v2.0.1")).toBeTruthy());
+    expect(screen.queryByText(/updates\.new|^new$/i)).toBeNull();
+    expect(screen.getAllByRole("button")).toHaveLength(1);
   });
 
   it("reads state without ever triggering a lookup", async () => {

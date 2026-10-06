@@ -452,6 +452,21 @@ def test_an_ordinary_release_is_not_marked_as_security(monkeypatch):
     assert updates.fetch_latest(updates.GIT).is_security is False
 
 
+def test_the_release_notes_come_with_the_answer(monkeypatch):
+    _stub_fetch(monkeypatch, {"tag_name": "v2.1.0", "body": "### Added\n\n- A feature."})
+    assert updates.fetch_latest(updates.GIT).notes == "### Added\n\n- A feature."
+
+
+@pytest.mark.parametrize("body", [None, "", "   ", 42, ["### Added"]])
+def test_a_release_without_readable_notes_has_none(body):
+    assert updates.release_notes(body) is None
+
+
+def test_overlong_release_notes_are_cut_rather_than_passed_on():
+    notes = updates.release_notes("x" * (updates._MAX_NOTES + 100))
+    assert notes is not None and len(notes) == updates._MAX_NOTES
+
+
 def test_security_in_the_prose_does_not_mark_the_release(monkeypatch):
     """Only the heading counts, the same rule the version history uses."""
     _stub_fetch(monkeypatch, {"tag_name": "v2.1.0", "body": "This is not a security release."})

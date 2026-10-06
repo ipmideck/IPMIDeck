@@ -9,7 +9,8 @@ Two independent switches decide whether anything here reaches the network:
 * ``config.updates.enabled`` — the operator's kill switch. With it false the routes that could
   open a socket are never registered and this loop is never started.
 * ``updates.check_enabled`` in the database — the operator's answer to the setup question. It
-  only governs the *unattended* check. Pressing the button in Settings or the update key in the
+  only governs the *unattended* check, and is on until answered "no": an instance that never saw
+  the question (an upgrade skips setup) checks like one that answered yes. Pressing the button in Settings or the update key in the
   console is an explicit request and is served whenever the kill switch allows it.
 """
 
@@ -20,6 +21,7 @@ import json
 import logging
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -31,6 +33,7 @@ from backend.core.updates import (
     fetch_latest,
     is_newer,
     safe_release_url,
+    upgrade_command,
 )
 
 logger = logging.getLogger("ipmideck.updates")
@@ -95,6 +98,8 @@ class UpdateStatus:
     checked_at: str | None = None
     error: str | None = None
     from_cache: bool = False
+    # The release notes of ``latest_version``, when the lookup could read them.
+    notes: str | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -108,6 +113,7 @@ class UpdateStatus:
             "checked_at": self.checked_at,
             "error": self.error,
             "from_cache": self.from_cache,
+            "notes": self.notes,
         }
 
 
@@ -121,6 +127,7 @@ def _status_from_probe(probe: UpdateProbe, checked_at: str) -> UpdateStatus:
         install_method=probe.source,
         checked_at=checked_at,
         error=probe.error,
+        notes=probe.notes,
     )
 
 
@@ -149,6 +156,10 @@ class UpdateService:
         # Set when a lookup leaves a security question open, so that a check made on request can
         # cut the unattended check's wait short instead of leaving the question for up to a day.
         self._wake = asyncio.Event()
+        # Called once per newer version the unattended check learns of, so the console can say
+        # so without anyone asking. Set by the entry point; None leaves it to the log alone.
+        self.announce: Callable[[UpdateStatus], None] | None = None
+        self._announced_version: str | None = None
         # Handed to the unattended check's current lookup. Cancelling the task cannot stop the
         # worker thread the lookup runs in; setting this tells it not to send its next request.
         self._unattended_cancel: threading.Event | None = None
@@ -156,8 +167,11 @@ class UpdateService:
     # --- consent -------------------------------------------------------------------------
 
     async def consent_given(self) -> bool:
+        # On by default: only an explicit "false" turns the unattended check off. An upgraded
+        # instance never runs setup, so it never records an answer, and would otherwise never
+        # hear about a release unless someone went looking in Settings.
         raw = await self._db.get_config(CONSENT_KEY, default=None)
-        return isinstance(raw, str) and raw.strip().lower() == "true"
+        return not (isinstance(raw, str) and raw.strip().lower() == "false")
 
     async def set_consent(self, enabled: bool) -> None:
         await self._db.set_config(CONSENT_KEY, "true" if enabled else "false")
@@ -188,6 +202,8 @@ class UpdateService:
         status.release_url = safe_release_url(data.get("release_url"))
         status.checked_at = data.get("checked_at")
         status.error = data.get("error")
+        notes = data.get("notes")
+        status.notes = notes if isinstance(notes, str) else None
         # Recomputed rather than trusted: the running version changes on upgrade while the cached
         # row does not, so a stale "update available" would survive the update that resolved it.
         status.update_available = is_newer(status.latest_version, VERSION)
@@ -205,6 +221,7 @@ class UpdateService:
                     "release_url": status.release_url,
                     "checked_at": status.checked_at,
                     "error": status.error,
+                    "notes": status.notes,
                 }
             ),
         )
@@ -303,6 +320,7 @@ class UpdateService:
                 status.is_security = previous.is_security
                 status.security_unresolved = previous.security_unresolved
                 status.release_url = previous.release_url
+                status.notes = previous.notes
                 status.update_available = is_newer(status.latest_version, VERSION)
                 self._consecutive_failures += 1
                 logger.info("Update check did not complete (%s)", probe.error)
@@ -365,6 +383,7 @@ class UpdateService:
                 status = await self.check_now(
                     minimum_interval=MIN_AUTO_INTERVAL_SECONDS, cancel=cancel
                 )
+                self._announce_once(status)
                 if status.from_cache:
                     # A previous run checked moments ago: try again once the floor has passed.
                     delay = MIN_AUTO_INTERVAL_SECONDS
@@ -383,6 +402,28 @@ class UpdateService:
                 logger.exception("The update check task hit an unexpected error")
                 delay = self._take_backoff()
             await self._pause(delay)
+
+    def _announce_once(self, status: UpdateStatus) -> None:
+        """Tell the operator about a newer version the first time it is known, not every day."""
+        version = status.latest_version
+        if not (status.update_available and version) or version == self._announced_version:
+            return
+        self._announced_version = version
+        command = upgrade_command(status.install_method, version)
+        if self.announce is not None:
+            try:
+                self.announce(status)
+            except Exception:
+                logger.debug("The update announcement could not be shown", exc_info=True)
+            return
+        logger.warning(
+            "IPMIDeck %s is available (running %s)%s — %s%s",
+            version,
+            VERSION,
+            ", a security release" if status.is_security else "",
+            status.release_url,
+            f". Upgrade with: {command}" if command else "",
+        )
 
     async def _pause(self, delay: float) -> None:
         """Wait ``delay`` seconds before the next pass.

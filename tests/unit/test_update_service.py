@@ -179,12 +179,18 @@ def _live_loops():
 # --- the two switches ---------------------------------------------------------------------------
 
 
-async def test_without_a_recorded_answer_the_unattended_check_never_starts(fetches):
+async def test_without_a_recorded_answer_the_unattended_check_runs(fetches):
+    # On by default: an upgraded instance never runs setup, so it never records an answer, and
+    # must still hear about a release. Only an explicit "no" turns the check off.
     service = UpdateService(_FakeDB(), _config(enabled=True))
-    assert await service.start() is False
-    assert service.running() is False
-    await asyncio.sleep(0)
-    assert fetches == []
+    assert await service.consent_given() is True
+    assert await service.start() is True
+    for _ in range(50):
+        if fetches:
+            break
+        await asyncio.sleep(0.01)
+    await service.stop()
+    assert fetches == ["pip"]
 
 
 async def test_a_declined_answer_keeps_the_unattended_check_off(fetches):
@@ -635,6 +641,18 @@ async def test_a_foreign_link_in_the_cached_result_is_not_served():
     assert status.release_url == RELEASES_URL
 
 
+async def test_the_release_notes_survive_the_cache():
+    db = _FakeDB({svc_mod._RESULT_KEY: _stored(age_seconds=60, notes="### Added\n\n- A thing.")})
+    status = await UpdateService(db, _config()).cached_status()
+    assert status.notes == "### Added\n\n- A thing."
+    assert status.as_dict()["notes"] == status.notes
+
+
+async def test_cached_notes_that_are_not_text_are_dropped():
+    db = _FakeDB({svc_mod._RESULT_KEY: _stored(age_seconds=60, notes={"html": "<b>x</b>"})})
+    assert (await UpdateService(db, _config()).cached_status()).notes is None
+
+
 # --- the suite's own guard ----------------------------------------------------------------------
 
 
@@ -653,3 +671,14 @@ def test_a_lookup_nobody_stubbed_fails_instead_of_reaching_the_network(monkeypat
     monkeypatch.setattr(updates, "_OPENER", SimpleNamespace(open=recording_open))
     assert updates.fetch_latest(updates.GIT).error == "unreachable"
     assert opened == []
+
+
+async def test_the_unattended_check_announces_what_it_found(fetches):
+    service = UpdateService(_FakeDB(), _config(enabled=True))
+    heard = []
+    service.announce = heard.append
+    await service.start()
+    assert await _until(lambda: heard)
+    await service.stop()
+    assert heard[0].latest_version == "99.0.0"
+    assert heard[0].install_method == "pip"

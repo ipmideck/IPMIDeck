@@ -24,6 +24,7 @@ import os
 import re
 import socket
 import ssl
+import sys
 import threading
 import urllib.error
 import urllib.parse
@@ -80,6 +81,25 @@ GIT = "git"
 UNKNOWN = "unknown"
 
 INSTALL_METHODS = (DOCKER, PIP, GIT, UNKNOWN)
+
+
+def upgrade_command(method: str, version: str) -> str | None:
+    """The command that moves this install to ``version``, or None when there is no single one.
+
+    Shown to the operator, never run: the image is replaced from outside the container, and a
+    checkout or an environment is the operator's to change. The Python-index command names the
+    interpreter this process runs on, so it upgrades the environment that is actually running.
+    """
+    if method == DOCKER:
+        return "docker compose pull && docker compose up -d"
+    if method == GIT:
+        return f"git fetch --tags && git checkout v{version}"
+    if method == PIP:
+        python = sys.executable or "python"
+        if " " in python:
+            python = f'"{python}"'
+        return f"{python} -m pip install --upgrade ipmideck=={version}"
+    return None
 
 
 # Values an application-container runtime puts in PID 1's ``container`` variable. LXC and
@@ -368,6 +388,17 @@ def safe_release_url(candidate) -> str:
     return RELEASES_URL
 
 
+# Release notes are shown in the update dialog; a body larger than this is cut, not trusted.
+_MAX_NOTES = 32 * 1024
+
+
+def release_notes(body) -> str | None:
+    """A release body as text the interface may show, or None when there is none."""
+    if not isinstance(body, str) or not body.strip():
+        return None
+    return body[:_MAX_NOTES]
+
+
 def _is_security_body(body) -> bool:
     """A release body marks a security release only through its ``### Security`` grouping.
 
@@ -390,6 +421,8 @@ class UpdateProbe:
     security_unresolved: bool = False
     error: str | None = None
     checked_at: str | None = None
+    # The published release notes of ``latest_version``, when a lookup read them.
+    notes: str | None = None
     extra: dict = field(default_factory=dict)
 
     def as_dict(self) -> dict:
@@ -554,6 +587,7 @@ def _latest_from_github(timeout: float, cancel: threading.Event | None = None) -
         latest_version=tag,
         release_url=safe_release_url(data.get("html_url")),
         is_security=_is_security_body(data.get("body")),
+        notes=release_notes(data.get("body")),
     )
 
 
@@ -589,6 +623,7 @@ def _mark_security_from_release(
     probe.security_unresolved = False
     probe.is_security = _is_security_body(data.get("body"))
     probe.release_url = safe_release_url(data.get("html_url"))
+    probe.notes = release_notes(data.get("body"))
 
 
 _CHANNELS = {

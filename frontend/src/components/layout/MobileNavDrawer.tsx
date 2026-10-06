@@ -1,4 +1,5 @@
 import { Drawer } from "vaul";
+import { UpgradeButton } from "./UpgradeButton";
 import { VersionButton } from "./VersionButton";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
@@ -72,10 +73,11 @@ export function MobileNavDrawer({ open, onClose }: Props) {
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-foreground text-sm font-bold text-background">
                 ID
               </div>
-              <div className="min-w-0">
+              <div className="flex min-w-0 items-center whitespace-nowrap">
                 <span className="text-sm font-semibold">IPMIDeck</span>
                 <VersionButton onOpen={onClose} />
               </div>
+              <UpgradeButton className="ml-auto" onOpen={onClose} />
             </div>
           </div>
 

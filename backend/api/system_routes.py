@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 import shutil
 import zipfile
 from datetime import datetime, timezone
@@ -19,6 +20,7 @@ from backend.core.crypto import _set_secure_permissions
 from backend.core.csv_export import csv_safe, safe_filename_part
 
 router = APIRouter()
+logger = logging.getLogger("ipmideck.system")
 
 
 # 04-W1-01 (Plan 04-01, Task 2): generic app_config K/V endpoints.
@@ -507,6 +509,7 @@ async def health():
 @router.get("/config", dependencies=[Depends(require_auth)])
 async def get_config():
     from backend.core.branding import VERSION
+    from backend.core.ipmitool import status as ipmitool_status
     from backend.main import config
     return {
         "server": {"host": config.server.host, "port": config.server.port},
@@ -514,7 +517,27 @@ async def get_config():
         "data": {"retention_days": config.data.retention_days},
         "demo": config.demo,
         "version": VERSION,
+        "ipmitool": ipmitool_status(config.demo, config.ipmi.auto_install_ipmitool),
     }
+
+
+@router.post("/system/ipmitool/install")
+async def install_ipmitool(user: str = Depends(require_auth)):
+    """Install ipmitool with the host's package manager, when the configuration allows it.
+
+    Refused with authentication switched off: this runs a package manager as root, and without a
+    login anyone who can reach the port would be the one asking. Takes no input at all; what runs
+    is decided by the host alone.
+    """
+    from backend.core import ipmitool
+    from backend.main import auth, config
+
+    if config.demo:
+        return {"success": False, "error_code": "ipmitool_install_demo"}
+    if not await auth.is_auth_enabled():
+        return {"success": False, "error_code": "ipmitool_install_needs_login"}
+    logger.warning("ipmitool install requested from the web UI by %s", user)
+    return await ipmitool.install(config.ipmi.auto_install_ipmitool)
 
 
 @router.get("/logs", dependencies=[Depends(require_auth)])

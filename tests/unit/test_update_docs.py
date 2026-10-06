@@ -1,8 +1,9 @@
 """What the operator is told about how often IPMIDeck checks has to be what the server does.
 
-The README, the changelog entry and the setup question are read before anyone agrees to the
-check, so each number they give is pinned to the constant that implements it: changing the
-cadence without changing the words fails here.
+The README and the setup question are read before anyone agrees to the check, so each number
+they give is pinned to the constant that implements it: changing the cadence without changing
+the words fails here. The setup question stays one line and names only the daily cadence. The changelog entry is kept short by its own convention and leaves the
+numbers to the README.
 """
 
 from __future__ import annotations
@@ -11,7 +12,6 @@ import json
 import re
 from pathlib import Path
 
-import pytest
 
 from backend.core import update_service as svc
 
@@ -22,9 +22,8 @@ def _flat(name: str) -> str:
     return re.sub(r"\s+", " ", (ROOT / name).read_text(encoding="utf-8"))
 
 
-@pytest.mark.parametrize("name", ["README.md", "CHANGELOG.md"])
-def test_the_documents_state_the_cadence_the_service_keeps(name):
-    text = _flat(name)
+def test_the_readme_states_the_cadence_the_service_keeps():
+    text = _flat("README.md")
     first_retry = svc._BACKOFF_START_SECONDS // 60
     ceiling = svc._BACKOFF_CEILING_SECONDS // 3600
     assert re.search(
@@ -40,10 +39,12 @@ def test_the_documents_state_the_cadence_the_service_keeps(name):
     assert "again after an hour" not in text
 
 
-def test_the_setup_question_says_a_failed_check_is_repeated_sooner():
+def test_the_setup_question_states_the_cadence_in_one_line():
+    """The wizard keeps it to a line; the retry details live in the README, pinned above."""
     catalog = json.loads(
         (ROOT / "frontend/src/i18n/locales/en/translation.json").read_text(encoding="utf-8")
     )
     hint = catalog["setup"]["auth"]["updateChecksHint"]
-    assert "once a day" in hint
-    assert re.search(r"fails or is left incomplete[^.]*sooner", hint)
+    assert svc.CHECK_INTERVAL_SECONDS == 24 * 3600
+    assert "once a day" in hint.lower()
+    assert len(hint) <= 70

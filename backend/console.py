@@ -928,6 +928,15 @@ class ConsoleUI:
         for h in saved:
             root_logger.addHandler(h)
 
+    def _frame_signature(self, console) -> tuple:
+        """Fingerprint of what the next frame would paint: terminal size + the rendered layout.
+
+        Rendering to segments is cheap next to repainting the terminal, and comparing the result
+        catches every source of change (new log line, header status, sub-view data, resize) without
+        tracking each one by hand.
+        """
+        return (console.size, hash(tuple(console.render(self.layout))))
+
     def run(self) -> None:
         """Run the interactive render loop — no-op off a TTY (D-24/D-07).
 
@@ -967,15 +976,21 @@ class ConsoleUI:
         # for the lifetime of Live so log records go ONLY to the deque (rendered in the body) and
         # never bypass Live's redirect to fight the frame. Restored in finally. See the helper.
         saved_stream_handlers = self._suspend_stream_handlers()
+        # REDRAW ONLY ON CHANGE: Live's auto-refresh repainted the WHOLE alternate screen 4x/s even
+        # when nothing changed, and on Windows rich splits a full frame into several writes, so the
+        # terminal painted it top-to-bottom (the visible "CRT" sweep). auto_refresh is off and the
+        # loop below calls live.refresh() only when the rendered frame (or the terminal size) differs
+        # from the last one painted — an idle console never touches the terminal.
+        last_frame = None
         try:
             with Live(
                 self.layout,
                 console=console,
                 screen=True,
-                refresh_per_second=4,
+                auto_refresh=False,
                 redirect_stdout=True,
                 redirect_stderr=True,
-            ):
+            ) as live:
                 while not self._stop.is_set():
                     # RESILIENT RENDER (04.1-04 gap-closure r4 — belt-and-suspenders): guard the
                     # per-frame render so a SINGLE bad frame can NEVER kill the render thread again
@@ -989,6 +1004,10 @@ class ConsoleUI:
                     try:
                         self.layout["header"].update(self.render_header())
                         self.layout["body"].update(self.render_body())
+                        frame = self._frame_signature(console)
+                        if frame != last_frame:
+                            live.refresh()
+                            last_frame = frame
                     except Exception:
                         logger.exception("Console render frame failed — continuing")
                     time.sleep(0.25)

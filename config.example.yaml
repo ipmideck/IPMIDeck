@@ -35,6 +35,9 @@ ipmi:
   poll_interval: 30           # seconds
   power_poll_interval: 30     # seconds
   command_timeout: 30         # seconds
+  # Let the web UI install ipmitool when it is missing. Works only when IPMIDeck runs as root
+  # (or with sudo that needs no password); otherwise the UI shows the command to run.
+  auto_install_ipmitool: false
 
 data:
   retention_days: 365
@@ -51,6 +54,12 @@ updates:
   # and work whenever this is true.
   # Environment override: IPMIDECK_UPDATES_ENABLED=false
   enabled: true
+  # Docker only: a Watchtower running next to the container, with its HTTP API on. With both set,
+  # "Download and install" in the web UI asks it to replace the container; without them the UI
+  # shows the docker compose command instead. A container cannot update its own image.
+  # Environment overrides: IPMIDECK_UPDATES_WATCHTOWER_URL, IPMIDECK_UPDATES_WATCHTOWER_TOKEN
+  # watchtower_url: http://watchtower:8080
+  # watchtower_token: change-me
 
 modules:
   sensors:

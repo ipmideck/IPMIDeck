@@ -108,9 +108,11 @@ def _reset_update_state(bm) -> None:
     Without this a stored answer or a cached result from one test would decide another's
     outcome, and the rate limit from a check would silently turn the next check into a cache read.
     """
+    # Stopped first: the unattended check is on by default, so a freshly booted instance has one
+    # in flight, and an answer it stored after the rows below were cleared would decide the test.
+    _run(bm.update_service.stop())
     _run(bm.db.set_config("updates.check_enabled", "false"))
     _run(bm.db.set_config("updates.last_result", ""))
-    _run(bm.update_service.stop())
     bm.update_service._last_attempt = None
     bm.update_service._backoff = svc_mod._BACKOFF_START_SECONDS
     bm.update_service._unresolved_version = None

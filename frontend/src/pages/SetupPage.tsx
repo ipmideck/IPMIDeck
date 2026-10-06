@@ -6,6 +6,7 @@ import { post, get, put } from "@/api/client";
 import { useServerStore } from "@/stores/server-store";
 import { useAuthStore } from "@/stores/auth-store";
 import { LanguageSelect } from "@/components/LanguageSelect";
+import { IpmitoolBanner } from "@/components/IpmitoolBanner";
 import { cn } from "@/lib/utils";
 import { VENDORS, TIER_LABEL_KEY } from "@/lib/vendors";
 import {
@@ -16,6 +17,7 @@ import {
   ChevronRight,
   ChevronLeft,
   Loader2,
+  PlugZap,
   ShieldCheck,
   Globe,
   Lock,
@@ -67,6 +69,9 @@ export default function SetupPage() {
   const [serverError, setServerError] = useState("");
   const [serverLoading, setServerLoading] = useState(false);
   const [testResult, setTestResult] = useState<"success" | "fail" | null>(null);
+  // The server's localized reason, kept only when it names something the operator can fix on
+  // this machine; every other failure keeps the generic message.
+  const [testFailReason, setTestFailReason] = useState<string | null>(null);
   const [testLoading, setTestLoading] = useState(false);
 
   // SAFETY-CRITICAL: the "No" branch MUST call POST /api/auth/toggle {enabled:false},
@@ -175,16 +180,23 @@ export default function SetupPage() {
     }
     setTestLoading(true);
     setTestResult(null);
+    setTestFailReason(null);
     setServerError("");
     try {
       // Create a temporary test by posting to test endpoint
-      const result = await post<{ success: boolean }>("/api/servers/test", {
-        host: serverHost,
-        port: parseInt(serverPort, 10),
-        username: serverUser,
-        password: serverPass,
-      });
+      const result = await post<{ success: boolean; error?: string; error_code?: string }>(
+        "/api/servers/test",
+        {
+          host: serverHost,
+          port: parseInt(serverPort, 10),
+          username: serverUser,
+          password: serverPass,
+        },
+      );
       setTestResult(result.success ? "success" : "fail");
+      if (!result.success && result.error_code === "ipmitool_missing") {
+        setTestFailReason(result.error ?? null);
+      }
     } catch {
       setTestResult("fail");
     } finally {
@@ -194,6 +206,9 @@ export default function SetupPage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
+      {/* Mounted only on the server step: by then the account decision is made, so the config
+       * read it relies on is allowed, and this is where a missing ipmitool first matters. */}
+      {step === 2 && <IpmitoolBanner />}
       {/* Stepper — relative wrapper so the language box can sit top-right on every step (D-09/D-10) */}
       <div className="relative">
         {/* Onboarding language box: detected default (i18next), correctable, switches the wizard immediately (D-09/D-10/D-12) */}
@@ -477,9 +492,12 @@ export default function SetupPage() {
                 disabled={authLoading}
                 className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground min-h-[var(--control-min)] shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-50"
               >
-                {authLoading && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
                 {t("common.continue")}
-                <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                {authLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                )}
               </button>
             </div>
           </div>
@@ -592,11 +610,13 @@ export default function SetupPage() {
               {testResult === "fail" && (
                 <p role="alert" className="flex items-start gap-2 text-xs text-danger">
                   <AlertCircle className="mt-px h-4 w-4 shrink-0" aria-hidden="true" />
-                  <span>{t("setup.server.testFail")}</span>
+                  <span>{testFailReason ?? t("setup.server.testFail")}</span>
                 </p>
               )}
             </div>
 
+            {/* Each spinner takes the place of an icon of the same size, so a button never
+                grows while it waits and the row never re-wraps under the pointer. */}
             <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
               <button
                 onClick={() => setStep(1)}
@@ -610,7 +630,11 @@ export default function SetupPage() {
                 disabled={testLoading}
                 className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground min-h-[var(--control-min)] hover:text-foreground transition-colors disabled:opacity-50"
               >
-                {testLoading && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+                {testLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <PlugZap className="h-4 w-4" aria-hidden="true" />
+                )}
                 {t("common.testConnection")}
               </button>
               <button
@@ -618,9 +642,12 @@ export default function SetupPage() {
                 disabled={serverLoading}
                 className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2 text-sm font-medium text-primary-foreground min-h-[var(--control-min)] hover:bg-primary/90 transition-colors disabled:opacity-50"
               >
-                {serverLoading && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
                 {t("setup.server.addServer")}
-                <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                {serverLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                )}
               </button>
             </div>
           </div>

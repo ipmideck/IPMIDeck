@@ -23,6 +23,23 @@ export interface UpdateState {
   checked_at: string | null;
   /** A machine-readable reason, never an exception string. */
   error: string | null;
+  /** The published notes of `latest_version`, when the lookup could read them. */
+  notes?: string | null;
+  /** How the newer version would be installed on this copy; null while there is none. */
+  upgrade?: UpgradePlan | null;
+}
+
+/** What the server would do to install the version on offer. It decides; the page only shows it. */
+export interface UpgradePlan {
+  /** True when the server can install it by itself, from the button. */
+  automatic: boolean;
+  mechanism: string | null;
+  /** The command an operator can run instead, when there is one. */
+  command: string | null;
+  /** Why it cannot install it by itself, as a code. */
+  reason: string | null;
+  /** What happens after the install: the app restarts, stops for a manual start, or the container is replaced. */
+  restart: "automatic" | "manual" | "container" | null;
 }
 
 interface UpdateStore {

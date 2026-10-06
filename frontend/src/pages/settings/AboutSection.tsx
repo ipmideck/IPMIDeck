@@ -21,19 +21,6 @@ interface AboutSectionProps {
   headingRef: React.Ref<HTMLHeadingElement>;
 }
 
-/** Localised install-method label, falling back to the raw value for anything unexpected. */
-function useInstallLabel(method: string | undefined) {
-  const { t } = useTranslation();
-  if (!method) return null;
-  const known: Record<string, string> = {
-    docker: t("updates.methodDocker"),
-    pip: t("updates.methodPip"),
-    git: t("updates.methodGit"),
-    unknown: t("updates.methodUnknown"),
-  };
-  return known[method] ?? method;
-}
-
 /**
  * About section — live version (/api/config), creator attribution (VERBATIM,
  * preserved from the monolith; no new/duplicated personal data), and sponsor.
@@ -46,6 +33,7 @@ export function AboutSection({ headingRef }: AboutSectionProps) {
   const { t } = useTranslation();
   const { appVersion, online, offlineTip } = useSettings();
   const setChangelogOpen = useUIOverlayStore((s) => s.setChangelogOpen);
+  const setUpdateOpen = useUIOverlayStore((s) => s.setUpdateOpen);
 
   const state = useUpdateStore((s) => s.state);
   const loadState = useUpdateStore((s) => s.loadState);
@@ -63,7 +51,6 @@ export function AboutSection({ headingRef }: AboutSectionProps) {
     if (state === null) void loadState();
   }, [state, loadState]);
 
-  const installLabel = useInstallLabel(state?.install_method);
   const suppressed = state !== null && !state.enabled;
   const consent = Boolean(state?.consent);
   const version = appVersion ?? state?.current_version ?? null;
@@ -235,15 +222,13 @@ export function AboutSection({ headingRef }: AboutSectionProps) {
               {state?.is_security
                 ? t("updates.securityUpdateAvailable", { version: state?.latest_version })
                 : t("updates.updateAvailable", { version: state?.latest_version })}
-              <a
-                href={state?.release_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 underline underline-offset-2 hover:no-underline"
+              <button
+                type="button"
+                onClick={() => setUpdateOpen(true)}
+                className="inline-flex items-center gap-1 font-medium underline underline-offset-2 hover:no-underline"
               >
-                {t("updates.viewRelease")}
-                <ExternalLink className="h-3 w-3" aria-hidden="true" />
-              </a>
+                {t("updateDialog.open")}
+              </button>
             </p>
           )}
           {result === "failed" && (
@@ -253,12 +238,6 @@ export function AboutSection({ headingRef }: AboutSectionProps) {
             </p>
           )}
         </div>
-
-        {installLabel && (
-          <p className="mt-4 text-xs text-muted-foreground">
-            {t("updates.installMethod", { method: installLabel })}
-          </p>
-        )}
       </FieldGroup>
     </SectionPanel>
   );

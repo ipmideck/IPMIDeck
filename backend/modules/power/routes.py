@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from backend.core.i18n import get_lang, t
+from backend.core.ipmitool import ipmi_failure
 from backend.modules import get_ctx
 
 router = APIRouter()
@@ -56,7 +57,7 @@ async def get_power_status(server_id: str, lang: str = Depends(get_lang)):
         )
         return {"server_id": server_id, "status": status}
     except Exception as e:
-        return {"server_id": server_id, "status": "unknown", "error": str(e)}
+        return {"server_id": server_id, "status": "unknown", **ipmi_failure(e, lang)}
 
 
 @router.post("/{server_id}/command")
@@ -127,4 +128,4 @@ async def power_command(server_id: str, body: PowerAction, lang: str = Depends(g
             (server_id, "power", body.action, "error", str(e)),
         )
         await ctx.db.commit()
-        return {"success": False, "error": str(e)}
+        return {"success": False, **ipmi_failure(e, lang)}

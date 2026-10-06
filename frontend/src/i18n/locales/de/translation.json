@@ -56,7 +56,109 @@
     "reconnecting": "Verbindung zum Backend wird wiederhergestellt…",
     "reconnectingDetail": "Versuch, die Verbindung wiederherzustellen.",
     "disconnected": "Backend getrennt",
-    "disconnectedDetail": "Live-Sensordaten und Fernsteuerungen sind nicht verfügbar. Noch sichtbare Werte zeigen den letzten bekannten Zustand."
+    "disconnectedDetail": "Live-Sensordaten und Fernsteuerungen sind nicht verfügbar. Noch sichtbare Werte zeigen den letzten bekannten Zustand.",
+    "ipmitoolMissing": "ipmitool ist nicht installiert",
+    "ipmitoolMissingDetail": "Kein Server ist erreichbar, bis es auf dem Rechner installiert ist, auf dem IPMIDeck läuft.",
+    "ipmitoolCopy": "Befehl kopieren",
+    "ipmitoolCopied": "Kopiert",
+    "ipmitoolRecheck": "Erneut prüfen",
+    "ipmitoolStillMissing": "Weiterhin nicht gefunden. Wenn du es gerade installiert hast, starte IPMIDeck neu.",
+    "ipmitoolInstall": "Installieren"
+  },
+  "ipmitoolInstall": {
+    "title": "ipmitool installieren",
+    "detected": "Erkanntes System: {{os}}",
+    "whatRuns": "IPMIDeck führt dies mit der Paketverwaltung des Systems aus:",
+    "installNow": "Jetzt installieren",
+    "installing": "Wird installiert…",
+    "retry": "Erneut versuchen",
+    "success": "ipmitool ist installiert. Ihre Server sind jetzt erreichbar.",
+    "failed": "Die Installation wurde nicht abgeschlossen.",
+    "output": "Ausgabe der Paketverwaltung",
+    "runYourself": "Führen Sie diesen Befehl in einem Terminal auf dem Rechner aus, auf dem IPMIDeck läuft:",
+    "reason": {
+      "disabled": "Die Installation über diese Seite ist ausgeschaltet. Um sie zu erlauben, setzen Sie ipmi.auto_install_ipmitool: true in config.yaml und starten Sie IPMIDeck neu. Außerdem sind Administratorrechte nötig.",
+      "no_privileges": "IPMIDeck läuft nicht mit Administratorrechten und kann daher keine Pakete selbst installieren.",
+      "brew_missing": "Homebrew ist nicht installiert. Installieren Sie es zuerst von brew.sh.",
+      "docker": "Das IPMIDeck-Image enthält ipmitool bereits. Laden Sie das offizielle Image erneut oder fügen Sie ipmitool Ihrem eigenen Image hinzu.",
+      "unsupported": "Auf diesem System wurde keine bekannte Paketverwaltung gefunden. Installieren Sie das Paket ipmitool und prüfen Sie dann erneut.",
+      "needs_login": "Zum Installieren muss die Anmeldung eingeschaltet sein (Einstellungen → Sicherheit).",
+      "demo": "Im Demo-Modus nicht verfügbar.",
+      "busy": "Es läuft bereits eine Installation.",
+      "timeout": "Die Paketverwaltung ist nicht rechtzeitig fertig geworden.",
+      "not_found": "Die Paketverwaltung ist fertig, aber ipmitool wird immer noch nicht gefunden.",
+      "failed": "Die Paketverwaltung hat einen Fehler gemeldet."
+    },
+    "windows": {
+      "intro": "Für Windows gibt es kein ipmitool-Paket. Verwenden Sie ein Herstellerwerkzeug, das es enthält:",
+      "step1": "Installieren Sie Dell iDRAC Tools oder das Dell OpenManage BMC Utility von der Dell-Supportseite. Beide enthalten ipmitool.exe.",
+      "step2": "IPMIDeck findet es im Dell-Ordner von selbst. Liegt ipmitool.exe woanders, fügen Sie diesen Ordner zum PATH hinzu und starten Sie IPMIDeck neu.",
+      "step3": "Klicken Sie auf Erneut prüfen.",
+      "searched": "Ordner, in denen IPMIDeck sucht:"
+    }
+  },
+  "updateDialog": {
+    "title": "IPMIDeck {{version}}",
+    "subtitle": "Eine neuere Version ist verfügbar.",
+    "running": "Sie verwenden Version {{version}}.",
+    "securityNote": "Diese Version behebt Sicherheitsprobleme. Installieren Sie sie bald.",
+    "notesMissing": "Die Versionshinweise konnten hier nicht gelesen werden.",
+    "installHeading": "Installation",
+    "backupFirst": "Zuerst wird eine Sicherung der Datenbank, des Verschlüsselungsschlüssels und der config.yaml angelegt.",
+    "after": {
+      "automatic": "Danach installiert {{mechanism}} Version {{version}}, und IPMIDeck startet von selbst neu; diese Seite lädt neu, sobald es wieder läuft.",
+      "manual": "Danach installiert {{mechanism}} Version {{version}}. IPMIDeck kann sich hier nicht selbst neu starten: Starten Sie es wieder, sobald das Update installiert ist.",
+      "container": "Danach lädt Watchtower das neue Image und ersetzt den Container; diese Seite lädt neu, sobald er wieder läuft."
+    },
+    "steps": {
+      "backup": "Datenbank und Einstellungen sichern",
+      "install": "Version {{version}} installieren",
+      "installContainer": "Update an Watchtower übergeben",
+      "restart": "IPMIDeck neu starten",
+      "restartManual": "IPMIDeck wieder starten",
+      "restartContainer": "Neuen Container starten"
+    },
+    "keepRunning": "Beenden Sie IPMIDeck nicht, solange dies läuft.",
+    "waiting": "Warten, bis Version {{version}} antwortet. Diese Seite lädt von selbst neu.",
+    "slow": "Das dauert länger als erwartet. Prüfen Sie die IPMIDeck-Konsole oder die Container-Logs.",
+    "stopped": "IPMIDeck wurde beendet, damit das Update installiert werden kann. Starten Sie es in ein bis zwei Minuten wieder; diese Seite lädt neu, sobald es antwortet. Der Fortschritt steht in update.log im Datenordner.",
+    "back": "Version {{version}} läuft. Wird neu geladen…",
+    "restartRequired": "Version {{version}} ist installiert. Starten Sie IPMIDeck neu, um sie zu verwenden.",
+    "failed": "Das Update wurde nicht installiert.",
+    "output": "Ausgabe des Installers",
+    "runYourself": "Führen Sie zur Installation diesen Befehl auf dem Rechner aus, auf dem IPMIDeck läuft:",
+    "guide": "Anleitung: Aktualisierung über die Weboberfläche",
+    "later": "Später",
+    "install": "Herunterladen und installieren",
+    "installing": "Wird installiert…",
+    "retry": "Erneut versuchen",
+    "open": "Neuerungen und Installation",
+    "upgradeLabel": "Version {{version}} ist verfügbar: Neuerungen ansehen und installieren",
+    "upgradeSecurityLabel": "Version {{version}} ist ein Sicherheitsupdate: Neuerungen ansehen und installieren",
+    "toastDetail": "Sehen Sie, was sich geändert hat, und installieren Sie es von hier aus.",
+    "toastAction": "Neuerungen ansehen",
+    "reason": {
+      "docker": "Ein Container kann sein eigenes Image nicht ersetzen. Führen Sie diesen Befehl auf dem Docker-Host aus, oder binden Sie Watchtower an, um von hier aus zu installieren.",
+      "git": "Diese Kopie läuft aus einem git-Checkout. Aktualisieren Sie sie mit git.",
+      "unknown": "IPMIDeck kann nicht erkennen, wie es installiert wurde, und kann sich daher nicht selbst aktualisieren.",
+      "editable": "Dies ist eine editierbare Entwicklungsinstallation. Aktualisieren Sie stattdessen den Checkout.",
+      "system_python": "IPMIDeck ist in einem vom System verwalteten Python installiert, das es nicht verändert. Aktualisieren Sie es so, wie Sie es installiert haben.",
+      "tool_missing": "IPMIDeck wurde mit uv installiert, aber uv ist nicht im PATH des Benutzers, der es ausführt.",
+      "pip_missing": "pip ist für das Python, das IPMIDeck ausführt, nicht verfügbar.",
+      "manual_only": "IPMIDeck wurde nicht mit dem Befehl ipmideck gestartet und kann sich daher nicht selbst beenden, um das Update zu installieren.",
+      "no_update": "Es gibt keine neuere Version zu installieren.",
+      "demo": "Im Demo-Modus können keine Updates installiert werden.",
+      "needs_login": "Zum Installieren eines Updates muss die Anmeldung aktiviert sein.",
+      "busy": "Es wird bereits ein Update installiert.",
+      "backup_failed": "Die Sicherung konnte nicht geschrieben werden, daher wurde nichts geändert.",
+      "watchtower_unauthorized": "Watchtower hat das Token abgelehnt. Prüfen Sie updates.watchtower_token.",
+      "watchtower_refused": "Watchtower hat die Update-Anfrage abgelehnt.",
+      "watchtower_unreachable": "Watchtower ist unter updates.watchtower_url nicht erreichbar.",
+      "timeout": "Der Installer hat zu lange gebraucht und wurde abgebrochen.",
+      "failed": "Der Installer hat einen Fehler gemeldet.",
+      "not_installed": "Der Installer ist fertig, aber Python lädt noch die alte Version.",
+      "not_possible": "IPMIDeck kann dieses Update nicht selbst installieren."
+    }
   },
   "error": {
     "title": "Etwas ist schiefgelaufen",
@@ -424,7 +526,7 @@
       "credentialsRequired": "Benutzername und Passwort sind erforderlich.",
       "applyFailed": "Authentifizierungseinstellung konnte nicht angewendet werden.",
       "updateChecksLabel": "IPMIDeck darf nach neuen Versionen suchen",
-      "updateChecksHint": "Beim Start und einmal täglich fragt IPMIDeck dort, wo diese Installation veröffentlicht wird (Python-Paketindex, Container-Registry oder GitHub-Releases), ob eine neuere Version vorliegt. Findet die Abfrage im Paketindex oder in der Registry eine, fragt IPMIDeck zusätzlich bei GitHub nach, ob es sich um eine Sicherheitsversion handelt. Eine fehlgeschlagene oder unvollständige Prüfung wird früher als die nächste tägliche wiederholt. Jede Anfrage enthält nur den Produktnamen und Ihre laufende Version — keine Kennung, nichts über Ihre Server. Sie können das jederzeit in den Einstellungen abschalten.",
+      "updateChecksHint": "Einmal täglich; gesendet werden nur Name und Version.",
       "updateChecksSaveFailed": "Ihre Auswahl zur Update-Prüfung konnte nicht gespeichert werden. Sie können sie später unter {{where}} festlegen."
     },
     "server": {
@@ -698,11 +800,6 @@
     "checking": "Wird geprüft…",
     "lastChecked": "Zuletzt geprüft {{when}}",
     "upToDate": "Version {{version}} ist die neueste Ausgabe",
-    "checkFailed": "Die Prüfung konnte nicht abgeschlossen werden.",
-    "installMethod": "Aktualisierungen stammen aus: {{method}}",
-    "methodDocker": "Docker-Registry",
-    "methodPip": "Python-Paketindex",
-    "methodGit": "Veröffentlichte Versionen",
-    "methodUnknown": "Veröffentlichte Versionen"
+    "checkFailed": "Die Prüfung konnte nicht abgeschlossen werden."
   }
 }

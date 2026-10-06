@@ -41,9 +41,10 @@ _CRED_MIGRATION_VERSION = "002_authenticated_credentials"
 
 
 def _set_secure_permissions(path: Path) -> None:
-    """Restrict a file to the current owner only.
+    """Restrict a file, or a folder, to the current owner only.
 
-    POSIX: ``chmod 0o600``. Windows: ``os.chmod`` only flips the read-only bit and
+    POSIX: ``chmod 0o600`` for a file, ``0o700`` for a folder — a folder without the execute
+    bit cannot be entered, so not even its owner could create a file in it. Windows: ``os.chmod`` only flips the read-only bit and
     does NOT touch the NTFS ACL (the file would still inherit the parent dir's ACL,
     often readable by every local user). So on Windows we shell out to ``icacls`` to
     remove inherited ACEs and grant Full control to only the current user. This is the
@@ -52,7 +53,7 @@ def _set_secure_permissions(path: Path) -> None:
     """
     path = Path(path)
     if os.name != "nt":
-        os.chmod(path, 0o600)
+        os.chmod(path, 0o700 if path.is_dir() else 0o600)
         return
     user = os.environ.get("USERNAME") or "owner"
     try:

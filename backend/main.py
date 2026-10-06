@@ -35,9 +35,10 @@ from backend.core.config import (
 from backend.core.crypto import _set_secure_permissions
 from backend.core.logging_util import suppress_noisy_loggers
 from backend.core.database import Database
+from backend.core.ipmitool import find_ipmitool, report_missing
 from backend.core.modules import ModuleLoader
 from backend.core.update_service import UpdateService
-from backend.core.updates import CHANGELOG_URL
+from backend.core.updates import CHANGELOG_URL, upgrade_command
 from backend.core.websocket import WebSocketManager
 
 logger = logging.getLogger("ipmideck")
@@ -124,6 +125,12 @@ ws_manager: WebSocketManager = WebSocketManager()
 module_loader: ModuleLoader = ModuleLoader(db)
 ipmi_service = None  # Set during startup based on config.demo
 update_service = None  # UpdateService — set during startup
+# The interactive console's report(), while one is on screen: where a newer version found by the
+# unattended check is announced. Held in a list so cli() can set it before the app starts.
+_console_report: list = [None]
+# How a request can stop or restart the server, while the `ipmideck` command runs it: an update
+# installed from the web UI ends with one of them. None when something else runs the app.
+_app_control: dict = {"restart": None, "exit": None}
 
 
 def _setup_logging(level: str) -> None:
@@ -371,6 +378,9 @@ async def lifespan(app: FastAPI):
     # nothing in this process can start a request. Registered here, alongside the module routes,
     # because the SPA catch-all below shadows anything mounted after it.
     update_service = UpdateService(db, config)
+    if _console_report[0] is not None:
+        report = _console_report[0]
+        update_service.announce = lambda status: _show_update_available(status, report)
     _sync_update_network_routes(app, config.updates.enabled)
     if not config.updates.enabled:
         logger.info("Update checks are switched off in the configuration")
@@ -439,6 +449,12 @@ async def lifespan(app: FastAPI):
             "wizard and claim this instance. Finish first-run setup now.",
             effective_host, effective_port,
         )
+    # Every server is reached through ipmitool, and a pip install cannot bring it along or even
+    # look for it, so this is the first point at which its absence can be noticed. Starting
+    # anyway keeps the web UI reachable to show the same advice; the warning is not repeated
+    # by the poll loops that will now fail.
+    if not config.demo and find_ipmitool() is None:
+        report_missing()
     # The running version and where to read what changed, in front of anyone who reads the log —
     # including through `docker logs`, where there is no console header. Sends nothing.
     logger.info("Version %s — changelog: %s", VERSION, CHANGELOG_URL)
@@ -776,6 +792,11 @@ def _mount_spa(app: FastAPI) -> None:
         app.mount("/assets", StaticFiles(directory=str(static_dir / "assets")), name="static-assets")
 
     spa_root = static_dir.resolve()
+    index_file = spa_root / "index.html"
+    # The page names its hashed bundles, so a browser that kept an old copy after an upgrade asks
+    # for files that no longer exist. "no-cache" still allows caching, but only after the
+    # browser has checked with the server, which the ETag makes a cheap 304.
+    index_headers = {"Cache-Control": "no-cache"}
 
     # SPA fallback: non-API routes return index.html for React Router.
     # API paths (/api/*) that don't match a registered route return 404 —
@@ -792,13 +813,25 @@ def _mount_spa(app: FastAPI) -> None:
         # Try to serve the exact file first (favicon.svg, etc.), but only when
         # it is contained under the SPA root (SEC-01 / F1).
         file_path = _resolve_spa_file(full_path, spa_root)
-        if file_path is not None:
+        if file_path is not None and file_path != index_file:
             return FileResponse(file_path)
         # Otherwise return index.html for React Router
-        return FileResponse(spa_root / "index.html")
+        return FileResponse(index_file, headers=index_headers)
 
 
 # === CLI entry point ===
+
+def _show_update_available(status, show) -> None:
+    """The newer version, where to read about it, and the command that installs it."""
+    kind = "security release" if status.is_security else "release"
+    show(
+        f"Version {status.latest_version} is available ({kind}) — {status.release_url}",
+        "bold red" if status.is_security else "bold green",
+    )
+    command = upgrade_command(status.install_method, status.latest_version)
+    if command:
+        show(f"Upgrade with: {command}", "cyan")
+
 
 def _report_update_status(status, show) -> None:
     """Describe the outcome of a console-requested update check through ``show(line, style)``.
@@ -812,11 +845,7 @@ def _report_update_status(status, show) -> None:
         show(f"Update check did not complete: {status.error}", "yellow")
     # A failed check keeps the update an earlier one found, so it is still reported.
     if status.update_available:
-        kind = "security release" if status.is_security else "release"
-        show(
-            f"Version {status.latest_version} is available ({kind}) — {status.release_url}",
-            "bold red" if status.is_security else "bold green",
-        )
+        _show_update_available(status, show)
     elif not status.error:
         show(f"Version {VERSION} is the latest published release", "green")
 
@@ -1221,6 +1250,9 @@ def cli():
             if srv is not None:
                 srv.should_exit = True
 
+        _app_control["exit"] = lambda: loop.call_soon_threadsafe(_request_exit)
+        _app_control["restart"] = lambda: loop.call_soon_threadsafe(_request_restart)
+
         def _on_check_updates() -> None:
             """Run a real update check off the console's key thread and report the outcome.
 
@@ -1313,6 +1345,8 @@ def cli():
                 # instead of scheduling work that would be refused anyway.
                 on_check_updates=_console_update_callback(early_cfg, _on_check_updates),
             )
+            # Unattended checks announce a newer version here, whatever the verbosity.
+            _console_report[0] = console.report
             # Render loop on a DEDICATED (non-daemon) thread; key listener on a DAEMON
             # thread that marshals each key onto the loop via call_soon_threadsafe.
             render_thread = threading.Thread(target=console.run, daemon=False)
@@ -1408,6 +1442,8 @@ def cli():
                 break  # Windows: relaunch message printed; exit cleanly so the shell can relaunch.
         finally:
             cache_task.cancel()  # idempotent — already cancelled on the restart path
+            _console_report[0] = None
+            _app_control["exit"] = _app_control["restart"] = None
             if console is not None:
                 console.stop()  # set _stop → render loop ends, key daemon returns
             if render_thread is not None:
