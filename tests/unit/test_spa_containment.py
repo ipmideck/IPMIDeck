@@ -98,3 +98,21 @@ def test_legitimate_files_still_resolve(path: str, spa_root: Path) -> None:
     assert resolved is not None, f"{path!r} should still be served"
     assert resolved.is_file()
     assert resolved.is_relative_to(spa_root)
+
+
+@pytest.mark.parametrize("path", ["/", "/settings", "/index.html"])
+def test_the_page_is_revalidated_after_an_upgrade(client, path: str) -> None:
+    """index.html names the hashed bundles of its own build. Served without a cache directive,
+    a browser kept the old copy after an upgrade and asked for bundles that were gone."""
+    resp = client.get(path)
+    assert resp.status_code == 200
+    assert resp.headers["cache-control"] == "no-cache"
+
+
+def test_hashed_bundles_are_not_forced_to_revalidate(client) -> None:
+    """The directive is for the page only; the bundles change name when they change."""
+    static_assets = Path(__file__).resolve().parents[2] / "backend" / "static" / "assets"
+    bundle = next(static_assets.glob("*.js"))
+    resp = client.get(f"/assets/{bundle.name}")
+    assert resp.status_code == 200
+    assert "no-cache" not in resp.headers.get("cache-control", "")

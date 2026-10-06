@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 
 from backend.core.csv_export import csv_safe, safe_filename_part
 from backend.core.i18n import get_lang, t
+from backend.core.ipmitool import ipmi_failure
 from backend.modules import get_ctx
 
 router = APIRouter()
@@ -64,7 +65,7 @@ async def get_sel_info(server_id: str, lang: str = Depends(get_lang)):
         )
         return {"server_id": server_id, "info": info}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, **ipmi_failure(e, lang)}
 
 
 @router.post("/{server_id}/refresh")
@@ -101,7 +102,7 @@ async def refresh_sel(server_id: str, lang: str = Depends(get_lang)):
 
         return {"success": True, "count": len(events)}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, **ipmi_failure(e, lang)}
 
 
 @router.post("/{server_id}/clear")
@@ -132,7 +133,7 @@ async def clear_sel(server_id: str, lang: str = Depends(get_lang)):
 
         return {"success": True}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, **ipmi_failure(e, lang)}
 
 
 @router.get("/{server_id}/export")

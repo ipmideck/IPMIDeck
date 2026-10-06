@@ -16,21 +16,26 @@
  *   (e) ENGLISH LEFTOVER    — best-effort heuristic: a non-en leaf identical to en,
  *                             multi-word (contains a space), >3 chars, ASCII letters,
  *                             not in the brand allow-list → failure (Latin scripts).
+ *   (f) EMPTY VALUE         — a leaf that is blank where en is not.
+ *
+ * The language list is read from frontend/src/i18n/languages.ts, so a language added
+ * there without a catalog folder (or a folder not registered there) fails too.
  *
  * Takes no args; resolves catalog paths relative to the repo root.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
 const LOCALES = join(ROOT, "frontend", "src", "i18n", "locales");
+const LANGUAGES_TS = join(ROOT, "frontend", "src", "i18n", "languages.ts");
 
 const LANGS = [
-  "en", "de", "fr", "es", "it", "pt", "nl", "ru", "pl", "zh-Hans", "ja", "ko",
-];
+  ...readFileSync(LANGUAGES_TS, "utf8").matchAll(/\bcode:\s*"([^"]+)"/g),
+].map((m) => m[1]);
 
 // Required CLDR plural suffixes per language. ru/pl need the full _one/_few/_many/_other
 // set; CJK use a single _other; the rest use _one/_other.
@@ -136,6 +141,18 @@ try {
   process.exit(1);
 }
 
+// The registered languages, the catalog folders and the plural table must agree.
+const folders = readdirSync(LOCALES, { withFileTypes: true })
+  .filter((d) => d.isDirectory())
+  .map((d) => d.name);
+for (const lng of LANGS) {
+  if (!folders.includes(lng)) fail(lng, "registered in languages.ts but has no catalog folder");
+  if (!(lng in REQUIRED_PLURALS)) fail(lng, "no entry in REQUIRED_PLURALS");
+}
+for (const dir of folders) {
+  if (!LANGS.includes(dir)) fail(dir, "catalog folder not registered in languages.ts");
+}
+
 const enKeys = Object.keys(enFlat);
 const enBaseKeys = new Set(enKeys.map(baseKey));
 
@@ -201,6 +218,16 @@ for (const lng of LANGS) {
         lng,
         `placeholder mismatch at ${k}: en={${[...enSet].join(",")}} catalog={${[...lngSet].join(",")}}`
       );
+    }
+  }
+
+  // (f) EMPTY VALUE — blank where en has text.
+  for (const k of enKeys) {
+    if (!(k in flat)) continue;
+    const enVal = enFlat[k];
+    const val = flat[k];
+    if (typeof enVal === "string" && enVal.trim() && typeof val === "string" && !val.trim()) {
+      fail(lng, `empty value at ${k}`);
     }
   }
 

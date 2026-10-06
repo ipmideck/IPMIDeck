@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from backend.core.i18n import get_lang, t
+from backend.core.ipmitool import ipmi_failure
 
 logger = logging.getLogger("ipmideck.servers")
 
@@ -345,7 +346,7 @@ async def test_raw_connection(body: TestCredentials, lang: str = Depends(get_lan
         status = await ipmi_service.get_power_status(body.host, body.username, body.password)
         return {"success": True, "power_status": status}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, **ipmi_failure(e, lang)}
 
 
 @router.post("/{server_id}/test")
@@ -386,4 +387,4 @@ async def test_connection(server_id: str, lang: str = Depends(get_lang)):
     except Exception as e:
         await db.execute("UPDATE servers SET is_online = 0 WHERE id = ?", (server_id,))
         await db.commit()
-        return {"success": False, "error": str(e)}
+        return {"success": False, **ipmi_failure(e, lang)}

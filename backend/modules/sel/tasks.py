@@ -6,6 +6,7 @@ import asyncio
 import logging
 
 from backend.core.crypto import decrypt
+from backend.core.ipmitool import IpmitoolMissingError
 from backend.modules import get_ctx
 
 logger = logging.getLogger("ipmideck.modules.sel")
@@ -107,8 +108,10 @@ async def _poll_one_server(server: dict) -> None:
             timeout=15.0,
         )
     except Exception as e:
-        # D-18: name the exception type/repr so the warning is never a blank reason.
-        logger.warning("sel poll failed server_id=%s: %s", sid, repr(e))
+        # D-18: name the exception type/repr so the warning is never a blank reason. A missing
+        # ipmitool was already reported once by the service.
+        if not isinstance(e, IpmitoolMissingError):
+            logger.warning("sel poll failed server_id=%s: %s", sid, repr(e))
         return
 
     last_id = await _init_cursor(sid)

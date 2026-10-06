@@ -35,7 +35,10 @@ from backend.core.config import (
 from backend.core.crypto import _set_secure_permissions
 from backend.core.logging_util import suppress_noisy_loggers
 from backend.core.database import Database
+from backend.core.ipmitool import find_ipmitool, report_missing
 from backend.core.modules import ModuleLoader
+from backend.core.update_service import UpdateService
+from backend.core.updates import CHANGELOG_URL, upgrade_command
 from backend.core.websocket import WebSocketManager
 
 logger = logging.getLogger("ipmideck")
@@ -121,6 +124,13 @@ auth: AuthManager = AuthManager(db)
 ws_manager: WebSocketManager = WebSocketManager()
 module_loader: ModuleLoader = ModuleLoader(db)
 ipmi_service = None  # Set during startup based on config.demo
+update_service = None  # UpdateService — set during startup
+# The interactive console's report(), while one is on screen: where a newer version found by the
+# unattended check is announced. Held in a list so cli() can set it before the app starts.
+_console_report: list = [None]
+# How a request can stop or restart the server, while the `ipmideck` command runs it: an update
+# installed from the web UI ends with one of them. None when something else runs the app.
+_app_control: dict = {"restart": None, "exit": None}
 
 
 def _setup_logging(level: str) -> None:
@@ -207,10 +217,21 @@ async def _seed_demo_servers(db: Database, auth: AuthManager) -> None:
     await db.commit()
 
 
+def _sync_update_network_routes(app: FastAPI, enabled: bool) -> None:
+    """Register the network-capable update routes only when the configuration permits them.
+
+    Called during startup, so the entries it adds are among those the next startup drops
+    (see _drop_startup_routes): a restart that switched the check off does not keep serving
+    the endpoint that performs it.
+    """
+    if enabled:
+        app.include_router(update_network_router, prefix="/api/updates", tags=["Updates"])
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup and shutdown."""
-    global config, db, auth, ws_manager, module_loader, ipmi_service
+    global config, db, auth, ws_manager, module_loader, ipmi_service, update_service
 
     # Load config
     config = load_config()
@@ -351,6 +372,19 @@ async def lifespan(app: FastAPI):
     lifespan_context = app.router.lifespan_context
     module_loader.mount_routes(app, dependencies=[Depends(require_auth)])
 
+    # The update service always exists, so the version history and the cached state are readable
+    # in every configuration. Only the routes that can open a socket are conditional: with the
+    # config switch off, /api/updates/check and /api/updates/consent are never registered, and
+    # nothing in this process can start a request. Registered here, alongside the module routes,
+    # because the SPA catch-all below shadows anything mounted after it.
+    update_service = UpdateService(db, config)
+    if _console_report[0] is not None:
+        report = _console_report[0]
+        update_service.announce = lambda status: _show_update_available(status, report)
+    _sync_update_network_routes(app, config.updates.enabled)
+    if not config.updates.enabled:
+        logger.info("Update checks are switched off in the configuration")
+
     # Register SPA fallback AFTER all API routes (including dynamically mounted modules).
     # The catch-all /{full_path:path} must come last or it shadows module routes.
     _mount_spa(app)
@@ -361,6 +395,9 @@ async def lifespan(app: FastAPI):
 
     # Start module background tasks
     await module_loader.start_background_tasks()
+
+    # Only starts when the switch is on AND the operator opted in; a no-op otherwise.
+    await update_service.start()
 
     # Prefer effective bind values stashed by cli() (which applies CLI precedence
     # over config). Fall back to config values when uvicorn is launched directly
@@ -412,6 +449,15 @@ async def lifespan(app: FastAPI):
             "wizard and claim this instance. Finish first-run setup now.",
             effective_host, effective_port,
         )
+    # Every server is reached through ipmitool, and a pip install cannot bring it along or even
+    # look for it, so this is the first point at which its absence can be noticed. Starting
+    # anyway keeps the web UI reachable to show the same advice; the warning is not repeated
+    # by the poll loops that will now fail.
+    if not config.demo and find_ipmitool() is None:
+        report_missing()
+    # The running version and where to read what changed, in front of anyone who reads the log —
+    # including through `docker logs`, where there is no console header. Sends nothing.
+    logger.info("Version %s — changelog: %s", VERSION, CHANGELOG_URL)
     if config.demo:
         logger.info("Demo mode active — 6 virtual servers (one per vendor) with simulated data")
 
@@ -419,6 +465,7 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down...")
+    await update_service.stop()
     await module_loader.stop_background_tasks()
     await db.close()
     logger.info("Shutdown complete")
@@ -669,12 +716,18 @@ from backend.api.server_routes import router as server_router
 from backend.api.system_routes import router as system_router
 from backend.api.dashboard_routes import router as dashboard_router
 from backend.api.module_routes import router as module_router
+from backend.api.update_routes import network_router as update_network_router
+from backend.api.update_routes import router as update_router
 
 app.include_router(auth_router, prefix="/api/auth", tags=["Auth"])
 app.include_router(server_router, prefix="/api/servers", tags=["Servers"], dependencies=[Depends(require_auth)])
 app.include_router(system_router, prefix="/api", tags=["System"])
 app.include_router(dashboard_router, prefix="/api/dashboard", tags=["Dashboard"], dependencies=[Depends(require_auth)])
 app.include_router(module_router, prefix="/api/admin/modules", tags=["Modules"], dependencies=[Depends(require_auth)])
+# Version history and cached state only — neither route can reach the network, so both are
+# available unconditionally. The routes that CAN open a socket are registered in lifespan, and
+# only when the configuration allows it.
+app.include_router(update_router, prefix="/api/updates", tags=["Updates"])
 
 
 def _resolve_spa_file(full_path: str, root: Path) -> Path | None:
@@ -727,6 +780,7 @@ def _mount_spa(app: FastAPI) -> None:
     /{full_path:path} route must be last — any route registered after it is
     unreachable because FastAPI matches routes in registration order.
     """
+
     static_dir = Path(__file__).parent / "static"
     if not static_dir.exists():
         return
@@ -738,6 +792,11 @@ def _mount_spa(app: FastAPI) -> None:
         app.mount("/assets", StaticFiles(directory=str(static_dir / "assets")), name="static-assets")
 
     spa_root = static_dir.resolve()
+    index_file = spa_root / "index.html"
+    # The page names its hashed bundles, so a browser that kept an old copy after an upgrade asks
+    # for files that no longer exist. "no-cache" still allows caching, but only after the
+    # browser has checked with the server, which the ETag makes a cheap 304.
+    index_headers = {"Cache-Control": "no-cache"}
 
     # SPA fallback: non-API routes return index.html for React Router.
     # API paths (/api/*) that don't match a registered route return 404 —
@@ -754,13 +813,66 @@ def _mount_spa(app: FastAPI) -> None:
         # Try to serve the exact file first (favicon.svg, etc.), but only when
         # it is contained under the SPA root (SEC-01 / F1).
         file_path = _resolve_spa_file(full_path, spa_root)
-        if file_path is not None:
+        if file_path is not None and file_path != index_file:
             return FileResponse(file_path)
         # Otherwise return index.html for React Router
-        return FileResponse(spa_root / "index.html")
+        return FileResponse(index_file, headers=index_headers)
 
 
 # === CLI entry point ===
+
+def _show_update_available(status, show) -> None:
+    """The newer version, where to read about it, and the command that installs it."""
+    kind = "security release" if status.is_security else "release"
+    show(
+        f"Version {status.latest_version} is available ({kind}) — {status.release_url}",
+        "bold red" if status.is_security else "bold green",
+    )
+    command = upgrade_command(status.install_method, status.latest_version)
+    if command:
+        show(f"Upgrade with: {command}", "cyan")
+
+
+def _report_update_status(status, show) -> None:
+    """Describe the outcome of a console-requested update check through ``show(line, style)``.
+
+    The console passes its report(), which writes to the body whatever the verbosity. A log record
+    would not: at WARNING verbosity, or with ``logging.level: error``, the answer would be filtered
+    out while the "Checking…" line above it stayed, and the operator would never hear back. The
+    update service keeps its own log records of what it found.
+    """
+    if status.error:
+        show(f"Update check did not complete: {status.error}", "yellow")
+    # A failed check keeps the update an earlier one found, so it is still reported.
+    if status.update_available:
+        _show_update_available(status, show)
+    elif not status.error:
+        show(f"Version {VERSION} is the latest published release", "green")
+
+
+async def _run_console_update_check(service, show) -> None:
+    """Run the check the console's update key asked for and show its outcome with ``show``."""
+    try:
+        status = await service.check_now()
+    except Exception:
+        logger.debug("The console update check raised unexpectedly", exc_info=True)
+        show("The update check could not be completed", "yellow")
+        return
+    _report_update_status(status, show)
+
+
+def _console_update_callback(early_cfg, callback):
+    """What the console's update key is wired to: ``callback``, or None when the switch is off.
+
+    Read from the same configuration the app will load, so the key and the routes agree about what
+    is permitted, and with None the key says checks are off instead of scheduling work that would
+    be refused. A configuration that could not be read here keeps the key wired: the service reads
+    the switch again before every lookup and refuses when it is off.
+    """
+    if early_cfg is None or early_cfg.updates.enabled:
+        return callback
+    return None
+
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     """Build the cli() argument parser (factored out so the subcommand routing is unit-testable).
@@ -1138,8 +1250,25 @@ def cli():
             if srv is not None:
                 srv.should_exit = True
 
+        _app_control["exit"] = lambda: loop.call_soon_threadsafe(_request_exit)
+        _app_control["restart"] = lambda: loop.call_soon_threadsafe(_request_restart)
+
+        def _on_check_updates() -> None:
+            """Run a real update check off the console's key thread and report the outcome.
+
+            The console calls this from the key thread, which must never block, so the work is
+            marshalled onto the event loop. The answer goes into the console body through its
+            report(), like the "Checking…" line the key printed, because a log record would be
+            hidden whenever the verbosity in force is above its level.
+            """
+            # Only the console's key calls this, so the console that asked is there to answer.
+            show = console.report
+            loop.call_soon_threadsafe(
+                lambda: asyncio.ensure_future(_run_console_update_check(update_service, show))
+            )
+
         def _on_set_verbosity(level: str) -> None:
-            # D-11/D-25: apply at runtime (basicConfig is a no-op once handlers exist) AND
+            # Apply at runtime (basicConfig is a no-op once handlers exist) AND
             # persist to config.yaml's logging.level. IPMIDECK_LOGGING_LEVEL still wins next
             # boot (env > yaml — see config._apply_env_overrides), documented above.
             from backend.core.logging_util import apply_log_level
@@ -1212,7 +1341,12 @@ def cli():
                 # being edited. A change-bind+restart starts a new session that recomputes
                 # effective_host/port, so this naturally reflects the current bind each run.
                 get_bind=lambda: (effective_host, effective_port),
+                # None when the configuration forbids the lookup, so the key reports that
+                # instead of scheduling work that would be refused anyway.
+                on_check_updates=_console_update_callback(early_cfg, _on_check_updates),
             )
+            # Unattended checks announce a newer version here, whatever the verbosity.
+            _console_report[0] = console.report
             # Render loop on a DEDICATED (non-daemon) thread; key listener on a DAEMON
             # thread that marshals each key onto the loop via call_soon_threadsafe.
             render_thread = threading.Thread(target=console.run, daemon=False)
@@ -1308,6 +1442,8 @@ def cli():
                 break  # Windows: relaunch message printed; exit cleanly so the shell can relaunch.
         finally:
             cache_task.cancel()  # idempotent — already cancelled on the restart path
+            _console_report[0] = None
+            _app_control["exit"] = _app_control["restart"] = None
             if console is not None:
                 console.stop()  # set _stop → render loop ends, key daemon returns
             if render_thread is not None:

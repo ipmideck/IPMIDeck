@@ -19,6 +19,8 @@ import asyncio
 import logging
 import time
 
+from backend.core.ipmitool import IpmitoolMissingError
+
 logger = logging.getLogger("ipmideck.modules.power")
 
 _running = True
@@ -69,8 +71,10 @@ async def _poll_one_server(server: dict, key) -> None:
         logger.warning("Power-status poll timeout for server %s", server_id)
         # Non-blocking cooldown — skip this server on subsequent cycles until it expires.
         _next_retry[server_id] = time.monotonic() + _COOLDOWN_SECONDS
-    except Exception:
-        logger.exception("Error polling power status for server %s", server_id)
+    except Exception as e:
+        # A missing ipmitool was already reported once by the service.
+        if not isinstance(e, IpmitoolMissingError):
+            logger.exception("Error polling power status for server %s", server_id)
         # Non-blocking cooldown — skip this server on subsequent cycles until it expires.
         _next_retry[server_id] = time.monotonic() + _COOLDOWN_SECONDS
 

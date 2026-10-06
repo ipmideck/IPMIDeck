@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
+import logging
 import shutil
 import zipfile
 from datetime import datetime, timezone
@@ -19,6 +21,7 @@ from backend.core.crypto import _set_secure_permissions
 from backend.core.csv_export import csv_safe, safe_filename_part
 
 router = APIRouter()
+logger = logging.getLogger("ipmideck.system")
 
 
 # 04-W1-01 (Plan 04-01, Task 2): generic app_config K/V endpoints.
@@ -56,12 +59,21 @@ _ALLOWED_APP_CONFIG_KEYS = {
     "data.retention_days",
 }
 
+# Readable here but NOT writable. Whether IPMIDeck may check for a newer version on its own is an
+# ordinary app_config row, so it can be read by name like the others; the interface itself takes
+# the answer from GET /api/updates/state. A write here would store the answer without starting or
+# stopping the check, so "off" would not hold until a restart. The write goes through
+# PUT /api/updates/consent, which does both.
+_READ_ONLY_APP_CONFIG_KEYS = {
+    "updates.check_enabled",
+}
+
 
 @router.get("/system/app-config/{key}", dependencies=[Depends(require_auth)])
 async def get_app_config_value(key: str):
     """Read a single app_config value. Returns {success, key, value}.
 
-    SEC-07 (F11): the key must be in the SAME allow-list the PUT path enforces.
+    The key must be allow-listed: the PUT path's list plus the read-only keys above.
     Without it the endpoint served any app_config row by name — `session_secret`
     included — to any caller holding a session (real, stolen, or forged).
 
@@ -69,7 +81,7 @@ async def get_app_config_value(key: str):
     coerced back to JSON booleans in the response so the frontend can use
     them directly. Missing rows return value=None (not an error).
     """
-    if key not in _ALLOWED_APP_CONFIG_KEYS:
+    if key not in _ALLOWED_APP_CONFIG_KEYS and key not in _READ_ONLY_APP_CONFIG_KEYS:
         return {"success": False, "error": "key_not_allowed"}
     from backend.main import db
     raw = await db.get_config(key, default=None)
@@ -498,6 +510,7 @@ async def health():
 @router.get("/config", dependencies=[Depends(require_auth)])
 async def get_config():
     from backend.core.branding import VERSION
+    from backend.core.ipmitool import status as ipmitool_status
     from backend.main import config
     return {
         "server": {"host": config.server.host, "port": config.server.port},
@@ -505,7 +518,31 @@ async def get_config():
         "data": {"retention_days": config.data.retention_days},
         "demo": config.demo,
         "version": VERSION,
+        # Working out the install notice may start sudo, so it runs off the event loop and fan
+        # control and the live telemetry keep running.
+        "ipmitool": await asyncio.to_thread(
+            ipmitool_status, config.demo, config.ipmi.auto_install_ipmitool
+        ),
     }
+
+
+@router.post("/system/ipmitool/install")
+async def install_ipmitool(user: str = Depends(require_auth)):
+    """Install ipmitool with the host's package manager, when the configuration allows it.
+
+    Refused with authentication switched off: this runs a package manager as root, and without a
+    login anyone who can reach the port would be the one asking. Takes no input at all; what runs
+    is decided by the host alone.
+    """
+    from backend.core import ipmitool
+    from backend.main import auth, config
+
+    if config.demo:
+        return {"success": False, "error_code": "ipmitool_install_demo"}
+    if not await auth.is_auth_enabled():
+        return {"success": False, "error_code": "ipmitool_install_needs_login"}
+    logger.warning("ipmitool install requested from the web UI by %s", user)
+    return await ipmitool.install(config.ipmi.auto_install_ipmitool)
 
 
 @router.get("/logs", dependencies=[Depends(require_auth)])

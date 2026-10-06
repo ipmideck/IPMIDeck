@@ -9,6 +9,13 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+from backend.core.ipmitool import (
+    IpmitoolMissingError,
+    report_missing,
+    report_present,
+)
+from backend.core.ipmitool import program as ipmitool_program
+
 logger = logging.getLogger("ipmideck.ipmi")
 
 # === Bounds on what a BMC can hand back ===
@@ -375,7 +382,7 @@ class LocalIPMIService(IPMIService):
         # Mitigation policy for the residual: do NOT log IPMITOOL_PASSWORD, do NOT export it
         # process-wide (the os.environ.copy() above keeps it scoped to this child). The longer
         # rationale lives in the 05-RESEARCH Rider-S section (local-only / gitignored doc).
-        cmd = ["ipmitool", "-I", "lanplus", "-H", host, "-U", user, "-E", *args]
+        cmd = [ipmitool_program(), "-I", "lanplus", "-H", host, "-U", user, "-E", *args]
         # Empty-password gotcha (05-RESEARCH Pitfall 3): ipmitool accepts IPMITOOL_PASSWORD=""
         # and silently authenticates with an empty password. If decryption ever yields a falsy
         # value, refuse here — BEFORE spawning — rather than auth with "".
@@ -385,12 +392,21 @@ class LocalIPMIService(IPMIService):
         child_env["IPMITOOL_PASSWORD"] = password  # inject ONLY for this child
         logger.debug("Executing: ipmitool -I lanplus -H %s -U %s ... %s", host, user, " ".join(args))
         async with self._get_host_lock(host):
-            proc = await asyncio.create_subprocess_exec(  # pragma: no cover
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=child_env,
-            )
+            try:
+                proc = await asyncio.create_subprocess_exec(  # pragma: no cover
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=child_env,
+                )
+            except FileNotFoundError:
+                # The OS error names neither the program nor the fix ("[WinError 2] The
+                # system cannot find the file specified"), and it would reach the UI and the
+                # log as-is. Say what is missing, once, and raise something callers can tell
+                # apart from a BMC that did not answer.
+                report_missing()
+                raise IpmitoolMissingError() from None
+            report_present()
             try:
                 stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=self.timeout)
             except asyncio.TimeoutError:

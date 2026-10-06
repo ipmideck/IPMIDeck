@@ -40,7 +40,7 @@ UPDATE POLICY:
 from __future__ import annotations
 
 # The pinned route SURFACE contract (verified live, post-lifespan, at Phase-6 tip b207817).
-# 58 HTTP (path, method) entries + the ("/ws", "") WebSocketRoute entry = 59 tuples.
+# 65 HTTP (path, method) entries + the ("/ws", "") WebSocketRoute entry = 66 tuples.
 # Methods are the explicitly-declared verbs (auto-added HEAD/OPTIONS excluded). Some paths
 # repeat with different methods (e.g. /api/servers GET+POST) — that is correct.
 EXPECTED = {
@@ -98,10 +98,22 @@ EXPECTED = {
     ("/api/system/gen-cert", "POST"),
     ("/api/system/history-csv", "GET"),
     ("/api/system/https", "PUT"),
+    # Installs ipmitool when it is missing: auth required, refused with the login off or in demo.
+    ("/api/system/ipmitool/install", "POST"),
     ("/api/system/restore", "POST"),
     ("/api/system/retention-cleanup-now", "POST"),
     ("/api/system/retention-days", "GET"),
     ("/api/system/retention-days", "PUT"),
+    # The version history and the cached state are always present. The check, the consent and the
+    # install pair (which starts and follows an update asked for in the web UI) are registered
+    # during startup and only when the configuration permits it — the fixture boots with that
+    # permission on, which is the default, so all of them appear here.
+    ("/api/updates/changelog", "GET"),
+    ("/api/updates/check", "POST"),
+    ("/api/updates/consent", "PUT"),
+    ("/api/updates/install", "GET"),
+    ("/api/updates/install", "POST"),
+    ("/api/updates/state", "GET"),
     ("/ws", ""),  # WebSocketRoute: no .methods
 }
 
@@ -148,7 +160,7 @@ def test_route_surface_is_invariant(client):
 
 
 def test_route_surface_counts(client):
-    """Exactly 58 HTTP (path, method) entries + exactly 1 /ws entry.
+    """Exactly 65 HTTP (path, method) entries + exactly 1 /ws entry.
 
     A count regression is named even before the full set diff, so an added/removed route
     is caught at the coarsest granularity first.
@@ -156,7 +168,7 @@ def test_route_surface_counts(client):
     live = _live_surface(client.app)
     ws_entries = {entry for entry in live if entry == ("/ws", "")}
     http_entries = live - ws_entries
-    assert len(http_entries) == 58, (
-        f"expected 58 HTTP (path, method) entries, found {len(http_entries)}"
+    assert len(http_entries) == 65, (
+        f"expected 65 HTTP (path, method) entries, found {len(http_entries)}"
     )
     assert len(ws_entries) == 1, f"expected exactly 1 /ws entry, found {len(ws_entries)}"

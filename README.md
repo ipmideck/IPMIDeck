@@ -114,7 +114,35 @@ pip install ipmideck
 ipmideck start
 ```
 
-Requires `ipmitool` installed on the system.
+Requires `ipmitool` on the machine running IPMIDeck. `pip` installs Python packages only: it
+cannot install a system program, nor run a check while installing, so IPMIDeck looks for
+`ipmitool` when it starts. If it is missing, the app still starts, logs the install command for
+your system, and the web UI shows a notice with an **Install** button.
+
+| System | Install `ipmitool` |
+|---|---|
+| Debian, Ubuntu and derivatives | `sudo apt install ipmitool` |
+| Fedora, RHEL, Rocky, Alma | `sudo dnf install ipmitool` |
+| Arch and derivatives | `sudo pacman -S ipmitool` |
+| openSUSE | `sudo zypper install ipmitool` |
+| Alpine | `sudo apk add ipmitool` |
+| macOS (Homebrew) | `brew install ipmitool` |
+| FreeBSD | `sudo pkg install ipmitool` |
+| Windows | Install Dell iDRAC Tools or the Dell OpenManage BMC Utility, which include `ipmitool.exe`. IPMIDeck finds it in the Dell folder by itself; a copy anywhere else must be on `PATH` |
+
+The Docker image already includes `ipmitool`.
+
+**Installing from the web UI.** The **Install** button shows the command for your system. It can
+also run it for you, if you allow it and IPMIDeck has the rights to:
+
+```yaml
+ipmi:
+  auto_install_ipmitool: true   # or IPMIDECK_IPMI_AUTO_INSTALL_IPMITOOL=true
+```
+
+With this on, IPMIDeck installs `ipmitool` itself only when it runs as root, or as a user with
+`sudo` that needs no password; on macOS, as the user who owns Homebrew. It never asks for a
+password, and the button needs the login to be on. Otherwise it shows the command to run.
 
 ---
 
@@ -149,6 +177,7 @@ IPMIDECK_SERVER_HTTPS=true
 IPMIDECK_IPMI_POLL_INTERVAL=30
 IPMIDECK_LOGGING_LEVEL=info
 IPMIDECK_DATA_RETENTION_DAYS=180
+IPMIDECK_UPDATES_ENABLED=false
 ```
 
 In the Docker image the app always listens on port 3000 inside the container: the image starts
@@ -165,6 +194,72 @@ editable at runtime from the in-app **Settings** page.
 Note that whether authentication is enabled is **not** a config-file setting. It is stored in
 the database and changed from the Security settings, so write access to `config.yaml` cannot be
 used to turn the login off.
+
+### Update checks
+
+IPMIDeck can tell you when a newer version has been published. The check is **on by default**:
+first-run setup asks the question once, with the box already ticked, and you confirm or untick
+it. An existing installation that upgrades does not go through setup again, so it checks unless
+you turn it off under **Settings → About → Updates**, which is also where you can change your
+mind at any time. Once you untick the box, it contacts nothing on its own.
+
+- **What it does.** While the check is on, IPMIDeck looks up the newest published version at
+  start-up and once every 24 hours. If a check fails (no route out, rate limited, an endpoint
+  error) it is retried after 15 minutes, then after a wait that doubles each time up to 6 hours,
+  until one succeeds. If a check finds a newer version whose release notes cannot be read yet,
+  the whole check (both requests described below) is repeated every hour, at most 6 times, and
+  then goes back to once a day. An install running a stable release is never offered a
+  pre-release.
+- **On demand.** The **Check now** button and the console `[g]` key check when you press them,
+  whatever was answered during setup. Both are refused when `updates.enabled` is off.
+- **What it sends.** One `GET`, to the index matching how you installed (the Python package
+  index, the container registry, or the published releases). The request carries the product
+  name and the version you are running, and nothing else — no identifier, no hostname, nothing
+  about your servers. Like any request, it shows the endpoint your public IP address. When a
+  package-index or container-registry lookup finds a newer version, one more `GET` asks the
+  published releases whether it is a security release: a release is marked as one when its
+  release notes have a `### Security` section. If those notes cannot be read yet, the whole check
+  is repeated as described above. Every request is logged verbatim before the socket opens, so you
+  can audit it in your own logs.
+- **What it never does.** The check itself does not download or install anything, and it shows
+  nothing at all while you are on the latest version. Installing is a separate step you start
+  yourself, described below.
+- **Turning it off completely.** Set `updates.enabled: false` in `config.yaml` (or
+  `IPMIDECK_UPDATES_ENABLED=false`). With that set, the endpoints that could open a socket are
+  never registered and the periodic check never starts — whatever was answered during setup.
+  A value that reads as neither on nor off counts as off, with a warning in the log. The version
+  history keeps working: it is read from a file inside the package, not fetched.
+
+### Installing an update
+
+When a check finds a newer version, the web UI says so once with a notice, and an **Upgrade**
+button stays next to the version in the sidebar until you install it. Both open the new version's
+release notes with a **Download and install** button. Before installing, IPMIDeck backs up the
+database, the encryption key and `config.yaml` into a new folder under `backups/` in the data
+folder; only the three most recent are kept, and the dialog shows where the copy went. They hold
+the BMC credentials, so keep them private. What the button does depends on how IPMIDeck was
+installed:
+
+| Installed with | What happens |
+|----------------|--------------|
+| pip in a virtual environment, pipx, uv | Installed by IPMIDeck, which then restarts by itself. On Windows it stops, installs, and you start it again (progress in `update.log` in the data folder) |
+| Docker | Shows `docker compose pull && docker compose up -d`. With Watchtower set up (below), the button asks Watchtower to replace the container |
+| git checkout, editable install, system Python | Explains why and shows the command to run yourself; a Python managed by the system is updated the way it was installed |
+
+The button needs the login to be on, does nothing in demo mode, and restarts only when IPMIDeck
+was started with the `ipmideck` command. The page reloads by itself when the new version answers.
+
+**Watchtower (Docker).** A container cannot replace its own image, and giving it the Docker socket
+would give it control of the host. Instead, run
+[Watchtower](https://github.com/nicholas-fedor/watchtower) next to IPMIDeck with its HTTP API on
+(`WATCHTOWER_HTTP_API_UPDATE=true` and a `WATCHTOWER_HTTP_API_TOKEN`), and add its address and
+token under the `updates:` section `config.yaml` already has:
+
+```yaml
+updates:
+  watchtower_url: http://watchtower:8080   # or IPMIDECK_UPDATES_WATCHTOWER_URL
+  watchtower_token: your-token             # or IPMIDECK_UPDATES_WATCHTOWER_TOKEN
+```
 
 ---
 
@@ -302,7 +397,13 @@ ipmideck/
   migration was interrupted: until it completes, the in-database key is still usable
 - BMC passwords are never placed on the command line — `ipmitool` reads them from the environment
   (`-E` / `IPMITOOL_PASSWORD`), so they never appear in `ps`
-- No external network dependencies — fully offline capable
+- No telemetry, no analytics, no accounts, no licence checks. The only connection IPMIDeck makes
+  on its own initiative is IPMI to the BMCs you configure. The single exception is the optional
+  update check, which is presented during setup and can be switched off outright
+  (`updates.enabled: false`) — see [Update checks](#update-checks). There is no HTTP client in
+  the runtime dependencies: check `pyproject.toml`, or run `tcpdump`
+- Fully offline capable — an air-gapped install works, including the in-app version history,
+  which is read from a file shipped inside the package rather than fetched
 - ipmitool arguments are passed as a list, never through a shell (no shell-injection surface)
 - Optional HTTPS/TLS for the dashboard, with one-click self-signed certificate generation
 - Credential checks are capped at 5 per minute per source address
