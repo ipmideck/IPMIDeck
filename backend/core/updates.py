@@ -8,9 +8,10 @@ Three properties this module has to keep, in priority order:
 2. **No HTTP client outside the standard library.** Every outbound request here goes through
    ``urllib.request``. The runtime dependency list is a public, checkable claim: adding a
    requests/httpx-class package would falsify it.
-3. **Nothing leaves the machine unless the operator asked for it.** This module never starts a
-   request on its own — every fetch is called from a code path that has already established
-   either an explicit operator action or a stored consent.
+3. **Nothing leaves the machine that the operator cannot see or switch off.** This module never
+   starts a request on its own: every fetch comes from an explicit operator action or from the
+   unattended check, which is on unless the operator turned it off, and ``updates.enabled:
+   false`` removes every path that could open a socket.
 
 Importing this module performs no I/O.
 """
