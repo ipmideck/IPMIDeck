@@ -7,6 +7,8 @@ from pathlib import Path
 
 import aiosqlite
 
+from backend.core.crypto import _set_secure_permissions
+
 logger = logging.getLogger("ipmideck.database")
 
 # Core tables (not module-specific)
@@ -75,9 +77,29 @@ class Database:
         self.db_path = db_path
         self._db: aiosqlite.Connection | None = None
 
+    def _restrict_permissions(self) -> None:
+        """Make the database readable only by its owner, sidecars included.
+
+        The database holds the BMC credentials, so a world-readable file hands them to
+        every local account on the host. This runs on every connect rather than only at
+        creation, so a database created by an earlier version repairs itself on the next
+        start with no migration step.
+
+        The write-ahead log and shared-memory sidecars are created by SQLite with the
+        main file's mode, so fixing the mode BEFORE the first write is enough for them.
+        Sidecars left behind by an abrupt shutdown are a different matter: SQLite reuses
+        those as they are, so an existing pair has to be fixed explicitly. They are
+        guarded by exists() because chmod on a missing path raises.
+        """
+        db_file = Path(self.db_path)
+        for path in (db_file, Path(f"{self.db_path}-wal"), Path(f"{self.db_path}-shm")):
+            if path.exists():
+                _set_secure_permissions(path)
+
     async def connect(self) -> None:
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self._db = await aiosqlite.connect(self.db_path)
+        self._restrict_permissions()
         self._db.row_factory = aiosqlite.Row
         await self._db.execute("PRAGMA journal_mode=WAL")
         await self._db.execute("PRAGMA foreign_keys=ON")

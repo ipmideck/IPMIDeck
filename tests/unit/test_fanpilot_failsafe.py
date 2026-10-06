@@ -351,6 +351,7 @@ def _reset_loop_state() -> None:
     for name in (
         "_last_online_state", "_controllers", "_garbage_counts", "_source_last_seen",
         "_pending_readback", "_last_commanded_speed", "_last_state", "_monitoring_only_alerted",
+        "_curve_problem_alerted",
     ):
         m = getattr(fp_tasks, name, None)
         if isinstance(m, dict):

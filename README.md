@@ -97,6 +97,13 @@ docker compose -f docker-compose.dev.yml up --build   # build from source
 
 Open `http://<your-ip>:3000` and follow the setup wizard.
 
+> The container runs as an unprivileged user (uid/gid 1000), not root. A named volume or an
+> existing data directory created by an earlier version is adopted automatically on first
+> start — no manual `chown`. The only case needing a one-time host-side
+> `chown -R 1000:1000 <dir>` is a bind mount on a filesystem that refuses to change ownership
+> (a read-only mount, NFS without `no_root_squash`, or CIFS with a fixed uid/gid). The
+> container still starts in that case and logs a warning rather than failing.
+
 > `--network host` (Linux) lets the container reach BMCs on your local network via UDP 623.
 > On Windows/macOS use `-p 3000:3000`.
 
@@ -107,7 +114,35 @@ pip install ipmideck
 ipmideck start
 ```
 
-Requires `ipmitool` installed on the system.
+Requires `ipmitool` on the machine running IPMIDeck. `pip` installs Python packages only: it
+cannot install a system program, nor run a check while installing, so IPMIDeck looks for
+`ipmitool` when it starts. If it is missing, the app still starts, logs the install command for
+your system, and the web UI shows a notice with an **Install** button.
+
+| System | Install `ipmitool` |
+|---|---|
+| Debian, Ubuntu and derivatives | `sudo apt install ipmitool` |
+| Fedora, RHEL, Rocky, Alma | `sudo dnf install ipmitool` |
+| Arch and derivatives | `sudo pacman -S ipmitool` |
+| openSUSE | `sudo zypper install ipmitool` |
+| Alpine | `sudo apk add ipmitool` |
+| macOS (Homebrew) | `brew install ipmitool` |
+| FreeBSD | `sudo pkg install ipmitool` |
+| Windows | Install Dell iDRAC Tools or the Dell OpenManage BMC Utility, which include `ipmitool.exe`. IPMIDeck finds it in the Dell folder by itself; a copy anywhere else must be on `PATH` |
+
+The Docker image already includes `ipmitool`.
+
+**Installing from the web UI.** The **Install** button shows the command for your system. It can
+also run it for you, if you allow it and IPMIDeck has the rights to:
+
+```yaml
+ipmi:
+  auto_install_ipmitool: true   # or IPMIDECK_IPMI_AUTO_INSTALL_IPMITOOL=true
+```
+
+With this on, IPMIDeck installs `ipmitool` itself only when it runs as root, or as a user with
+`sudo` that needs no password; on macOS, as the user who owns Homebrew. It never asks for a
+password, and the button needs the login to be on. Otherwise it shows the command to run.
 
 ---
 
@@ -138,13 +173,93 @@ A documented subset of settings can be overridden with `IPMIDECK_`-prefixed envi
 
 ```bash
 IPMIDECK_SERVER_PORT=8080
+IPMIDECK_SERVER_HTTPS=true
 IPMIDECK_IPMI_POLL_INTERVAL=30
 IPMIDECK_LOGGING_LEVEL=info
 IPMIDECK_DATA_RETENTION_DAYS=180
+IPMIDECK_UPDATES_ENABLED=false
 ```
 
-Every key is written to that `config.yaml` on first run — read it for the full list. The same
-settings are also editable at runtime from the in-app **Settings** page.
+In the Docker image the app always listens on port 3000 inside the container: the image starts
+it with `--port 3000`, which takes precedence over `IPMIDECK_SERVER_PORT` and `config.yaml`.
+Change the published port with the port mapping (`-p 8080:3000`) instead. Under
+`--network host` a port mapping has no effect, so override the command instead, for example
+`ipmideck --host 0.0.0.0 --port 8080 start`; the container's health check follows the port
+given there.
+
+The `config.yaml` written on first run covers the common settings, not every key — read it for
+what it contains, and add the rest by hand if you need them. The same settings are also
+editable at runtime from the in-app **Settings** page.
+
+Note that whether authentication is enabled is **not** a config-file setting. It is stored in
+the database and changed from the Security settings, so write access to `config.yaml` cannot be
+used to turn the login off.
+
+### Update checks
+
+IPMIDeck can tell you when a newer version has been published. The check is **on by default**:
+first-run setup asks the question once, with the box already ticked, and you confirm or untick
+it. An existing installation that upgrades does not go through setup again, so it checks unless
+you turn it off under **Settings → About → Updates**, which is also where you can change your
+mind at any time. Once you untick the box, it contacts nothing on its own.
+
+- **What it does.** While the check is on, IPMIDeck looks up the newest published version at
+  start-up and once every 24 hours. If a check fails (no route out, rate limited, an endpoint
+  error) it is retried after 15 minutes, then after a wait that doubles each time up to 6 hours,
+  until one succeeds. If a check finds a newer version whose release notes cannot be read yet,
+  the whole check (both requests described below) is repeated every hour, at most 6 times, and
+  then goes back to once a day. An install running a stable release is never offered a
+  pre-release.
+- **On demand.** The **Check now** button and the console `[g]` key check when you press them,
+  whatever was answered during setup. Both are refused when `updates.enabled` is off.
+- **What it sends.** One `GET`, to the index matching how you installed (the Python package
+  index, the container registry, or the published releases). The request carries the product
+  name and the version you are running, and nothing else — no identifier, no hostname, nothing
+  about your servers. Like any request, it shows the endpoint your public IP address. When a
+  package-index or container-registry lookup finds a newer version, one more `GET` asks the
+  published releases whether it is a security release: a release is marked as one when its
+  release notes have a `### Security` section. If those notes cannot be read yet, the whole check
+  is repeated as described above. Every request is logged verbatim before the socket opens, so you
+  can audit it in your own logs.
+- **What it never does.** The check itself does not download or install anything, and it shows
+  nothing at all while you are on the latest version. Installing is a separate step you start
+  yourself, described below.
+- **Turning it off completely.** Set `updates.enabled: false` in `config.yaml` (or
+  `IPMIDECK_UPDATES_ENABLED=false`). With that set, the endpoints that could open a socket are
+  never registered and the periodic check never starts — whatever was answered during setup.
+  A value that reads as neither on nor off counts as off, with a warning in the log. The version
+  history keeps working: it is read from a file inside the package, not fetched.
+
+### Installing an update
+
+When a check finds a newer version, the web UI says so once with a notice, and an **Upgrade**
+button stays next to the version in the sidebar until you install it. Both open the new version's
+release notes with a **Download and install** button. Before installing, IPMIDeck backs up the
+database, the encryption key and `config.yaml` into a new folder under `backups/` in the data
+folder; only the three most recent are kept, and the dialog shows where the copy went. They hold
+the BMC credentials, so keep them private. What the button does depends on how IPMIDeck was
+installed:
+
+| Installed with | What happens |
+|----------------|--------------|
+| pip in a virtual environment, pipx, uv | Installed by IPMIDeck, which then restarts by itself. On Windows it stops, installs, and you start it again (progress in `update.log` in the data folder) |
+| Docker | Shows `docker compose pull && docker compose up -d`. With Watchtower set up (below), the button asks Watchtower to replace the container |
+| git checkout, editable install, system Python | Explains why and shows the command to run yourself; a Python managed by the system is updated the way it was installed |
+
+The button needs the login to be on, does nothing in demo mode, and restarts only when IPMIDeck
+was started with the `ipmideck` command. The page reloads by itself when the new version answers.
+
+**Watchtower (Docker).** A container cannot replace its own image, and giving it the Docker socket
+would give it control of the host. Instead, run
+[Watchtower](https://github.com/nicholas-fedor/watchtower) next to IPMIDeck with its HTTP API on
+(`WATCHTOWER_HTTP_API_UPDATE=true` and a `WATCHTOWER_HTTP_API_TOKEN`), and add its address and
+token under the `updates:` section `config.yaml` already has:
+
+```yaml
+updates:
+  watchtower_url: http://watchtower:8080   # or IPMIDECK_UPDATES_WATCHTOWER_URL
+  watchtower_token: your-token             # or IPMIDECK_UPDATES_WATCHTOWER_TOKEN
+```
 
 ---
 
@@ -267,21 +382,128 @@ ipmideck/
 ## Security
 
 - Local authentication with bcrypt password hashing
-- Opaque session tokens, HMAC-SHA256 signed with a per-install secret, with configurable
+- Session tokens signed with HMAC-SHA256 using a per-install secret, with configurable
   expiry (`IPMIDECK_AUTH_SESSION_EXPIRY` / the `auth.session_expiry` config key — e.g. `24h`,
-  `90m`, `1h`; default `24h`)
-- BMC credentials encrypted at rest with AES-256-CBC. The 32-byte key is randomly generated and
-  stored in `<data_dir>/encryption.key` — deliberately **outside** the database, so a stolen DB
-  alone decrypts nothing (back the key file up separately)
+  `90m`, `1h`; default `24h`; values above `30d` are capped at 30 days, with a warning in the
+  log). The signature is what makes a token trustworthy: the payload
+  itself is base64url-encoded JSON, so treat the cookie as readable by whoever holds it
+- BMC credentials encrypted at rest with AES-256-GCM, which detects tampering as well as
+  concealing the value. The 32-byte key is randomly generated and stored in
+  `<data_dir>/encryption.key` — deliberately **outside** the database, so in normal operation
+  a stolen DB alone decrypts nothing (back the key file up separately). Credentials written by
+  earlier versions (AES-256-CBC, unauthenticated) are converted automatically on the first
+  start after upgrading; see the changelog for the copies it leaves behind. The one exception
+  is an installation upgraded from a version that kept the key in the database and whose
+  migration was interrupted: until it completes, the in-database key is still usable
 - BMC passwords are never placed on the command line — `ipmitool` reads them from the environment
   (`-E` / `IPMITOOL_PASSWORD`), so they never appear in `ps`
-- No external network dependencies — fully offline capable
+- No telemetry, no analytics, no accounts, no licence checks. The only connection IPMIDeck makes
+  on its own initiative is IPMI to the BMCs you configure. The single exception is the optional
+  update check, which is presented during setup and can be switched off outright
+  (`updates.enabled: false`) — see [Update checks](#update-checks). There is no HTTP client in
+  the runtime dependencies: check `pyproject.toml`, or run `tcpdump`
+- Fully offline capable — an air-gapped install works, including the in-app version history,
+  which is read from a file shipped inside the package rather than fetched
 - ipmitool arguments are passed as a list, never through a shell (no shell-injection surface)
 - Optional HTTPS/TLS for the dashboard, with one-click self-signed certificate generation
+- Credential checks are capped at 5 per minute per source address
+  (`IPMIDECK_ATTEMPT_LIMIT`, `IPMIDECK_ATTEMPT_WINDOW` in seconds). A slot is consumed whether
+  or not the password turns out to be right, and the cap deliberately does not touch the
+  per-account failure counter, so traffic from one address cannot lock the operator out.
+  Behind a reverse proxy, list it in `forwarded_allow_ips` (see
+  [Behind a reverse proxy](#behind-a-reverse-proxy)): otherwise every client shares the proxy's
+  address and one party's failed attempts hold everyone off until the window ends
+- State-changing requests (`POST`/`PUT`/`PATCH`/`DELETE`) are refused when the browser reports
+  an origin other than the one the dashboard is served from, including a different port on the
+  same host. Requests with no `Origin` and no `Referer` — the CLI, the container health check,
+  scripted integrations — are unaffected
+- Defensive response headers on everything served: `frame-ancestors 'none'` (plus
+  `X-Frame-Options: DENY`) to keep the dashboard out of a hostile iframe, `nosniff`,
+  `Referrer-Policy: no-referrer`, and HSTS when the request itself arrived over TLS
+
+### Behind a reverse proxy
+
+Two settings exist for proxied deployments, both under `server:` in `config.yaml`:
+
+| Setting | When you need it |
+|---------|------------------|
+| `forwarded_allow_ips` | Your TLS proxy is not on `127.0.0.1`. Without it the forwarded scheme is discarded and the session cookie loses its `Secure` flag. |
+| `trusted_origins` | Your proxy does not pass the browser's `Host` through. |
+
+`trusted_origins` is the one that bites. nginx does **not** forward the original `Host` unless
+you add `proxy_set_header Host $host;`, so the guard above compares the browser's
+`https://ipmi.example.com` against the `localhost:3000` it was handed, and every save fails with
+`Cross-origin request rejected`. Either fix the proxy header or name the real address:
+
+```yaml
+server:
+  trusted_origins:
+    - https://ipmi.example.com
+```
+
+An entry with a scheme requires that scheme to match, so listing an `https` origin does not
+also trust its cleartext twin. Origins that are neither this server's own nor on the list are
+still rejected. Both settings also take an environment variable
+(`IPMIDECK_SERVER_FORWARDED_ALLOW_IPS`, `IPMIDECK_SERVER_TRUSTED_ORIGINS` — the latter
+comma-separated).
+
 
 ![IPMIDeck Settings — optional HTTPS/TLS with one-click self-signed certificate generation](docs/screenshots/settings-https.png)
 
 ![IPMIDeck Settings — local authentication enabled, with a confirm-with-password flow to disable it](docs/screenshots/settings-password.png)
+
+### HTTPS
+
+Over plain HTTP the session cookie and every BMC password typed into the dashboard cross the
+network in the clear. On a trusted LAN that may be an acceptable trade, and it stays the
+default so nothing changes under you — but it is worth turning off.
+
+Set `https: true` in `config.yaml` (or `IPMIDECK_SERVER_HTTPS=true`, or the Network card in
+Settings) and restart. If no certificate is configured, one is generated for you at
+`<data_dir>/certs/server.crt` and used automatically. It covers `localhost`, this machine's
+hostname and its addresses, so it works whether you reach the dashboard by name or by IP.
+
+This works in Docker too — the image starts through the `ipmideck` command, which is what
+resolves the certificate. A certificate can only be given to the web server as it starts, so a
+container whose `command:` is overridden to run `uvicorn` directly serves cleartext however the
+configuration reads. The startup log always states the scheme it actually came up on, and says
+so explicitly when `https` is on but no certificate reached the server.
+
+**Your browser will show a security warning the first time.** Nobody signed the certificate —
+there is no certificate authority involved — so the browser cannot vouch for *who* you are
+talking to. The traffic is encrypted either way; only the identity is unverified. On a LAN
+you can click through ("Advanced" → "Proceed"), or remove the warning for good by importing
+the certificate:
+
+| Platform | How |
+|---|---|
+| Windows | `certutil -addstore -f Root <data_dir>\certs\server.crt` (as administrator) |
+| macOS | Open `server.crt` in Keychain Access → System → set it to **Always Trust** |
+| Linux | Copy to `/usr/local/share/ca-certificates/` and run `sudo update-ca-certificates` |
+| Firefox | Keeps its own store: Settings → Privacy & Security → Certificates → Import |
+
+**To use your own certificate instead** — from your internal CA, or Let's Encrypt — point
+`cert_file` and `key_file` at the PEM pair. Files you supply are never overwritten.
+
+```yaml
+server:
+  https: true
+  cert_file: /etc/ssl/ipmideck/fullchain.pem
+  key_file: /etc/ssl/ipmideck/privkey.pem
+```
+
+**Or terminate TLS at a reverse proxy** (Caddy, nginx, Traefik) and leave IPMIDeck on HTTP
+bound to `127.0.0.1`. If you do, make sure the proxy forwards the original scheme, otherwise
+the session cookie is not marked secure. A proxy that is not on `127.0.0.1` must also be listed
+in `forwarded_allow_ips`, and one that rewrites the `Host` header needs its public origin in
+`trusted_origins` — see [Behind a reverse proxy](#behind-a-reverse-proxy).
+
+To regenerate, delete `<data_dir>/certs/` and restart, or run `ipmideck --gen-cert`.
+`server.key` is as sensitive as `encryption.key` — protect and back it up the same way.
+
+If a certificate cannot be set up at all, IPMIDeck logs the reason and starts over plain HTTP
+rather than refusing to start: being locked out of your own dashboard is worse than the
+warning you were already living with.
 
 ---
 

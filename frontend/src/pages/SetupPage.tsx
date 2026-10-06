@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { post, get } from "@/api/client";
+import { toast } from "sonner";
+import { post, get, put } from "@/api/client";
 import { useServerStore } from "@/stores/server-store";
 import { useAuthStore } from "@/stores/auth-store";
 import { LanguageSelect } from "@/components/LanguageSelect";
+import { IpmitoolBanner } from "@/components/IpmitoolBanner";
 import { cn } from "@/lib/utils";
 import { VENDORS, TIER_LABEL_KEY } from "@/lib/vendors";
 import {
@@ -15,6 +17,7 @@ import {
   ChevronRight,
   ChevronLeft,
   Loader2,
+  PlugZap,
   ShieldCheck,
   Globe,
   Lock,
@@ -52,6 +55,9 @@ export default function SetupPage() {
   const [passwordConfirm, setPasswordConfirm] = useState("");
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
+  // Pre-ticked: most operators want to know when a fix ships, and the choice is presented rather
+  // than assumed. Unticking it means the app never contacts anything on its own.
+  const [allowUpdateChecks, setAllowUpdateChecks] = useState(true);
 
   // Server state
   const [serverName, setServerName] = useState("");
@@ -63,6 +69,9 @@ export default function SetupPage() {
   const [serverError, setServerError] = useState("");
   const [serverLoading, setServerLoading] = useState(false);
   const [testResult, setTestResult] = useState<"success" | "fail" | null>(null);
+  // The server's localized reason, kept only when it names something the operator can fix on
+  // this machine; every other failure keeps the generic message.
+  const [testFailReason, setTestFailReason] = useState<string | null>(null);
   const [testLoading, setTestLoading] = useState(false);
 
   // SAFETY-CRITICAL: the "No" branch MUST call POST /api/auth/toggle {enabled:false},
@@ -105,6 +114,26 @@ export default function SetupPage() {
           hasUser: false,
           username: null,
         });
+      }
+      // The operator's answer to the update question, recorded once the account decision has
+      // gone through. Deliberately not allowed to block the wizard: a preference write that
+      // fails must not trap someone on this step. Nothing is stored in that case, which means no
+      // unattended check runs whatever the box showed, so the operator is told where to set it.
+      // A 405 or a 404 is not a failure: the configuration has switched update checks off
+      // entirely and the route does not exist, so there is nothing to record. The server answers
+      // 405 in that case, because the page fallback still matches the path for GET only; 404 is
+      // accepted too so the outcome does not hinge on how the fallback is mounted.
+      try {
+        await put("/api/updates/consent", { enabled: allowUpdateChecks });
+      } catch (e: any) {
+        const message = String(e?.message ?? "");
+        if (!message.includes(" 404 ") && !message.includes(" 405 ")) {
+          toast.warning(
+            t("setup.auth.updateChecksSaveFailed", {
+              where: `${t("nav.settings")} → ${t("settings.sections.about")}`,
+            }),
+          );
+        }
       }
       setStep(2);
     } catch (e: any) {
@@ -151,16 +180,23 @@ export default function SetupPage() {
     }
     setTestLoading(true);
     setTestResult(null);
+    setTestFailReason(null);
     setServerError("");
     try {
       // Create a temporary test by posting to test endpoint
-      const result = await post<{ success: boolean }>("/api/servers/test", {
-        host: serverHost,
-        port: parseInt(serverPort, 10),
-        username: serverUser,
-        password: serverPass,
-      });
+      const result = await post<{ success: boolean; error?: string; error_code?: string }>(
+        "/api/servers/test",
+        {
+          host: serverHost,
+          port: parseInt(serverPort, 10),
+          username: serverUser,
+          password: serverPass,
+        },
+      );
       setTestResult(result.success ? "success" : "fail");
+      if (!result.success && result.error_code === "ipmitool_missing") {
+        setTestFailReason(result.error ?? null);
+      }
     } catch {
       setTestResult("fail");
     } finally {
@@ -170,6 +206,9 @@ export default function SetupPage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
+      {/* Mounted only on the server step: by then the account decision is made, so the config
+       * read it relies on is allowed, and this is where a missing ipmitool first matters. */}
+      {step === 2 && <IpmitoolBanner />}
       {/* Stepper — relative wrapper so the language box can sit top-right on every step (D-09/D-10) */}
       <div className="relative">
         {/* Onboarding language box: detected default (i18next), correctable, switches the wizard immediately (D-09/D-10/D-12) */}
@@ -396,6 +435,37 @@ export default function SetupPage() {
                 </div>
               )}
 
+              {/* The one question about the network, asked once, answered by default. It sits
+                  here rather than on a step of its own: this step is already about how the
+                  instance is exposed, and an extra screen for a single checkbox is a worse
+                  trade than one more line on a screen the operator is already reading. */}
+              <div className="rounded-xl border border-border/60 bg-muted/20 p-4">
+                <div className="flex items-start gap-3">
+                  <input
+                    id="setup-update-checks"
+                    type="checkbox"
+                    checked={allowUpdateChecks}
+                    onChange={(e) => setAllowUpdateChecks(e.target.checked)}
+                    aria-describedby="setup-update-checks-hint"
+                    className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-[var(--color-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                  />
+                  <div className="min-w-0">
+                    <label
+                      htmlFor="setup-update-checks"
+                      className="cursor-pointer text-sm font-medium text-foreground"
+                    >
+                      {t("setup.auth.updateChecksLabel")}
+                    </label>
+                    <p
+                      id="setup-update-checks-hint"
+                      className="mt-1 text-xs leading-relaxed text-muted-foreground"
+                    >
+                      {t("setup.auth.updateChecksHint")}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               {/* Error: triple-encoded (D-04) — danger token + AlertCircle companion
                * + text, on a tinted callout, announced via role="alert". */}
               {authError && (
@@ -422,9 +492,12 @@ export default function SetupPage() {
                 disabled={authLoading}
                 className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground min-h-[var(--control-min)] shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-50"
               >
-                {authLoading && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
                 {t("common.continue")}
-                <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                {authLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                )}
               </button>
             </div>
           </div>
@@ -537,11 +610,13 @@ export default function SetupPage() {
               {testResult === "fail" && (
                 <p role="alert" className="flex items-start gap-2 text-xs text-danger">
                   <AlertCircle className="mt-px h-4 w-4 shrink-0" aria-hidden="true" />
-                  <span>{t("setup.server.testFail")}</span>
+                  <span>{testFailReason ?? t("setup.server.testFail")}</span>
                 </p>
               )}
             </div>
 
+            {/* Each spinner takes the place of an icon of the same size, so a button never
+                grows while it waits and the row never re-wraps under the pointer. */}
             <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
               <button
                 onClick={() => setStep(1)}
@@ -555,7 +630,11 @@ export default function SetupPage() {
                 disabled={testLoading}
                 className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground min-h-[var(--control-min)] hover:text-foreground transition-colors disabled:opacity-50"
               >
-                {testLoading && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+                {testLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <PlugZap className="h-4 w-4" aria-hidden="true" />
+                )}
                 {t("common.testConnection")}
               </button>
               <button
@@ -563,9 +642,12 @@ export default function SetupPage() {
                 disabled={serverLoading}
                 className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2 text-sm font-medium text-primary-foreground min-h-[var(--control-min)] hover:bg-primary/90 transition-colors disabled:opacity-50"
               >
-                {serverLoading && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
                 {t("setup.server.addServer")}
-                <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                {serverLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                )}
               </button>
             </div>
           </div>

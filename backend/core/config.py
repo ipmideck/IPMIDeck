@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from dataclasses import dataclass, field
@@ -9,23 +10,88 @@ from pathlib import Path
 
 import yaml
 
+from backend.core.crypto import _set_secure_permissions
+
 _DURATION_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 _DURATION_RE = re.compile(r"^(\d+)([smhd]?)$")
+
+# Upper bound for any configured duration. A session lifetime of "9999d" is a typo, not an
+# intention, and silently honouring it would leave a session valid for centuries. Well above
+# any legitimate setting, so a real configuration is never clamped.
+MAX_DURATION_SECONDS = 30 * 86400
+
+logger = logging.getLogger("ipmideck.config")
 
 
 def parse_duration_seconds(value: str | int | None, default: int = 86400) -> int:
     """Parse a duration like '24h', '90m', '1d', '45s', or a bare integer (seconds) into
-    seconds. Invalid / non-positive input returns ``default`` (never raises)."""
+    seconds.
+
+    Never raises: this runs during startup, where a malformed value in the configuration
+    file must not stop the application from booting. Invalid or non-positive input falls
+    back to ``default``, but the fallback is LOGGED — silently substituting a different
+    lifetime than the one written in the file left the operator with no way to discover
+    that their setting was never in effect. Values above the maximum are clamped rather
+    than rejected, so an obvious typo cannot grant a session an unbounded lifetime.
+    """
     if value is None or isinstance(value, bool):
         # bool is an int subclass — reject it explicitly so True/False can't slip through.
+        if value is not None:
+            logger.warning("Invalid duration %r — using %ds instead", value, default)
         return default
     if isinstance(value, int):
-        return value if value > 0 else default
+        if value <= 0:
+            logger.warning("Invalid duration %r — using %ds instead", value, default)
+            return default
+        return _clamp_duration(value, value)
     match = _DURATION_RE.match(value.strip().lower())
     if not match:
+        logger.warning("Invalid duration %r — using %ds instead", value, default)
         return default
     seconds = int(match.group(1)) * _DURATION_UNITS[match.group(2) or "s"]
-    return seconds if seconds > 0 else default
+    if seconds <= 0:
+        logger.warning("Invalid duration %r — using %ds instead", value, default)
+        return default
+    return _clamp_duration(seconds, value)
+
+
+def _clamp_duration(seconds: int, written: str | int) -> int:
+    """Cap a parsed duration at MAX_DURATION_SECONDS, logging when the cap applies."""
+    if seconds > MAX_DURATION_SECONDS:
+        logger.warning(
+            "Duration %r exceeds the %d-day maximum — using %ds instead",
+            written, MAX_DURATION_SECONDS // 86400, MAX_DURATION_SECONDS,
+        )
+        return MAX_DURATION_SECONDS
+    return seconds
+
+
+_TRUE_WORDS = frozenset({"true", "1", "yes", "on"})
+_FALSE_WORDS = frozenset({"false", "0", "no", "off", ""})
+
+
+def parse_switch(value: object, name: str) -> bool:
+    """Read an on/off setting from the configuration file or the environment.
+
+    YAML turns an unquoted ``false`` into a boolean but keeps a quoted ``"false"`` as text, and
+    any non-empty text is true in Python, so ``bool("false")`` would switch the setting ON. The
+    usual spellings are recognised in either form. Anything else is read as off, with a warning
+    naming the value: this guards the switch that keeps the update check from opening a socket,
+    and a value nobody can interpret must not be taken as permission.
+    """
+    if isinstance(value, bool):
+        return value
+    # bool is an int subclass and was handled above; only a literal 1 or 0 counts here.
+    if isinstance(value, int) and value in (0, 1):
+        return value == 1
+    if isinstance(value, str):
+        word = value.strip().lower()
+        if word in _TRUE_WORDS:
+            return True
+        if word in _FALSE_WORDS:
+            return False
+    logger.warning("Unrecognised value %r for %s — treating it as off", value, name)
+    return False
 
 
 def _data_dir() -> Path:
@@ -39,14 +105,46 @@ class ServerConfig:
     https: bool = False
     cert_file: str | None = None
     key_file: str | None = None
+    # Which peers are allowed to set X-Forwarded-Proto/For. Only 127.0.0.1 is trusted by
+    # default, so a TLS proxy in another container reaches us from a bridge address, its
+    # forwarded scheme is discarded, and the session cookie silently loses its Secure
+    # flag. Set this to the proxy's address to make the cookie correct behind it.
+    forwarded_allow_ips: str | None = None
+    # External addresses the dashboard is reached at, for deployments behind a reverse proxy
+    # that does NOT preserve the browser's Host header (nginx does not by default: it sends
+    # the upstream's own name instead). The cross-origin guard compares the browser's Origin
+    # against Host, so with a rewritten Host every state-changing request would be refused.
+    # Listing the real external origin here restores writes without weakening the guard for
+    # anyone else: an origin that is neither this server's own authority nor on this list is
+    # still rejected. Empty by default — a direct deployment needs nothing here.
+    trusted_origins: list[str] = field(default_factory=list)
+
+    def __post_init__(self):
+        # YAML lets an operator write a single origin without list syntax. Iterating a bare
+        # string would compare the guard against its individual characters and silently
+        # trust nothing, so accept both shapes rather than failing at request time.
+        if isinstance(self.trusted_origins, str):
+            self.trusted_origins = _split_origins(self.trusted_origins)
+        elif isinstance(self.trusted_origins, list):
+            # An empty "-" item loads as None, and a number as an int; either would raise
+            # inside the origin guard on the first proxied request. Keep only real entries.
+            self.trusted_origins = [
+                item.strip()
+                for item in self.trusted_origins
+                if isinstance(item, str) and item.strip()
+            ]
+        else:
+            self.trusted_origins = []
 
 
 @dataclass
 class AuthConfig:
-    enabled: bool = True
+    # Only the session lifetime is configurable here. Whether authentication is enabled, and
+    # the brute-force lockout thresholds, are deliberately NOT: the enabled flag lives in the
+    # database so that write access to this file cannot be used to turn the login off, and the
+    # lockout thresholds are fixed in the login path. Keys that do nothing are worse than
+    # absent ones — they read as promises the code does not keep.
     session_expiry: str = "24h"
-    max_login_attempts: int = 5
-    lockout_duration: str = "15m"
 
 
 @dataclass
@@ -55,12 +153,23 @@ class IPMIConfig:
     power_poll_interval: int = 30
     command_timeout: int = 30  # real Dell BMCs: `sdr elist` can take ~16s; 15 was too tight
     backend: str = "ipmitool"
+    # Lets the web UI install ipmitool with the system package manager when it is missing. Off by
+    # default: it runs a package manager as root, so the operator turns it on knowingly, and it
+    # only works when the app already runs as root or has sudo without a password.
+    auto_install_ipmitool: bool = False
+
+    def __post_init__(self):
+        self.auto_install_ipmitool = parse_switch(
+            self.auto_install_ipmitool, "ipmi.auto_install_ipmitool"
+        )
 
 
 @dataclass
 class DataConfig:
     db_path: str = ""
     retention_days: int = 365
+    # Never read: the retention sweep runs on its own fixed schedule. Kept only so a
+    # config.yaml written by an older release still loads; no longer advertised or written.
     cleanup_interval: str = "24h"
 
     def __post_init__(self):
@@ -80,14 +189,43 @@ class ModuleConfig:
 
 
 @dataclass
+class UpdatesConfig:
+    """Whether this instance is allowed to contact the network to look up a published version.
+
+    This is the kill switch, and it is deliberately coarser than the operator's own preference:
+    with it false the check endpoint is never registered and the periodic task is never started,
+    so suppression is structural rather than a runtime branch someone could regress past. The
+    per-operator preference lives in the database (on unless answered "no") and only decides
+    whether the check runs unattended.
+    """
+
+    enabled: bool = True
+    # A Watchtower running next to the container, with its HTTP API on: the only way a Docker
+    # install can be updated from the web UI, since a container cannot replace its own image.
+    watchtower_url: str | None = None
+    watchtower_token: str | None = None
+
+    def __post_init__(self):
+        # A quoted "false" (or "no", "off", "0") loads as text, and text is truthy: read as-is,
+        # the switch written to keep the socket closed would leave it open.
+        self.enabled = parse_switch(self.enabled, "updates.enabled")
+
+
+@dataclass
 class AppConfig:
     server: ServerConfig = field(default_factory=ServerConfig)
     auth: AuthConfig = field(default_factory=AuthConfig)
     ipmi: IPMIConfig = field(default_factory=IPMIConfig)
     data: DataConfig = field(default_factory=DataConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    updates: UpdatesConfig = field(default_factory=UpdatesConfig)
     demo: bool = False
     modules: dict[str, ModuleConfig] = field(default_factory=dict)
+
+
+def _split_origins(value: str) -> list[str]:
+    """Split a comma-separated origin list, dropping blanks from trailing separators."""
+    return [item.strip() for item in value.split(",") if item.strip()]
 
 
 def _apply_env_overrides(config: AppConfig) -> None:
@@ -95,13 +233,29 @@ def _apply_env_overrides(config: AppConfig) -> None:
     env_map = {
         "IPMIDECK_SERVER_HOST": ("server", "host"),
         "IPMIDECK_SERVER_PORT": ("server", "port", int),
-        "IPMIDECK_AUTH_ENABLED": ("auth", "enabled", lambda v: v.lower() in ("true", "1", "yes")),
+        "IPMIDECK_SERVER_FORWARDED_ALLOW_IPS": ("server", "forwarded_allow_ips"),
+        "IPMIDECK_SERVER_TRUSTED_ORIGINS": ("server", "trusted_origins", _split_origins),
+        "IPMIDECK_SERVER_HTTPS": (
+            "server", "https", lambda v: v.lower() in ("true", "1", "yes")
+        ),
+        "IPMIDECK_SERVER_CERT_FILE": ("server", "cert_file"),
+        "IPMIDECK_SERVER_KEY_FILE": ("server", "key_file"),
         "IPMIDECK_AUTH_SESSION_EXPIRY": ("auth", "session_expiry"),
         "IPMIDECK_IPMI_POLL_INTERVAL": ("ipmi", "poll_interval", int),
         "IPMIDECK_IPMI_POWER_POLL_INTERVAL": ("ipmi", "power_poll_interval", int),
+        "IPMIDECK_IPMI_AUTO_INSTALL_IPMITOOL": (
+            "ipmi",
+            "auto_install_ipmitool",
+            lambda v: parse_switch(v, "IPMIDECK_IPMI_AUTO_INSTALL_IPMITOOL"),
+        ),
         "IPMIDECK_DATA_DB_PATH": ("data", "db_path"),
         "IPMIDECK_DATA_RETENTION_DAYS": ("data", "retention_days", int),
         "IPMIDECK_LOGGING_LEVEL": ("logging", "level"),
+        "IPMIDECK_UPDATES_ENABLED": (
+            "updates", "enabled", lambda v: parse_switch(v, "IPMIDECK_UPDATES_ENABLED")
+        ),
+        "IPMIDECK_UPDATES_WATCHTOWER_URL": ("updates", "watchtower_url"),
+        "IPMIDECK_UPDATES_WATCHTOWER_TOKEN": ("updates", "watchtower_token"),
         "IPMIDECK_DEMO": ("demo", None, lambda v: v.lower() in ("true", "1", "yes")),
     }
     for env_key, mapping in env_map.items():
@@ -130,6 +284,16 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
     if path.exists():
         with open(path) as f:
             raw = yaml.safe_load(f) or {}
+        if not isinstance(raw, dict):
+            # A file holding a list or a single value has no settings to read. Ignoring it lets the
+            # app start on the defaults instead of failing on the first section it looks up, and
+            # the warning says why the file appears to have no effect.
+            logger.warning(
+                "%s does not contain settings (its top level is not a set of names and values)"
+                " — ignoring it and using the defaults",
+                path,
+            )
+            raw = {}
 
         if "server" in raw:
             config.server = ServerConfig(**{k: v for k, v in raw["server"].items() if k in ServerConfig.__dataclass_fields__})
@@ -141,6 +305,15 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
             config.data = DataConfig(**{k: v for k, v in raw["data"].items() if k in DataConfig.__dataclass_fields__})
         if "logging" in raw:
             config.logging = LoggingConfig(**{k: v for k, v in raw["logging"].items() if k in LoggingConfig.__dataclass_fields__})
+        updates = raw.get("updates")
+        if isinstance(updates, dict):
+            config.updates = UpdatesConfig(
+                **{k: v for k, v in updates.items() if k in UpdatesConfig.__dataclass_fields__}
+            )
+        elif updates is not None:
+            # "updates: false" written as a value rather than a section: honour it as the
+            # switch instead of ignoring it, which would leave the check on.
+            config.updates = UpdatesConfig(enabled=parse_switch(updates, "updates"))
         if "demo" in raw:
             config.demo = bool(raw["demo"])
         if "modules" in raw and isinstance(raw["modules"], dict):
@@ -182,6 +355,7 @@ def update_server_yaml(updates: dict, config_path: str | Path | None = None) -> 
     raw["server"] = server
     with open(path, "w", encoding="utf-8") as f:
         yaml.dump(raw, f, default_flow_style=False, sort_keys=False)
+    _set_secure_permissions(path)
     return path
 
 
@@ -193,10 +367,11 @@ def save_default_config(config_path: str | Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     default = {
         "server": {"host": "0.0.0.0", "port": 3000, "https": False},
-        "auth": {"enabled": True, "session_expiry": "24h", "max_login_attempts": 5},
+        "auth": {"session_expiry": "24h"},
         "ipmi": {"poll_interval": 30, "power_poll_interval": 30, "command_timeout": 30},
-        "data": {"retention_days": 365, "cleanup_interval": "24h"},
+        "data": {"retention_days": 365},
         "logging": {"level": "info"},
+        "updates": {"enabled": True},
         "modules": {
             "sensors": {"enabled": True},
             "fanpilot": {"enabled": True},
@@ -207,3 +382,4 @@ def save_default_config(config_path: str | Path) -> None:
     }
     with open(path, "w") as f:
         yaml.dump(default, f, default_flow_style=False, sort_keys=False)
+    _set_secure_permissions(path)

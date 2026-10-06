@@ -55,13 +55,22 @@ def test_app_title_and_version_source_from_branding():
 
 
 def test_health_version_matches_branding(client):
-    """BEHAVIORAL: GET /api/health (unauthenticated) returns branding.VERSION.
+    """BEHAVIORAL: GET /api/config returns branding.VERSION.
 
-    Uses the auth-OFF demo/temp-DB `client` fixture so no real hardware/DB is touched.
+    The version moved off the public health endpoint, which now reports liveness only —
+    an unauthenticated caller has no business learning which build is running. The
+    auth-OFF demo/temp-DB `client` fixture keeps this off real hardware/DB.
     """
-    r = client.get("/api/health")
+    r = client.get("/api/config")
     assert r.status_code == 200
     assert r.json()["version"] == branding.VERSION
+
+
+def test_health_reports_liveness_only(client):
+    """The public health endpoint must not disclose anything beyond liveness."""
+    r = client.get("/api/health")
+    assert r.status_code == 200
+    assert r.json() == {"status": "ok"}
 
 
 def test_health_version_literal_absent_from_source():

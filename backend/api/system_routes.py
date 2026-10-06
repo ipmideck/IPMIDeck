@@ -2,20 +2,26 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
+import logging
 import shutil
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from backend.core.auth import require_auth
+from backend.core.crypto import _set_secure_permissions
+from backend.core.csv_export import csv_safe, safe_filename_part
 
 router = APIRouter()
+logger = logging.getLogger("ipmideck.system")
 
 
 # 04-W1-01 (Plan 04-01, Task 2): generic app_config K/V endpoints.
@@ -53,12 +59,21 @@ _ALLOWED_APP_CONFIG_KEYS = {
     "data.retention_days",
 }
 
+# Readable here but NOT writable. Whether IPMIDeck may check for a newer version on its own is an
+# ordinary app_config row, so it can be read by name like the others; the interface itself takes
+# the answer from GET /api/updates/state. A write here would store the answer without starting or
+# stopping the check, so "off" would not hold until a restart. The write goes through
+# PUT /api/updates/consent, which does both.
+_READ_ONLY_APP_CONFIG_KEYS = {
+    "updates.check_enabled",
+}
+
 
 @router.get("/system/app-config/{key}", dependencies=[Depends(require_auth)])
 async def get_app_config_value(key: str):
     """Read a single app_config value. Returns {success, key, value}.
 
-    SEC-07 (F11): the key must be in the SAME allow-list the PUT path enforces.
+    The key must be allow-listed: the PUT path's list plus the read-only keys above.
     Without it the endpoint served any app_config row by name — `session_secret`
     included — to any caller holding a session (real, stolen, or forged).
 
@@ -66,7 +81,7 @@ async def get_app_config_value(key: str):
     coerced back to JSON booleans in the response so the frontend can use
     them directly. Missing rows return value=None (not an error).
     """
-    if key not in _ALLOWED_APP_CONFIG_KEYS:
+    if key not in _ALLOWED_APP_CONFIG_KEYS and key not in _READ_ONLY_APP_CONFIG_KEYS:
         return {"success": False, "error": "key_not_allowed"}
     from backend.main import db
     raw = await db.get_config(key, default=None)
@@ -341,6 +356,14 @@ async def restore(request: Request):
     """
     from backend.main import config
 
+    # The archive arrives as the raw request body, so the content type is the only
+    # declaration of intent available. Requiring it stops a cross-origin form POST —
+    # which can only ever carry a form or text content type — from reaching the
+    # extractor at all.
+    content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
+    if content_type != "application/zip":
+        return {"success": False, "error": "Expected a zip archive (Content-Type: application/zip)"}
+
     data_dir = Path(config.data.db_path).parent
     staging = data_dir / "staging"
     if staging.exists():
@@ -411,6 +434,11 @@ async def _apply_staging_if_present(config) -> bool:
                     if sc.exists():
                         sc.unlink()
             shutil.move(str(src), str(dest))
+            # Restored files arrive with the mode zipfile gave them on extraction, which
+            # is world-readable, and shutil.move preserves it. Every file a backup carries
+            # is sensitive — the database and the encryption key hold BMC credentials — so
+            # restoring one would otherwise quietly widen its permissions.
+            _set_secure_permissions(dest)
     shutil.rmtree(staging, ignore_errors=True)
     return True
 
@@ -431,12 +459,20 @@ _RANGE_OFFSETS = {
 
 
 @router.get("/system/history-csv", dependencies=[Depends(require_auth)])
-async def history_csv(server_id: str, sensor_name: str, range: str = "24h"):
-    """Export sensor history as CSV. server_id is str (Decision C); range matches
-    useRangeStore ("live" | "1h" | "24h" | "7d")."""
+async def history_csv(
+    server_id: str,
+    sensor_name: str,
+    range: Literal["live", "1h", "24h", "7d"] = "24h",
+):
+    """Export sensor history as CSV.
+
+    `range` is a closed set: an unrecognised value used to fall back to 24 hours while
+    still being reflected verbatim into the response filename, so the caller was handed a
+    file whose name disagreed with its contents.
+    """
     from backend.main import db
 
-    offset = _RANGE_OFFSETS.get(range, _RANGE_OFFSETS["24h"])
+    offset = _RANGE_OFFSETS[range]
     rows = await db.fetchall(
         "SELECT timestamp, sensor_name, value FROM sensor_readings "
         "WHERE server_id = ? AND sensor_name = ? AND timestamp > datetime('now', ?) "
@@ -447,8 +483,10 @@ async def history_csv(server_id: str, sensor_name: str, range: str = "24h"):
     writer = csv.writer(buf)
     writer.writerow(["timestamp", "sensor_name", "value"])
     for r in rows:
-        writer.writerow([r["timestamp"], r["sensor_name"], r["value"]])
-    safe = sensor_name.replace(" ", "_").replace("/", "_")
+        writer.writerow(
+            [csv_safe(r["timestamp"]), csv_safe(r["sensor_name"]), csv_safe(r["value"])]
+        )
+    safe = safe_filename_part(sensor_name)
     return StreamingResponse(
         iter([buf.getvalue()]),
         media_type="text/csv",
@@ -458,27 +496,53 @@ async def history_csv(server_id: str, sensor_name: str, range: str = "24h"):
 
 @router.get("/health")
 async def health():
-    from backend.core.branding import VERSION
-    from backend.main import config, ws_manager, module_loader
-    return {
-        "status": "ok",
-        "version": VERSION,
-        "demo": config.demo,
-        "websocket_connections": ws_manager.connection_count,
-        "modules_loaded": len(module_loader.get_enabled_modules()),
-        "time": datetime.utcnow().isoformat() + "Z",
-    }
+    """Liveness only.
+
+    This endpoint is unauthenticated so a container orchestrator can reach it, which
+    means everything it returns is public. The build version, module count and live
+    connection count told an anonymous scanner which release to look up exploits for and
+    whether anyone was watching; the authenticated config endpoint carries that same
+    detail for the UI.
+    """
+    return {"status": "ok"}
 
 
 @router.get("/config", dependencies=[Depends(require_auth)])
 async def get_config():
+    from backend.core.branding import VERSION
+    from backend.core.ipmitool import status as ipmitool_status
     from backend.main import config
     return {
         "server": {"host": config.server.host, "port": config.server.port},
         "ipmi": {"poll_interval": config.ipmi.poll_interval},
         "data": {"retention_days": config.data.retention_days},
         "demo": config.demo,
+        "version": VERSION,
+        # Working out the install notice may start sudo, so it runs off the event loop and fan
+        # control and the live telemetry keep running.
+        "ipmitool": await asyncio.to_thread(
+            ipmitool_status, config.demo, config.ipmi.auto_install_ipmitool
+        ),
     }
+
+
+@router.post("/system/ipmitool/install")
+async def install_ipmitool(user: str = Depends(require_auth)):
+    """Install ipmitool with the host's package manager, when the configuration allows it.
+
+    Refused with authentication switched off: this runs a package manager as root, and without a
+    login anyone who can reach the port would be the one asking. Takes no input at all; what runs
+    is decided by the host alone.
+    """
+    from backend.core import ipmitool
+    from backend.main import auth, config
+
+    if config.demo:
+        return {"success": False, "error_code": "ipmitool_install_demo"}
+    if not await auth.is_auth_enabled():
+        return {"success": False, "error_code": "ipmitool_install_needs_login"}
+    logger.warning("ipmitool install requested from the web UI by %s", user)
+    return await ipmitool.install(config.ipmi.auto_install_ipmitool)
 
 
 @router.get("/logs", dependencies=[Depends(require_auth)])

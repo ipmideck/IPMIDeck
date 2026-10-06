@@ -26,6 +26,7 @@ normal stdout/stderr logging is restored on exit.
 
 from __future__ import annotations
 
+import errno
 import logging
 import socket
 import sys
@@ -116,25 +117,58 @@ def browsable_url(scheme: str, host: str, port: int) -> str:
     return f"{scheme}://{browsable_host(host)}:{port}"
 
 
-def port_in_use(host: str, port: int) -> bool:
-    """Return True if ``port`` is already bound/listening on ``host`` (D-17).
+PORT_IN_USE = "in_use"
+ADDRESS_UNAVAILABLE = "unavailable"
 
-    Deliberately does NOT set SO_REUSEADDR (RESEARCH Pitfall 4): SO_REUSEADDR would let the probe
-    re-bind over an already-listening socket, producing a FALSE negative and letting a second
-    backend start and fight over the same BMC. A plain bind() raises OSError (EADDRINUSE /
-    WinError 10048) when the port is taken — that is the "already running" signal.
 
-    "0.0.0.0"/"::"/"" wildcard binds are probed against 127.0.0.1 so the check is meaningful.
+def bind_problem(host: str, port: int) -> str | None:
+    """Try the bind the server is about to make and say why it would fail, or None if it would not.
+
+    Returns ``PORT_IN_USE`` when something already holds the port (the "already running"
+    signal) and ``ADDRESS_UNAVAILABLE`` when the address itself cannot be bound: not assigned
+    to this host, not resolvable, a family the host lacks, or not permitted (a privileged
+    port). One bind, classified once, so the two answers cannot disagree.
+
+    On Linux the probe sets SO_REUSEADDR so that a connection still in TIME_WAIT from the
+    previous run (a quick restart, a container restarted under host networking, where the
+    health check leaves one every 30 seconds) does not count as "in use": uvicorn binds with
+    SO_REUSEADDR itself and would start fine there, and Linux still refuses the bind while a
+    socket is listening. It stays off elsewhere: on Windows it lets a second socket bind over a
+    live listener, and on macOS/BSD it lets 127.0.0.1 bind while a wildcard listener holds the
+    port, either of which would hide a running instance.
+
+    The probe binds the same address the server will, wildcards included: probing 127.0.0.1 for
+    a 0.0.0.0 server misses an instance already listening on 0.0.0.0 on Windows, which lets a
+    specific address bind over a wildcard listener. An IPv6 address is probed with an IPv6
+    socket.
     """
-    probe_host = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe_host = host or "0.0.0.0"
+    family = socket.AF_INET6 if ":" in probe_host else socket.AF_INET
     try:
-        s.bind((probe_host, port))
-        return False
+        s = socket.socket(family, socket.SOCK_STREAM)
     except OSError:
-        return True
+        return ADDRESS_UNAVAILABLE  # e.g. IPv6 disabled on this host
+    try:
+        if sys.platform.startswith("linux"):
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind((probe_host, port))
+        return None
+    except socket.gaierror:
+        return ADDRESS_UNAVAILABLE
+    except OSError as e:
+        if e.errno in (errno.EADDRNOTAVAIL, errno.EACCES) or getattr(e, "winerror", None) in (
+            10049,  # WSAEADDRNOTAVAIL
+            10013,  # WSAEACCES
+        ):
+            return ADDRESS_UNAVAILABLE
+        return PORT_IN_USE
     finally:
         s.close()
+
+
+def port_in_use(host: str, port: int) -> bool:
+    """Return True if ``port`` is already bound/listening on ``host`` (see :func:`bind_problem`)."""
+    return bind_problem(host, port) == PORT_IN_USE
 
 
 def read_key() -> str | None:
@@ -290,7 +324,7 @@ class ConsoleUI:
     action key + a status line with the active verbosity and the connected-client count + the
     credits line) over a deque-backed scrolling-log body, via rich Live(screen=True) + Layout.
     Action keys dispatch to sub-views (connected sessions / configured servers / show-URL /
-    update-stub), cycle the runtime verbosity (starting at INFO per D-04), and run the D-15d
+    update check), cycle the runtime verbosity (starting at INFO), and run the
     change-bind-host/port flow.
 
     SCROLLBACK / HANDLER tradeoffs are documented in the module docstring (Pitfall 1 / Pitfall 6).
@@ -338,6 +372,7 @@ class ConsoleUI:
         verbosity: str = "INFO",
         max_log_lines: int = 500,
         get_bind=None,
+        on_check_updates=None,
     ) -> None:
         self.ws_manager = ws_manager
         self.get_url = get_url
@@ -350,6 +385,11 @@ class ConsoleUI:
         # change-bind editor prompt. The editable buffer stays EMPTY (NOT pre-filled) so the typed
         # value shows immediately. None (default) just omits the "current:" label — backward compat.
         self.get_bind = get_bind
+        # OPTIONAL: schedules a real update check and answers through report(). It must NOT
+        # perform the lookup itself — dispatch() runs on the key thread and a network round trip
+        # there would freeze the render loop for the duration of the request. None (the default)
+        # means the console cannot check, and the key says so instead of pretending.
+        self.on_check_updates = on_check_updates
         self.verbosity = verbosity  # D-04: default/quiet == INFO
         self.log_lines: deque = deque(maxlen=max_log_lines)
         self.view = "log"  # "log" | "sessions" | "servers"
@@ -383,7 +423,7 @@ class ConsoleUI:
     # --- helpers ---------------------------------------------------------------------------
 
     def _push_log(self, line: str, style: str = _PUSH_LOG_DEFAULT_STYLE) -> None:
-        """Surface a one-line action result (URL, update stub, change-bind confirmation) in the body.
+        """Surface a one-line action result (URL, update check, change-bind confirmation) in the body.
 
         R8: stores a styled ``rich.text.Text`` (consistent with DequeLogHandler now storing Text) so
         an action result can stand out — e.g. the change-bind "restart required" confirmation in a
@@ -406,7 +446,7 @@ class ConsoleUI:
     def _show_log(self, line: str, style: str = _PUSH_LOG_DEFAULT_STYLE) -> None:
         """Push an action-result line AND switch back to the log view so it is actually visible (r10).
 
-        ROOT CAUSE (04.1-04 gap-closure r10, concern 2): the show-URL ('u'), update-stub ('g') and
+        ROOT CAUSE: the show-URL ('u'), update-check ('g') and
         change-bind ('b' → commit) actions pushed a line into the deque via _push_log() but did NOT
         change self.view. While the operator was in the 's' (servers) or 'c' (sessions) sub-view the
         body renders the TABLE, so the freshly pushed line was HIDDEN behind it ("I pressed u and
@@ -418,6 +458,16 @@ class ConsoleUI:
         """
         self._push_log(line, style=style)
         self.view = "log"
+
+    def report(self, line: str, style: str = _PUSH_LOG_DEFAULT_STYLE) -> None:
+        """Show the answer to a key press that arrives later, such as the update check's.
+
+        It goes straight into the body, like the line the key printed when pressed, rather than
+        through a log record: the operator asked a question, and a reply sent as a record would be
+        hidden by a quieter verbosity. The view is left as it is, so an answer arriving while a
+        table is open does not pull the operator out of it.
+        """
+        self._push_log(line, style=style)
 
     @staticmethod
     def _validate_bind(host: str, port_str: str) -> tuple[str, int] | None:
@@ -751,8 +801,8 @@ class ConsoleUI:
           c   -> open the connected-sessions sub-view (D-14/D-19)
           s   -> open the configured-servers sub-view (D-15b)
           u   -> push the dashboard URL into the log (D-15a)
-          g   -> update-check STUB: print the local version + "ships with the pip release", NO
-                 network call (D-13)
+          g   -> check for a newer published version (scheduled off this thread; the result
+                 arrives as a log line)
           b   -> enter the keystroke-driven change-bind editor (D-15d) — NOT a blocking input()
           r   -> clean in-process restart (D-15c)
           q   -> if in a sub-view, return to the log view; else clean exit (D-03/D-12)
@@ -802,11 +852,18 @@ class ConsoleUI:
             # _show_log so the URL switches back to the log view (it was hidden behind a sub-view).
             self._show_log(self.get_url(), style="cyan")
         elif key == "g":
-            # Informational stub — neutral (default) style; not an alert (r8). r10: _show_log so the
-            # stub line is visible even when pressed from the servers/sessions sub-view.
-            self._show_log(
-                f"Current version {VERSION}. Online update check ships with the pip release."
-            )
+            # A real check, run off this thread. dispatch() is on the key thread and must never
+            # block: a lookup here would freeze the render loop for the length of the request (or
+            # the whole timeout, on a box with no route out). The callback schedules the work and
+            # the outcome arrives later as a log line, which is also why there is no spinner —
+            # the log IS the progress indicator.
+            self._show_log(f"Current version {VERSION}. Checking for a newer one\u2026")
+            if self.on_check_updates is None:
+                self._show_log(
+                    "Update checks are switched off in the configuration.", style="yellow"
+                )
+            else:
+                self.on_check_updates()
         elif key == "b":
             # D-15d: enter the keystroke-driven bind editor (no input(), never blocks the loop).
             self._enter_bind_edit()
@@ -871,6 +928,15 @@ class ConsoleUI:
         for h in saved:
             root_logger.addHandler(h)
 
+    def _frame_signature(self, console) -> tuple:
+        """Fingerprint of what the next frame would paint: terminal size + the rendered layout.
+
+        Rendering to segments is cheap next to repainting the terminal, and comparing the result
+        catches every source of change (new log line, header status, sub-view data, resize) without
+        tracking each one by hand.
+        """
+        return (console.size, hash(tuple(console.render(self.layout))))
+
     def run(self) -> None:
         """Run the interactive render loop — no-op off a TTY (D-24/D-07).
 
@@ -910,15 +976,21 @@ class ConsoleUI:
         # for the lifetime of Live so log records go ONLY to the deque (rendered in the body) and
         # never bypass Live's redirect to fight the frame. Restored in finally. See the helper.
         saved_stream_handlers = self._suspend_stream_handlers()
+        # REDRAW ONLY ON CHANGE: Live's auto-refresh repainted the WHOLE alternate screen 4x/s even
+        # when nothing changed, and on Windows rich splits a full frame into several writes, so the
+        # terminal painted it top-to-bottom (the visible "CRT" sweep). auto_refresh is off and the
+        # loop below calls live.refresh() only when the rendered frame (or the terminal size) differs
+        # from the last one painted — an idle console never touches the terminal.
+        last_frame = None
         try:
             with Live(
                 self.layout,
                 console=console,
                 screen=True,
-                refresh_per_second=4,
+                auto_refresh=False,
                 redirect_stdout=True,
                 redirect_stderr=True,
-            ):
+            ) as live:
                 while not self._stop.is_set():
                     # RESILIENT RENDER (04.1-04 gap-closure r4 — belt-and-suspenders): guard the
                     # per-frame render so a SINGLE bad frame can NEVER kill the render thread again
@@ -932,6 +1004,10 @@ class ConsoleUI:
                     try:
                         self.layout["header"].update(self.render_header())
                         self.layout["body"].update(self.render_body())
+                        frame = self._frame_signature(console)
+                        if frame != last_frame:
+                            live.refresh()
+                            last_frame = frame
                     except Exception:
                         logger.exception("Console render frame failed — continuing")
                     time.sleep(0.25)

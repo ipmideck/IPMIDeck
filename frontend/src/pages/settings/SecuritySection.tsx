@@ -49,11 +49,19 @@ export function SecuritySection({ headingRef }: SecuritySectionProps) {
     }
     setSecBusy(true);
     try {
-      await post("/api/auth/configure", {
+      const res = await post<{ success: boolean; error?: string }>("/api/auth/configure", {
         username: secUsername,
         password: secPassword,
         ...(hasUser ? { current_password: secCurrentPassword } : {}),
       });
+      // The API refuses with HTTP 200 + {success:false} (project convention), so `post`
+      // never throws and the catch below cannot see a refusal. Without this check a
+      // rejected request still flipped the badge to "enabled" and toasted success while
+      // the dashboard stayed open on the LAN. Mirrors disableAuth just below.
+      if (!res.success) {
+        toast.error(res.error || t("settings.authEnableFailed"));
+        return;
+      }
       useAuthStore.setState({ authEnabled: true, authenticated: true, hasUser: true, username: secUsername });
       setSecUsername("");
       setSecPassword("");
@@ -150,31 +158,39 @@ export function SecuritySection({ headingRef }: SecuritySectionProps) {
         ) : (
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">{t("settings.authDisabledLabel")}</p>
+            {/* Identity first: who you are, and — when an account already exists — proof
+                that you own it. Asking for the current password AFTER the new one (the
+                order this form used to have) inverts every convention. */}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <input placeholder={t("settings.secUsernamePlaceholder")} value={secUsername} onChange={(e) => setSecUsername(e.target.value)} className={inputClass} />
-              <input type="password" placeholder={t("settings.secPasswordPlaceholder")} value={secPassword} onChange={(e) => setSecPassword(e.target.value)} className={cn(inputClass, "font-mono")} />
-            </div>
-            <input
-              type="password"
-              placeholder={t("settings.confirmPasswordPlaceholder")}
-              value={secPasswordConfirm}
-              onChange={(e) => setSecPasswordConfirm(e.target.value)}
-              className={cn(
-                "w-full rounded-md border bg-background px-3 py-2 text-sm font-mono min-h-[--control-min] md:min-h-9",
-                secPassword && secPasswordConfirm && secPassword !== secPasswordConfirm ? "border-danger/60" : "border-border",
+              {hasUser && (
+                <input
+                  type="password"
+                  placeholder={t("settings.currentPasswordPlaceholder")}
+                  value={secCurrentPassword}
+                  onChange={(e) => setSecCurrentPassword(e.target.value)}
+                  className={cn(inputClass, "font-mono")}
+                />
               )}
-            />
-            {secPassword && secPasswordConfirm && secPassword !== secPasswordConfirm && (
-              <p className="text-xs text-danger">{t("settings.passwordsDoNotMatch")}</p>
-            )}
-            {hasUser && (
+            </div>
+            {/* Then the change itself. Both labels say "new" so neither can be mistaken
+                for the current password sitting right above them. */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <input type="password" placeholder={t("settings.secPasswordPlaceholder")} value={secPassword} onChange={(e) => setSecPassword(e.target.value)} className={cn(inputClass, "font-mono")} />
               <input
                 type="password"
-                placeholder={t("settings.currentPasswordPlaceholder")}
-                value={secCurrentPassword}
-                onChange={(e) => setSecCurrentPassword(e.target.value)}
-                className={cn(inputClass, "font-mono")}
+                placeholder={t("settings.secConfirmNewPasswordPlaceholder")}
+                value={secPasswordConfirm}
+                onChange={(e) => setSecPasswordConfirm(e.target.value)}
+                className={cn(
+                  inputClass,
+                  "font-mono",
+                  secPassword && secPasswordConfirm && secPassword !== secPasswordConfirm && "border-danger/60",
+                )}
               />
+            </div>
+            {secPassword && secPasswordConfirm && secPassword !== secPasswordConfirm && (
+              <p className="text-xs text-danger">{t("settings.passwordsDoNotMatch")}</p>
             )}
             <button onClick={enableAuth} disabled={secBusy || !online} title={offlineTip} className={primaryBtnClass}>
               {t("settings.enableAuth")}
