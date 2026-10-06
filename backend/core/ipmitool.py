@@ -8,6 +8,7 @@ import os
 import platform
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 from backend.core.i18n import t
@@ -66,6 +67,12 @@ _install_lock = asyncio.Lock()
 # Set while the program is known to be missing, so a poll loop that fails every few seconds
 # produces one warning per episode rather than one per attempt.
 _missing_reported = False
+
+# The install notice is worked out on every page load, and asking sudo means starting a process,
+# so the answer is kept for a minute. An install asks again, because the operator may have just
+# granted the rights.
+_SUDO_ANSWER_TTL = 60.0
+_sudo_answer: tuple[float, bool] | None = None
 
 
 class IpmitoolMissingError(RuntimeError):
@@ -212,8 +219,8 @@ def _is_root() -> bool:
     return geteuid is not None and geteuid() == 0
 
 
-def _sudo_without_password() -> bool:
-    """True when sudo runs without asking. ``-n`` makes it fail instead of prompting."""
+def _probe_sudo() -> bool:
+    """Start ``sudo -n true``: ``-n`` makes it fail instead of prompting."""
     if shutil.which("sudo") is None:
         return False
     try:
@@ -228,6 +235,27 @@ def _sudo_without_password() -> bool:
     except (OSError, subprocess.SubprocessError):
         return False
     return result.returncode == 0
+
+
+def _sudo_without_password() -> bool:
+    """True when sudo runs without asking, answered from the last minute's probe when there is one.
+
+    No lock: two page loads at the same moment at most probe twice, and the tuple is replaced
+    whole.
+    """
+    global _sudo_answer
+    cached = _sudo_answer
+    if cached is not None and time.monotonic() - cached[0] < _SUDO_ANSWER_TTL:
+        return cached[1]
+    answer = _probe_sudo()
+    _sudo_answer = (time.monotonic(), answer)
+    return answer
+
+
+def _forget_sudo_answer() -> None:
+    """Drop the kept sudo answer, so the next question starts sudo again."""
+    global _sudo_answer
+    _sudo_answer = None
 
 
 def _in_container() -> bool:
@@ -297,7 +325,10 @@ def _os_label(os_release: Path = Path("/etc/os-release")) -> str:
 
 
 def status(demo: bool, allow_install: bool = False) -> dict:
-    """What the web UI needs to decide whether to show the install notice, and what it says."""
+    """What the web UI needs to decide whether to show the install notice, and what it says.
+
+    It may start sudo, so callers on the event loop run it in a worker thread.
+    """
     available = demo or find_ipmitool() is not None
     result: dict = {
         "available": available,
@@ -332,7 +363,10 @@ async def install(allow_install: bool) -> dict:
     if _install_lock.locked():
         return _failure("busy")
     async with _install_lock:
-        plan = install_plan(allow_install)
+        # Planning may start sudo, which blocks, so it runs in a worker thread. The kept answer is
+        # dropped first, because the privileges may have just been granted.
+        _forget_sudo_answer()
+        plan = await asyncio.to_thread(install_plan, allow_install)
         package = _package()
         if not plan["automatic"] or package is None:
             return _failure(plan["reason"] or "unsupported")

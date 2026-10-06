@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import logging
@@ -517,7 +518,11 @@ async def get_config():
         "data": {"retention_days": config.data.retention_days},
         "demo": config.demo,
         "version": VERSION,
-        "ipmitool": ipmitool_status(config.demo, config.ipmi.auto_install_ipmitool),
+        # Working out the install notice may start sudo, so it runs off the event loop and fan
+        # control and the live telemetry keep running.
+        "ipmitool": await asyncio.to_thread(
+            ipmitool_status, config.demo, config.ipmi.auto_install_ipmitool
+        ),
     }
 
 

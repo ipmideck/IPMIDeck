@@ -7,6 +7,8 @@ container, on Windows, with the setting off, without privileges, in demo mode, w
 from __future__ import annotations
 
 import asyncio
+import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -15,10 +17,12 @@ from backend.core import ipmitool
 
 
 @pytest.fixture(autouse=True)
-def _rearm_warning():
+def _reset_module_state():
     ipmitool.report_present()
+    ipmitool._forget_sudo_answer()
     yield
     ipmitool.report_present()
+    ipmitool._forget_sudo_answer()
 
 
 # === Finding a vendor copy on Windows ===
@@ -127,6 +131,65 @@ def test_the_os_label_reads_the_distribution_name(tmp_path, monkeypatch):
     release = tmp_path / "os-release"
     release.write_text('NAME="Ubuntu"\nPRETTY_NAME="Ubuntu 24.04 LTS"\n', encoding="utf-8")
     assert ipmitool._os_label(release) == "Ubuntu 24.04 LTS"
+
+
+# === Asking sudo ===
+
+
+def _sudo_on_path(monkeypatch, code=0):
+    """sudo found on PATH; returns the list each probe appends its thread to."""
+    probes = []
+
+    def fake_run(argv, **kwargs):
+        assert argv == ["sudo", "-n", "true"]
+        probes.append(threading.get_ident())
+        return SimpleNamespace(returncode=code)
+
+    monkeypatch.setattr(
+        ipmitool.shutil, "which", lambda name: "/usr/bin/sudo" if name == "sudo" else None
+    )
+    monkeypatch.setattr(ipmitool.subprocess, "run", fake_run)
+    return probes
+
+
+@pytest.mark.parametrize(("code", "answer"), [(0, True), (1, False)])
+def test_the_sudo_answer_is_kept_for_a_minute(monkeypatch, code, answer):
+    probes = _sudo_on_path(monkeypatch, code)
+    now = [0.0]
+    monkeypatch.setattr(ipmitool, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    assert ipmitool._sudo_without_password() is answer
+    now[0] = 30.0
+    assert ipmitool._sudo_without_password() is answer
+    assert len(probes) == 1
+    now[0] = 61.0
+    assert ipmitool._sudo_without_password() is answer
+    assert len(probes) == 2
+
+
+async def test_an_install_asks_sudo_again_off_the_event_loop(monkeypatch):
+    probes = _sudo_on_path(monkeypatch)
+    assert ipmitool._sudo_without_password() is True
+    assert len(probes) == 1
+    monkeypatch.setattr(ipmitool.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(ipmitool, "_in_container", lambda: False)
+    monkeypatch.setattr(ipmitool, "_is_root", lambda: False)
+    monkeypatch.setattr(
+        ipmitool, "_package", lambda *a, **k: ipmitool._LINUX_PACKAGES[0][1:]
+    )
+    monkeypatch.setattr(ipmitool, "find_ipmitool", lambda: "/usr/bin/ipmitool")
+    calls = []
+
+    async def fake_exec(*argv, **kwargs):
+        calls.append(argv)
+        return _Proc(0)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    loop_thread = threading.get_ident()
+    result = await ipmitool.install(True)
+    assert result["success"] is True
+    assert len(probes) == 2
+    assert probes[1] != loop_thread
+    assert calls[0][:2] == ("sudo", "-n")
 
 
 # === Running the install ===
@@ -251,6 +314,34 @@ async def test_the_route_passes_the_configured_permission(monkeypatch):
     result = await system_routes.install_ipmitool(user="operator")
     assert result["success"] is True
     assert seen == [True]
+
+
+async def test_the_config_route_asks_sudo_off_the_event_loop(monkeypatch):
+    # Every page loads the config, so a sudo probe on the loop would stall fan control.
+    from backend.api import system_routes
+
+    monkeypatch.setattr(bm.config, "demo", False)
+    monkeypatch.setattr(bm.config.ipmi, "auto_install_ipmitool", True)
+    monkeypatch.setattr(ipmitool, "find_ipmitool", lambda: None)
+    monkeypatch.setattr(ipmitool.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(ipmitool, "_in_container", lambda: False)
+    monkeypatch.setattr(ipmitool, "_is_root", lambda: False)
+    monkeypatch.setattr(
+        ipmitool, "_package", lambda *a, **k: ipmitool._LINUX_PACKAGES[0][1:]
+    )
+    monkeypatch.setattr(ipmitool, "_os_label", lambda: "Test OS")
+    asked = []
+
+    def fake_sudo():
+        asked.append(threading.get_ident())
+        return False
+
+    monkeypatch.setattr(ipmitool, "_sudo_without_password", fake_sudo)
+    loop_thread = threading.get_ident()
+    body = await system_routes.get_config()
+    assert len(asked) == 1
+    assert asked[0] != loop_thread
+    assert body["ipmitool"]["install"]["reason"] == "no_privileges"
 
 
 def test_the_switch_reads_quoted_false_as_off():
