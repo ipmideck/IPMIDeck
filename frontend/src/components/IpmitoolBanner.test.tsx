@@ -88,8 +88,8 @@ describe("the install dialog", () => {
   it("explains why it cannot install, and gives the command to run", async () => {
     ipmitool = { ...linux, install: { automatic: false, reason: "no_privileges" } };
     const dialog = await openDialog();
-    expect(dialog).toHaveTextContent("Detected system: Ubuntu 24.04 LTS");
-    expect(dialog).toHaveTextContent("not running with administrator rights");
+    expect(dialog).toHaveTextContent("Your system: Ubuntu 24.04 LTS");
+    expect(dialog).toHaveTextContent("needs administrator rights");
     expect(within(dialog).getByText("sudo apt install ipmitool")).toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: "Install now" })).toBeNull();
   });
@@ -112,12 +112,22 @@ describe("the install dialog", () => {
     const dialog = await openDialog();
     await userEvent.click(within(dialog).getByRole("button", { name: "Install now" }));
     expect(
-      await within(dialog).findByText("The installation did not complete."),
+      await within(dialog).findByText("That didn't work."),
     ).toBeInTheDocument();
     expect(dialog).toHaveTextContent("Unable to locate package ipmitool");
     expect(within(dialog).getByText("sudo apt install ipmitool")).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
+
+  const windowsPackage = {
+    name: "Dell iDRAC Tools",
+    version: "11.4.0.0",
+    url: "https://dl.dell.com/FOLDER13988263M/1/Dell-iDRACTools-Web-WINX64-11.4.0.0-1435_A00.exe",
+    page: "https://www.dell.com/support/home/en-us/drivers/driversdetails?driverid=p05hx",
+    sha256: "dd1ba761046f6c0e739ade54c1ebe1b129b85d4d7e6ce14a34dea8f160c622ec",
+    size_mb: 32,
+    supported_os: ["Windows 10 (64-bit)", "Windows 11 (64-bit)", "Windows Server 2022", "Windows Server 2025"],
+  };
 
   it("guides Windows through a vendor tool instead of inventing a command", async () => {
     ipmitool = {
@@ -125,13 +135,38 @@ describe("the install dialog", () => {
       install_command: null,
       platform: "windows",
       os_label: "Windows",
-      install: { automatic: false, reason: "windows" },
+      install: { automatic: false, reason: "no_desktop" },
       search_dirs: ["C:\\Program Files\\Dell\\SysMgt\\bmc"],
+      windows_package: windowsPackage,
     };
     const dialog = await openDialog();
     expect(dialog).toHaveTextContent("iDRAC Tools");
     expect(dialog).toHaveTextContent("C:\\Program Files\\Dell\\SysMgt\\bmc");
+    expect(dialog).toHaveTextContent("Windows service");
     expect(dialog).not.toHaveTextContent("WSL");
     expect(within(dialog).queryByRole("button", { name: "Install now" })).toBeNull();
+  });
+
+  it("shows Windows where the Dell installer comes from and offers to install it", async () => {
+    ipmitool = {
+      available: false,
+      install_command: null,
+      platform: "windows",
+      os_label: "Windows",
+      install: { automatic: true, reason: null },
+      search_dirs: ["C:\\Program Files\\Dell\\SysMgt\\bmc"],
+      windows_package: windowsPackage,
+    };
+    const dialog = await openDialog();
+    expect(dialog).toHaveTextContent("dl.dell.com");
+    expect(dialog).toHaveTextContent(windowsPackage.sha256);
+    expect(dialog).toHaveTextContent("Windows 11 (64-bit)");
+    expect(dialog).toHaveTextContent("Windows Server 2025");
+    expect(within(dialog).getByRole("link", { name: "Open Dell's page" })).toHaveAttribute(
+      "href",
+      windowsPackage.page,
+    );
+    await userEvent.click(within(dialog).getByRole("button", { name: "Install now" }));
+    expect(post).toHaveBeenCalledWith("/api/system/ipmitool/install");
   });
 });

@@ -13,6 +13,18 @@ export interface IpmitoolStatus {
   install?: { automatic: boolean; reason: string | null };
   os_label?: string;
   search_dirs?: string[];
+  windows_package?: WindowsPackage;
+}
+
+/** The Dell installer the backend downloads and starts on Windows. */
+export interface WindowsPackage {
+  name: string;
+  version: string;
+  url: string;
+  page: string;
+  sha256: string;
+  size_mb: number;
+  supported_os: string[];
 }
 
 interface InstallResult {
@@ -36,6 +48,14 @@ const REASONS = new Set([
   "timeout",
   "not_found",
   "failed",
+  "no_desktop",
+  "download",
+  "checksum",
+  "extract",
+  "cancelled",
+  "windows_timeout",
+  "windows_failed",
+  "windows_not_found",
 ]);
 
 function reasonOf(code: string | null | undefined): string {
@@ -55,7 +75,8 @@ interface IpmitoolInstallDialogProps {
  * What it takes to install ipmitool on the machine running IPMIDeck, and doing it when the
  * backend can. The backend decides: it installs only when allowed in config.yaml and already
  * privileged, so this dialog never asks for a password — it explains why it cannot, and shows
- * the command to run instead.
+ * the command to run instead. On Windows it shows the Dell installer the backend downloads,
+ * where from, its checksum and the supported systems; the administrator prompt is Windows' own.
  */
 export function IpmitoolInstallDialog({
   open,
@@ -78,6 +99,7 @@ export function IpmitoolInstallDialog({
   const reason = status.install?.reason ?? null;
   const command = status.install_command;
   const windows = status.platform === "windows";
+  const pkg = status.windows_package;
 
   const install = async () => {
     setPhase("installing");
@@ -143,25 +165,81 @@ export function IpmitoolInstallDialog({
             )}
 
             {phase !== "done" && windows && (
-              <div>
-                <p className="text-muted-foreground">{t("ipmitoolInstall.windows.intro")}</p>
-                <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-foreground">
-                  <li>{t("ipmitoolInstall.windows.step1")}</li>
-                  <li>{t("ipmitoolInstall.windows.step2")}</li>
-                  <li>{t("ipmitoolInstall.windows.step3")}</li>
-                </ol>
-                {status.search_dirs && status.search_dirs.length > 0 && (
-                  <div className="mt-3">
-                    <p className="text-xs text-muted-foreground">{t("ipmitoolInstall.windows.searched")}</p>
-                    <ul className="mt-1 space-y-0.5">
-                      {status.search_dirs.map((dir) => (
-                        <li key={dir} className="break-all font-mono text-xs text-foreground">
-                          {dir}
-                        </li>
-                      ))}
-                    </ul>
+              <div className="space-y-3">
+                {automatic && phase !== "failed" && pkg && (
+                  <div className="space-y-1.5">
+                    <p className="text-foreground">
+                      {t("ipmitoolInstall.windows.summary", {
+                        name: pkg.name,
+                        version: pkg.version,
+                        size: pkg.size_mb,
+                      })}
+                    </p>
+                    <p className="text-muted-foreground">{t("ipmitoolInstall.windows.confirm")}</p>
                   </div>
                 )}
+
+                {!automatic && reason && (
+                  <p className="flex items-start gap-2 text-foreground">
+                    <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" aria-hidden="true" />
+                    <span>{t(`ipmitoolInstall.reason.${reasonOf(reason)}`)}</span>
+                  </p>
+                )}
+
+                {(!automatic || phase === "failed") && (
+                  <ol className="list-decimal space-y-1 pl-5 text-foreground">
+                    <li>{t("ipmitoolInstall.windows.step1")}</li>
+                    <li>{t("ipmitoolInstall.windows.step2")}</li>
+                  </ol>
+                )}
+
+                {pkg && (
+                  <p className="text-xs text-muted-foreground">
+                    {t("ipmitoolInstall.windows.supported", { list: pkg.supported_os.join(", ") })}
+                  </p>
+                )}
+
+                <details className="rounded-md border border-border">
+                  <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-muted-foreground">
+                    {t("ipmitoolInstall.windows.details")}
+                  </summary>
+                  <div className="space-y-2 border-t border-border px-3 py-2 text-xs">
+                    {pkg && (
+                      <>
+                        <div>
+                          <p className="text-muted-foreground">{t("ipmitoolInstall.windows.source")}</p>
+                          <p className="break-all font-mono text-foreground">{pkg.url}</p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground">{t("ipmitoolInstall.windows.checksum")}</p>
+                          <p className="break-all font-mono text-foreground">{pkg.sha256}</p>
+                        </div>
+                      </>
+                    )}
+                    {status.search_dirs && status.search_dirs.length > 0 && (
+                      <div>
+                        <p className="text-muted-foreground">{t("ipmitoolInstall.windows.searched")}</p>
+                        <ul className="space-y-0.5">
+                          {status.search_dirs.map((dir) => (
+                            <li key={dir} className="break-all font-mono text-foreground">
+                              {dir}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {pkg && (
+                      <a
+                        href={pkg.page}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-block font-medium text-primary underline-offset-2 hover:underline"
+                      >
+                        {t("ipmitoolInstall.windows.page")}
+                      </a>
+                    )}
+                  </div>
+                </details>
               </div>
             )}
 
@@ -216,7 +294,7 @@ export function IpmitoolInstallDialog({
                 >
                   {t("banner.ipmitoolRecheck")}
                 </button>
-                {automatic && !windows && (
+                {automatic && (
                   <button
                     type="button"
                     onClick={install}

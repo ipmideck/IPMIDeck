@@ -35,8 +35,11 @@ ipmi:
   poll_interval: 30           # seconds
   power_poll_interval: 30     # seconds
   command_timeout: 30         # seconds
-  # Let the web UI install ipmitool when it is missing. Works only when IPMIDeck runs as root
-  # (or with sudo that needs no password); otherwise the UI shows the command to run.
+  # Let the web UI install ipmitool when it is missing. On Linux, FreeBSD and macOS it works only
+  # when IPMIDeck runs as root (or with sudo that needs no password); otherwise the UI shows the
+  # command to run. Not needed on Windows: there the Install button always downloads Dell iDRAC
+  # Tools from dl.dell.com, checks its SHA-256 and installs it quietly; Windows asks for
+  # administrator confirmation on the computer running IPMIDeck.
   auto_install_ipmitool: false
 
 data:

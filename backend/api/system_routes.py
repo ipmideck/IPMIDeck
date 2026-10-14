@@ -530,16 +530,20 @@ async def get_config():
 async def install_ipmitool(user: str = Depends(require_auth)):
     """Install ipmitool with the host's package manager, when the configuration allows it.
 
+    On Windows, the pinned Dell installer is downloaded, checked and started instead.
+
     Refused with authentication switched off: this runs a package manager as root, and without a
-    login anyone who can reach the port would be the one asking. Takes no input at all; what runs
-    is decided by the host alone.
+    login anyone who can reach the port would be the one asking. Windows is the exception: what
+    runs there is fixed and checked, and it gains administrator rights only when the person at
+    that computer accepts Windows' own prompt, so that prompt is the consent. Takes no input at
+    all; what runs is decided by the host alone.
     """
     from backend.core import ipmitool
     from backend.main import auth, config
 
     if config.demo:
         return {"success": False, "error_code": "ipmitool_install_demo"}
-    if not await auth.is_auth_enabled():
+    if ipmitool.host_platform() != "windows" and not await auth.is_auth_enabled():
         return {"success": False, "error_code": "ipmitool_install_needs_login"}
     logger.warning("ipmitool install requested from the web UI by %s", user)
     return await ipmitool.install(config.ipmi.auto_install_ipmitool)

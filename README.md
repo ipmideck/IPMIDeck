@@ -144,6 +144,13 @@ With this on, IPMIDeck installs `ipmitool` itself only when it runs as root, or 
 `sudo` that needs no password; on macOS, as the user who owns Homebrew. It never asks for a
 password, and the button needs the login to be on. Otherwise it shows the command to run.
 
+On Windows neither the setting nor the login is needed. **Install now** downloads Dell iDRAC
+Tools 11.4.0.0 from `dl.dell.com`, checks it against the SHA-256 Dell publishes, and installs
+it quietly; the only step left to you is the Windows administrator prompt on the computer
+running IPMIDeck. `ipmitool.exe` ends up in `Program Files\Dell\SysMgt\iDRACTools\IPMI`.
+Supported: Windows 10 and 11 (64-bit), Windows Server 2022 and 2025. When IPMIDeck runs as a
+Windows service there is no button, because nobody would see the prompt.
+
 ---
 
 ## Documentation

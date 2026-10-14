@@ -155,7 +155,8 @@ class IPMIConfig:
     backend: str = "ipmitool"
     # Lets the web UI install ipmitool with the system package manager when it is missing. Off by
     # default: it runs a package manager as root, so the operator turns it on knowingly, and it
-    # only works when the app already runs as root or has sudo without a password.
+    # only works when the app already runs as root or has sudo without a password. Not read on
+    # Windows, where the pinned Dell installer runs behind Windows' own administrator prompt.
     auto_install_ipmitool: bool = False
 
     def __post_init__(self):
