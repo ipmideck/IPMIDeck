@@ -71,7 +71,7 @@ left out. `tests/unit/test_changelog_format.py` enforces this.
   version on demand, whatever the automatic setting is.
 - **ipmitool can be installed from the web UI.** The missing-ipmitool notice has an Install
   button: it runs the package manager when `ipmi.auto_install_ipmitool` is on and IPMIDeck is
-  privileged, and otherwise shows the command. On Windows it finds Dell's bundled ipmitool.exe.
+  privileged. On Windows it unpacks Dell's ipmitool.exe into the data folder, with no admin rights.
 - **A newer version is announced in the console, with its upgrade command.** The first time the
   automatic check finds one, the console says so whatever its verbosity (the log, when there is
   no console), with the command for this install: Docker, pip or git.

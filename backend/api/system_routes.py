@@ -530,13 +530,13 @@ async def get_config():
 async def install_ipmitool(user: str = Depends(require_auth)):
     """Install ipmitool with the host's package manager, when the configuration allows it.
 
-    On Windows, the pinned Dell installer is downloaded, checked and started instead.
+    On Windows, the pinned Dell package is downloaded, checked and unpacked into the data folder
+    instead.
 
     Refused with authentication switched off: this runs a package manager as root, and without a
     login anyone who can reach the port would be the one asking. Windows is the exception: what
-    runs there is fixed and checked, and it gains administrator rights only when the person at
-    that computer accepts Windows' own prompt, so that prompt is the consent. Takes no input at
-    all; what runs is decided by the host alone.
+    happens there is fixed and checked, and nothing gains any rights: one known file is unpacked
+    into IPMIDeck's own data folder. Takes no input at all; what runs is decided by the host alone.
     """
     from backend.core import ipmitool
     from backend.main import auth, config

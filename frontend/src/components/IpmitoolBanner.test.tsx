@@ -102,6 +102,20 @@ describe("the install dialog", () => {
     expect(await within(dialog).findByText(/ipmitool is installed/)).toBeInTheDocument();
   });
 
+  it("keeps the success on screen after the notice itself goes away", async () => {
+    // The recheck after a good install finds the program, which hides the notice; the dialog
+    // must stay until it is closed, or the result is never seen.
+    ipmitool = { ...linux, install: { automatic: true, reason: null } };
+    const dialog = await openDialog();
+    ipmitool = { available: true, install_command: null, platform: "linux" };
+    await userEvent.click(within(dialog).getByRole("button", { name: "Install now" }));
+    expect(await screen.findByText(/ipmitool is installed/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(screen.getByText(/ipmitool is installed/)).toBeInTheDocument();
+    await userEvent.click(screen.getAllByRole("button", { name: "Close" })[0]);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
   it("shows the failure, the output and the command when the install fails", async () => {
     ipmitool = { ...linux, install: { automatic: true, reason: null } };
     installAnswer = {
@@ -129,35 +143,48 @@ describe("the install dialog", () => {
     supported_os: ["Windows 10 (64-bit)", "Windows 11 (64-bit)", "Windows Server 2022", "Windows Server 2025"],
   };
 
-  it("guides Windows through a vendor tool instead of inventing a command", async () => {
-    ipmitool = {
-      available: false,
-      install_command: null,
-      platform: "windows",
-      os_label: "Windows",
-      install: { automatic: false, reason: "no_desktop" },
-      search_dirs: ["C:\\Program Files\\Dell\\SysMgt\\bmc"],
-      windows_package: windowsPackage,
-    };
-    const dialog = await openDialog();
-    expect(dialog).toHaveTextContent("iDRAC Tools");
-    expect(dialog).toHaveTextContent("C:\\Program Files\\Dell\\SysMgt\\bmc");
-    expect(dialog).toHaveTextContent("Windows service");
-    expect(dialog).not.toHaveTextContent("WSL");
-    expect(within(dialog).queryByRole("button", { name: "Install now" })).toBeNull();
-  });
+  const windowsDirs = [
+    "C:\\IPMIDeck\\data\\tools\\ipmitool",
+    "C:\\Program Files\\Dell\\SysMgt\\bmc",
+  ];
 
-  it("shows Windows where the Dell installer comes from and offers to install it", async () => {
+  it("after a failed unpack, tells Windows where to put ipmitool.exe by hand", async () => {
     ipmitool = {
       available: false,
       install_command: null,
       platform: "windows",
       os_label: "Windows",
       install: { automatic: true, reason: null },
-      search_dirs: ["C:\\Program Files\\Dell\\SysMgt\\bmc"],
+      search_dirs: windowsDirs,
+      windows_package: windowsPackage,
+    };
+    installAnswer = {
+      success: false,
+      error_code: "ipmitool_install_windows_failed",
+      output: "msiexec exit code 1603: the unpacking failed",
+    };
+    const dialog = await openDialog();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Install now" }));
+    expect(await within(dialog).findByText("That didn't work.")).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("the unpacking failed");
+    expect(dialog).toHaveTextContent("first folder under Details");
+    expect(dialog).toHaveTextContent(windowsDirs[0]);
+    expect(dialog).not.toHaveTextContent("WSL");
+    expect(within(dialog).getByRole("button", { name: "Try again" })).toBeInTheDocument();
+  });
+
+  it("shows Windows where the Dell package comes from and offers to unpack it", async () => {
+    ipmitool = {
+      available: false,
+      install_command: null,
+      platform: "windows",
+      os_label: "Windows",
+      install: { automatic: true, reason: null },
+      search_dirs: windowsDirs,
       windows_package: windowsPackage,
     };
     const dialog = await openDialog();
+    expect(dialog).toHaveTextContent("no administrator rights are needed");
     expect(dialog).toHaveTextContent("dl.dell.com");
     expect(dialog).toHaveTextContent(windowsPackage.sha256);
     expect(dialog).toHaveTextContent("Windows 11 (64-bit)");

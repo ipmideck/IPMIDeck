@@ -128,7 +128,7 @@ your system, and the web UI shows a notice with an **Install** button.
 | Alpine | `sudo apk add ipmitool` |
 | macOS (Homebrew) | `brew install ipmitool` |
 | FreeBSD | `sudo pkg install ipmitool` |
-| Windows | Install Dell iDRAC Tools or the Dell OpenManage BMC Utility, which include `ipmitool.exe`. IPMIDeck finds it in the Dell folder by itself; a copy anywhere else must be on `PATH` |
+| Windows | Press **Install now** in the web UI (see below), or put `ipmitool.exe` and the DLL files next to it on `PATH` |
 
 The Docker image already includes `ipmitool`.
 
@@ -145,11 +145,14 @@ With this on, IPMIDeck installs `ipmitool` itself only when it runs as root, or 
 password, and the button needs the login to be on. Otherwise it shows the command to run.
 
 On Windows neither the setting nor the login is needed. **Install now** downloads Dell iDRAC
-Tools 11.4.0.0 from `dl.dell.com`, checks it against the SHA-256 Dell publishes, and installs
-it quietly; the only step left to you is the Windows administrator prompt on the computer
-running IPMIDeck. `ipmitool.exe` ends up in `Program Files\Dell\SysMgt\iDRACTools\IPMI`.
-Supported: Windows 10 and 11 (64-bit), Windows Server 2022 and 2025. When IPMIDeck runs as a
-Windows service there is no button, because nobody would see the prompt.
+Tools 11.4.0.0 from `dl.dell.com`, checks it against the SHA-256 Dell publishes, and takes
+`ipmitool.exe` out of it into `tools\ipmitool` in the IPMIDeck data folder. Nothing is installed
+in Windows and no administrator rights are needed, so it also works when IPMIDeck runs as a
+service. Supported: Windows 10 and 11 (64-bit), Windows Server 2022 and 2025.
+
+Installing Dell iDRAC Tools yourself is not enough on its own: Dell's installer makes its folder
+readable by administrators only, so IPMIDeck finds that copy only when it runs with administrator
+rights.
 
 ---
 

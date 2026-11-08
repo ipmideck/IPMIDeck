@@ -16,7 +16,7 @@ export interface IpmitoolStatus {
   windows_package?: WindowsPackage;
 }
 
-/** The Dell installer the backend downloads and starts on Windows. */
+/** The Dell package the backend downloads on Windows and unpacks ipmitool from. */
 export interface WindowsPackage {
   name: string;
   version: string;
@@ -48,11 +48,9 @@ const REASONS = new Set([
   "timeout",
   "not_found",
   "failed",
-  "no_desktop",
   "download",
   "checksum",
   "extract",
-  "cancelled",
   "windows_timeout",
   "windows_failed",
   "windows_not_found",
@@ -75,8 +73,9 @@ interface IpmitoolInstallDialogProps {
  * What it takes to install ipmitool on the machine running IPMIDeck, and doing it when the
  * backend can. The backend decides: it installs only when allowed in config.yaml and already
  * privileged, so this dialog never asks for a password — it explains why it cannot, and shows
- * the command to run instead. On Windows it shows the Dell installer the backend downloads,
- * where from, its checksum and the supported systems; the administrator prompt is Windows' own.
+ * the command to run instead. On Windows it shows the Dell package the backend downloads, where
+ * from, its checksum and the supported systems; ipmitool is unpacked into the data folder, so
+ * nothing there asks for administrator rights either.
  */
 export function IpmitoolInstallDialog({
   open,
