@@ -1,4 +1,5 @@
 import { get } from "@/api/client";
+import { useDisplayPrefsStore } from "@/stores/display-prefs-store";
 import { useServerStore, type Server } from "@/stores/server-store";
 
 /**
@@ -20,4 +21,7 @@ export async function bootstrapAppData(): Promise<void> {
   } catch {
     setLoaded(true);
   }
+  // How dates and times are shown. Not awaited: until it lands the defaults apply, which
+  // match the formats used before the preference existed.
+  void useDisplayPrefsStore.getState().hydrate();
 }

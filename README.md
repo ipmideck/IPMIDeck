@@ -201,6 +201,11 @@ The `config.yaml` written on first run covers the common settings, not every key
 what it contains, and add the rest by hand if you need them. The same settings are also
 editable at runtime from the in-app **Settings** page.
 
+Dates and times are formatted in the browser. The time zone, 12- or 24-hour clock, seconds and
+ISO `YYYY-MM-DD` dates are chosen under **Settings → Appearance → Date and time** and stored on the
+server, so every browser shows the same; the container's `TZ` does not change them. Event log
+(SEL) entries keep the BMC's own clock.
+
 Note that whether authentication is enabled is **not** a config-file setting. It is stored in
 the database and changed from the Security settings, so write access to `config.yaml` cannot be
 used to turn the login off.

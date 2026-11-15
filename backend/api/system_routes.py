@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import csv
 import io
+import json
 import logging
+import re
 import shutil
 import zipfile
 from datetime import datetime, timezone
@@ -57,7 +59,43 @@ _ALLOWED_APP_CONFIG_KEYS = {
     "currency",
     "alerting.notifications_enabled",
     "data.retention_days",
+    # How dates and times are shown in the interface: a JSON object string with exactly
+    # timeZone ("browser" or an IANA name), timeFormat ("auto" | "24h" | "12h"),
+    # seconds ("auto" | "show" | "hide") and dateFormat ("language" | "iso").
+    # Validated and re-serialized by _validate_display_datetime before it is stored.
+    "display.datetime",
 }
+
+_DISPLAY_DATETIME_ENUMS = {
+    "timeFormat": {"auto", "24h", "12h"},
+    "seconds": {"auto", "show", "hide"},
+    "dateFormat": {"language", "iso"},
+}
+_DISPLAY_DATETIME_FIELDS = {"timeZone", *_DISPLAY_DATETIME_ENUMS}
+_DISPLAY_DATETIME_MAX_RAW = 512
+# Shape check only: the zone itself is resolved by the browser, which falls back to its own
+# zone when the name is unknown. Checking it against a zone database here would need tzdata.
+_TIME_ZONE_RE = re.compile(r"[A-Za-z0-9_+\-/]{1,64}")
+
+
+def _validate_display_datetime(value: object) -> str | None:
+    """Return the canonical JSON for a valid display.datetime value, or None if invalid."""
+    if not isinstance(value, str) or len(value) > _DISPLAY_DATETIME_MAX_RAW:
+        return None
+    try:
+        parsed = json.loads(value)
+    except ValueError:
+        return None
+    if not isinstance(parsed, dict) or set(parsed) != _DISPLAY_DATETIME_FIELDS:
+        return None
+    for field, allowed in _DISPLAY_DATETIME_ENUMS.items():
+        if not isinstance(parsed[field], str) or parsed[field] not in allowed:
+            return None
+    zone = parsed["timeZone"]
+    if not isinstance(zone, str) or not _TIME_ZONE_RE.fullmatch(zone):
+        return None
+    return json.dumps(parsed, sort_keys=True, separators=(",", ":"))
+
 
 # Readable here but NOT writable. Whether IPMIDeck may check for a newer version on its own is an
 # ordinary app_config row, so it can be read by name like the others; the interface itself takes
@@ -102,6 +140,13 @@ async def put_app_config_value(key: str, body: AppConfigValueBody):
     """
     if key not in _ALLOWED_APP_CONFIG_KEYS:
         return {"success": False, "error": "key_not_allowed"}
+    if key == "display.datetime":
+        canonical = _validate_display_datetime(body.value)
+        if canonical is None:
+            return {"success": False, "error": "invalid_value"}
+        from backend.main import db
+        await db.set_config(key, canonical)
+        return {"success": True, "key": key, "value": canonical}
     from backend.main import db
     v = body.value
     if isinstance(v, bool):

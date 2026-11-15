@@ -14,6 +14,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useUIOverlayStore } from "@/stores/ui-overlay-store";
 import { useUpdateStore } from "@/stores/update-store";
+import { useDateTimeFormat } from "@/stores/display-prefs-store";
 import { useSettings } from "./SettingsContext";
 import { SectionPanel, FieldGroup, secondaryBtnClass } from "./primitives";
 
@@ -31,6 +32,8 @@ interface AboutSectionProps {
  */
 export function AboutSection({ headingRef }: AboutSectionProps) {
   const { t } = useTranslation();
+  // The browser's own locale, as this line has always used; zone and clock follow the preference.
+  const { formatDateTime } = useDateTimeFormat({ browserLocale: true });
   const { appVersion, online, offlineTip } = useSettings();
   const setChangelogOpen = useUIOverlayStore((s) => s.setChangelogOpen);
   const setUpdateOpen = useUIOverlayStore((s) => s.setUpdateOpen);
@@ -56,7 +59,7 @@ export function AboutSection({ headingRef }: AboutSectionProps) {
   const version = appVersion ?? state?.current_version ?? null;
 
   const lastChecked = state?.checked_at
-    ? new Date(state.checked_at).toLocaleString()
+    ? formatDateTime(state.checked_at, { seconds: true })
     : null;
 
   async function handleCheck() {

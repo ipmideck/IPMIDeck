@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { useServerStore } from "@/stores/server-store";
 import { useCurrencyStore } from "@/stores/currency-store";
 import { useEnergyResetStore } from "@/stores/energy-reset-store";
+import { useDateTimeFormat } from "@/stores/display-prefs-store";
 import { SUPPORTED_CURRENCIES, currencyOptionLabel, type CurrencyCode } from "@/lib/currency";
 import { cn } from "@/lib/utils";
 import { useSettings } from "./SettingsContext";
@@ -23,7 +24,8 @@ interface EnergySectionProps {
  * even when the user never lands on this section.
  */
 export function EnergySection({ headingRef }: EnergySectionProps) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
+  const { formatDateTime } = useDateTimeFormat();
   const { online, offlineTip } = useSettings();
   const { servers } = useServerStore();
   const currency = useCurrencyStore((s) => s.currency);
@@ -34,7 +36,6 @@ export function EnergySection({ headingRef }: EnergySectionProps) {
   const resets = useEnergyResetStore((s) => s.resets);
   const resetServer = useEnergyResetStore((s) => s.resetServer);
   const resetAll = useEnergyResetStore((s) => s.resetAll);
-  const energyLocale = i18n.resolvedLanguage || "en";
 
   return (
     <SectionPanel
@@ -107,7 +108,7 @@ export function EnergySection({ headingRef }: EnergySectionProps) {
                   <div className="truncate text-sm font-medium text-foreground">{server.name}</div>
                   <div className="text-xs text-muted-foreground">
                     {resets[server.id]
-                      ? t("settings.energy.lastReset", { value: new Date(resets[server.id]!).toLocaleString(energyLocale) })
+                      ? t("settings.energy.lastReset", { value: formatDateTime(resets[server.id]!, { seconds: true }) })
                       : t("settings.energy.neverReset")}
                   </div>
                 </div>
