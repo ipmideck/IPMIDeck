@@ -4,16 +4,22 @@ from __future__ import annotations
 
 import json
 import math
+from typing import Literal
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from backend.core.i18n import get_lang, t
 from backend.core.ipmi_service import is_fan_capable
 from backend.core.ipmitool import ERROR_CODE as IPMITOOL_MISSING
 from backend.core.ipmitool import known_missing as ipmitool_known_missing
 from backend.modules import get_ctx
+from backend.modules.fanpilot.engine import (
+    MAX_SOURCE_SENSORS,
+    clean_sensor_names,
+    normalize_profile_sensors,
+)
 from backend.modules.fanpilot.tasks import get_last_state, set_last_state, wake_loop
 from backend.modules.sensors.tasks import wake_loop as wake_sensor_loop
 
@@ -79,7 +85,41 @@ def _non_finite_response(lang: str) -> JSONResponse:
     )
 
 
-class ProfileCreate(BaseModel):
+SensorMode = Literal["max", "avg"]
+
+
+class _SensorFields(BaseModel):
+    """Validation shared by the create and update bodies for the sensors a profile follows.
+
+    source_sensors (the list) wins over source_sensor; a body with only source_sensor is an
+    older client and means that one sensor, combined as the hottest.
+    """
+
+    @field_validator("source_sensors", check_fields=False)
+    @classmethod
+    def _check_sensor_list(cls, value):
+        if value is None:
+            return None
+        names = clean_sensor_names(value)
+        if names is None:
+            raise ValueError(
+                f"source_sensors must hold 1 to {MAX_SOURCE_SENSORS} different, non-empty "
+                "sensor names of at most 64 characters"
+            )
+        return names
+
+    @field_validator("source_sensor", check_fields=False)
+    @classmethod
+    def _check_single_sensor(cls, value):
+        if value is None:
+            return None
+        names = clean_sensor_names([value])
+        if names is None:
+            raise ValueError("source_sensor must be a non-empty name of at most 64 characters")
+        return names[0]
+
+
+class ProfileCreate(_SensorFields):
     name: str
     description: str = ""
     curve_points: list[dict]
@@ -87,9 +127,11 @@ class ProfileCreate(BaseModel):
     hysteresis: float = 3.0
     safety_threshold: float = 85.0
     source_sensor: str = "CPU Temp"
+    source_sensors: list[str] | None = None
+    sensor_mode: SensorMode | None = None
 
 
-class ProfileUpdate(BaseModel):
+class ProfileUpdate(_SensorFields):
     name: str | None = None
     description: str | None = None
     curve_points: list[dict] | None = None
@@ -97,6 +139,14 @@ class ProfileUpdate(BaseModel):
     hysteresis: float | None = None
     safety_threshold: float | None = None
     source_sensor: str | None = None
+    source_sensors: list[str] | None = None
+    sensor_mode: SensorMode | None = None
+
+
+def _with_sensors(row: dict) -> dict:
+    """Replace the stored sensor-list text with the list the control loop actually follows."""
+    row["source_sensors"], row["sensor_mode"] = normalize_profile_sensors(row)
+    return row
 
 
 class FanMode(BaseModel):
@@ -118,6 +168,7 @@ async def list_profiles():
     rows = await ctx.db.fetchall("SELECT * FROM fan_profiles ORDER BY is_preset DESC, name")
     for row in rows:
         row["curve_points"] = _load_curve(row["curve_points"])
+        _with_sensors(row)
     return {"profiles": rows}
 
 
@@ -125,12 +176,16 @@ async def list_profiles():
 async def create_profile(body: ProfileCreate, lang: str = Depends(get_lang)):
     if _has_non_finite(body):
         return _non_finite_response(lang)
+    sensors = body.source_sensors or [body.source_sensor]
+    mode = body.sensor_mode or "max"
     ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
+    # source_sensor always holds the first sensor, so an older version reads a real one.
     await ctx.db.execute(
-        "INSERT INTO fan_profiles (name, description, curve_points, interpolation, hysteresis, safety_threshold, source_sensor) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO fan_profiles (name, description, curve_points, interpolation, hysteresis, "
+        "safety_threshold, source_sensor, source_sensors, sensor_mode) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (body.name, body.description, json.dumps(body.curve_points), body.interpolation,
-         body.hysteresis, body.safety_threshold, body.source_sensor),
+         body.hysteresis, body.safety_threshold, sensors[0], json.dumps(sensors), mode),
     )
     await ctx.db.commit()
     row = await ctx.db.fetchone("SELECT last_insert_rowid() as id")
@@ -144,7 +199,7 @@ async def get_profile(profile_id: int, lang: str = Depends(get_lang)):
     if not row:
         return {"success": False, "error": t("profile_not_found", lang)}
     row["curve_points"] = _load_curve(row["curve_points"])
-    return {"profile": row}
+    return {"profile": _with_sensors(row)}
 
 
 @router.put("/profiles/{profile_id}")
@@ -158,11 +213,29 @@ async def update_profile(profile_id: int, body: ProfileUpdate, lang: str = Depen
 
     updates = []
     params = []
-    for field in ["name", "description", "interpolation", "hysteresis", "safety_threshold", "source_sensor"]:
+    for field in ["name", "description", "interpolation", "hysteresis", "safety_threshold"]:
         val = getattr(body, field, None)
         if val is not None:
             updates.append(f"{field} = ?")
             params.append(val)
+
+    # The list wins; a body with only source_sensor comes from an older client and means
+    # that one sensor, combined as the hottest unless the body also names a mode.
+    sensors = None
+    mode = body.sensor_mode
+    if body.source_sensors is not None:
+        sensors = body.source_sensors
+    elif body.source_sensor is not None:
+        sensors = [body.source_sensor]
+        mode = mode or "max"
+    if sensors is not None:
+        updates.append("source_sensor = ?")
+        params.append(sensors[0])
+        updates.append("source_sensors = ?")
+        params.append(json.dumps(sensors))
+    if mode is not None:
+        updates.append("sensor_mode = ?")
+        params.append(mode)
 
     if body.curve_points is not None:
         updates.append("curve_points = ?")

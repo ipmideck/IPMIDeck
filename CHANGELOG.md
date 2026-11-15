@@ -64,11 +64,10 @@ left out. `tests/unit/test_changelog_format.py` enforces this.
 - **See what changed, from inside the app.** The version in the sidebar opens the release
   history over any page. It ships inside the package, so it works with no network, and security
   releases are marked.
-- **Update checks, on by default.** At start-up and once a day IPMIDeck asks whether a newer
-  version exists, sending only the product name and version; nothing is downloaded. Turn it off
-  under **Settings → About → Updates**, or everywhere with `updates.enabled: false`.
-- **A Check now button, and a console `[g]` key that really checks.** Both look up the latest
-  version on demand, whatever the automatic setting is.
+- **Update checks, on by default, and a Check now button.** At start-up and once a day IPMIDeck
+  asks whether a newer version exists, sending only its name and version; nothing is downloaded.
+  Check now and the console `[g]` key ask on demand. Turn it off in **Settings → About → Updates**
+  or `updates.enabled: false`.
 - **ipmitool can be installed from the web UI.** The missing-ipmitool notice has an Install
   button: it runs the package manager when `ipmi.auto_install_ipmitool` is on and IPMIDeck is
   privileged. On Windows it unpacks Dell's ipmitool.exe into the data folder, with no admin rights.
@@ -84,6 +83,10 @@ left out. `tests/unit/test_changelog_format.py` enforces this.
   Date and time**, pick an IANA time zone, a 24- or 12-hour clock, seconds, and ISO `YYYY-MM-DD`
   dates, whatever the interface language or the container's `TZ`. Nothing changes until you do.
   ([#16](https://github.com/ipmideck/IPMIDeck/issues/16))
+- **A fan profile can follow several temperature sensors.** Tick up to eight in the profile
+  settings and choose whether the curve follows the hottest or their average. The safety override
+  always watches the hottest, and if any of them stops reporting the fans still fail safe.
+  ([#19](https://github.com/ipmideck/IPMIDeck/issues/19))
 
 ### Changed
 

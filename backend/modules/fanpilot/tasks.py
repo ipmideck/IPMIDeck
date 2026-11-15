@@ -13,7 +13,9 @@ from backend.modules.fanpilot.engine import (
     CURVE_NOT_FINITE,
     CURVE_UNREADABLE,
     FanPilotController,
+    combine_temps,
     curve_problem,
+    normalize_profile_sensors,
 )
 
 logger = logging.getLogger("ipmideck.modules.fanpilot")
@@ -790,7 +792,8 @@ async def fanpilot_loop():
                 "SELECT s.id, s.host, s.username_enc, s.password_enc, s.vendor, "
                 "s.fanpilot_profile_id, "
                 "s.fanpilot_enabled, s.is_online, fp.curve_points, fp.hysteresis, "
-                "fp.safety_threshold, fp.source_sensor, fp.name as profile_name "
+                "fp.safety_threshold, fp.source_sensor, fp.source_sensors, fp.sensor_mode, "
+                "fp.name as profile_name "
                 "FROM servers s "
                 "LEFT JOIN fan_profiles fp ON s.fanpilot_profile_id = fp.id "
                 "WHERE s.fanpilot_enabled = 1"
@@ -910,26 +913,34 @@ async def fanpilot_loop():
                     )
                 ctrl = _controllers[server_id]
 
-                # Get current temperature from latest sensor reading.
-                # 04-W1-02: also pull the timestamp for the freshness gate.
-                source_sensor = server["source_sensor"] or "CPU Temp"
-                reading = await ctx.db.fetchone(
-                    "SELECT value, timestamp FROM sensor_readings "
-                    "WHERE server_id = ? AND sensor_name = ? "
-                    "ORDER BY timestamp DESC LIMIT 1",
-                    (server_id, source_sensor),
-                )
+                # Latest reading of every sensor the profile follows (one query each, at
+                # most MAX_SOURCE_SENSORS). 04-W1-02: also pull the timestamps for the
+                # freshness gate. Every guard below applies to the whole set: one bad
+                # sensor fails the tick, none is ever silently dropped.
+                sensors, sensor_mode = normalize_profile_sensors(server)
+                readings = []
+                for sensor_name in sensors:
+                    row = await ctx.db.fetchone(
+                        "SELECT value, timestamp FROM sensor_readings "
+                        "WHERE server_id = ? AND sensor_name = ? "
+                        "ORDER BY timestamp DESC LIMIT 1",
+                        (server_id, sensor_name),
+                    )
+                    readings.append((sensor_name, row))
+
                 # C11: a vanished source row (missing / NULL value) is invisible to the
                 # freshness gate below (which only runs when a row exists). Track the gap
                 # per server; a sustained gap (>= stale_threshold) routes through the SAME
                 # fail-safe primitive + a critical alert. A single missing tick does NOT trip.
-                has_reading = bool(reading) and reading["value"] is not None
-                if not has_reading:
+                # Any one selected sensor missing counts as a missing tick.
+                missing = [name for name, row in readings if not row or row["value"] is None]
+                if missing:
+                    missing_names = ", ".join(missing)
                     if _check_source_missing(server_id, False, stale_threshold):
                         logger.warning(
                             "FanPilot source-missing guard TRIPPED server_id=%s "
                             "threshold=%.1fs sensor=%s",
-                            server_id, stale_threshold, source_sensor,
+                            server_id, stale_threshold, missing_names,
                         )
                         if auto_recover_enabled:
                             await _recover_to_bmc_auto(
@@ -938,25 +949,29 @@ async def fanpilot_loop():
                                 reason="source_missing", vendor=server["vendor"] or "dell",
                             )
                             await ctx.ws.broadcast_alert(
-                                server_id, "critical", source_sensor,
+                                server_id, "critical", missing_names,
                                 "Source sensor reading vanished; failed safe", None,
                             )
                     continue
-                # Usable reading: refresh the last-seen so the gap timer resets.
+                # Usable readings: refresh the last-seen so the gap timer resets.
                 _check_source_missing(server_id, True, stale_threshold)
 
-                # 04-W1-02 freshness gate: if the latest sensor reading is
-                # older than 2 × poll_interval, treat as missing → trigger the
-                # SAME recovery pathway as 04-W1-01. Closes the "sensor frozen
-                # with is_online=1" gap (e.g. sensor rename, DB write lag).
-                reading_ts = _parse_sqlite_timestamp(reading["timestamp"])
-                if reading_ts is not None:
-                    age_seconds = (datetime.utcnow() - reading_ts).total_seconds()
+                # 04-W1-02 freshness gate: if the OLDEST selected reading is older than
+                # 2 x poll_interval, treat as missing and trigger the SAME recovery pathway
+                # as 04-W1-01. Closes the "sensor frozen with is_online=1" gap (e.g.
+                # sensor rename, DB write lag). An unparsable timestamp is skipped.
+                oldest = None
+                for name, row in readings:
+                    reading_ts = _parse_sqlite_timestamp(row["timestamp"])
+                    if reading_ts is not None and (oldest is None or reading_ts < oldest[1]):
+                        oldest = (name, reading_ts)
+                if oldest is not None:
+                    age_seconds = (datetime.utcnow() - oldest[1]).total_seconds()
                     if age_seconds > stale_threshold:
                         logger.warning(
                             "FanPilot freshness-gate triggered server_id=%s "
                             "age=%.1fs threshold=%.1fs sensor=%s",
-                            server_id, age_seconds, stale_threshold, source_sensor,
+                            server_id, age_seconds, stale_threshold, oldest[0],
                         )
                         if auto_recover_enabled:
                             await _recover_to_bmc_auto(
@@ -968,7 +983,7 @@ async def fanpilot_loop():
                         # Don't pass stale data to compute_fan_speed.
                         continue
 
-                current_temp = reading["value"]
+                values = [row["value"] for _name, row in readings]
 
                 # === P0-2 garbage-value guard (D-P02-01..04) ===
                 # Distinct from the freshness gate above (value-blind): a FRESH row
@@ -976,12 +991,20 @@ async def fanpilot_loop():
                 # the curve (it would floor fans to idle). Debounce N=3 consecutive bad
                 # ticks per server so a single transient bad read doesn't trip; on
                 # crossing N route through the SAME fail-safe primitive + a critical
-                # alert, then skip this tick.
-                if _check_garbage_value(server_id, current_temp):
+                # alert, then skip this tick. Any one selected sensor out of range makes
+                # the tick bad; the sensor farthest outside the range is the one named.
+                worst = None
+                for name, value in zip(sensors, values):
+                    if GARBAGE_TEMP_FLOOR_C < value < GARBAGE_TEMP_CEILING_C:
+                        continue
+                    distance = max(GARBAGE_TEMP_FLOOR_C - value, value - GARBAGE_TEMP_CEILING_C)
+                    if worst is None or distance > worst[2]:
+                        worst = (name, value, distance)
+                if _check_garbage_value(server_id, worst[1] if worst else max(values)):
                     logger.warning(
                         "FanPilot garbage-value guard TRIPPED server_id=%s value=%s "
                         "threshold=%d sensor=%s",
-                        server_id, current_temp, GARBAGE_DEBOUNCE_TICKS, source_sensor,
+                        server_id, worst[1], GARBAGE_DEBOUNCE_TICKS, worst[0],
                     )
                     await _recover_to_bmc_auto(
                         ctx, server_id, server["host"],
@@ -989,24 +1012,29 @@ async def fanpilot_loop():
                         reason="sensor_garbage", vendor=server["vendor"] or "dell",
                     )
                     await ctx.ws.broadcast_alert(
-                        server_id, "critical", source_sensor,
-                        f"Implausible sensor value {current_temp}C; failed safe",
-                        current_temp,
+                        server_id, "critical", worst[0],
+                        f"Implausible sensor value {worst[1]}C; failed safe",
+                        worst[1],
                     )
                     # Reset after acting; recovery set fanpilot_enabled=0 so the server
                     # won't re-enter this loop until the operator re-engages.
                     _garbage_counts[server_id] = 0
                     continue
-                if current_temp <= GARBAGE_TEMP_FLOOR_C or current_temp >= GARBAGE_TEMP_CEILING_C:
+                if worst is not None:
                     # Bad value but below the debounce threshold — log and skip this tick
                     # WITHOUT feeding the garbage to the curve (don't idle the fans on a blip).
                     logger.warning(
                         "FanPilot garbage-value guard server_id=%s value=%s count=%d/%d "
                         "sensor=%s (below trip threshold; skipping tick)",
-                        server_id, current_temp, _garbage_counts.get(server_id, 0),
-                        GARBAGE_DEBOUNCE_TICKS, source_sensor,
+                        server_id, worst[1], _garbage_counts.get(server_id, 0),
+                        GARBAGE_DEBOUNCE_TICKS, worst[0],
                     )
                     continue
+
+                # The curve and hysteresis follow the combined value (the hottest or the
+                # mean); the safety override always watches the hottest sensor.
+                hottest = max(values)
+                current_temp = combine_temps(values, sensor_mode)
 
                 # Apply fan speed via IPMI. P0-3: _apply_fan_write consumes the
                 # FanWriteResult (transient retries / hard-reject immediate fall-back /
@@ -1024,7 +1052,9 @@ async def fanpilot_loop():
                 # the rest of the fleet under control.
                 await _report_curve_problem(ctx, server, curve_issue)
                 try:
-                    target_speed = ctrl.compute_fan_speed(curve_points, current_temp)
+                    target_speed = ctrl.compute_fan_speed(
+                        curve_points, current_temp, safety_temp=hottest
+                    )
 
                     accepted = await _apply_fan_write(ctx, server, target_speed)
                     if not accepted:
