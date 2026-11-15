@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from backend.core.i18n import get_lang, t
+from backend.core.ipmitool import ipmi_failure
 from backend.modules import get_ctx
 
 router = APIRouter()
@@ -75,4 +76,4 @@ async def refresh_fru(server_id: str, lang: str = Depends(get_lang)):
 
         return {"success": True, "count": len(entries)}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, **ipmi_failure(e, lang)}

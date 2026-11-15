@@ -279,7 +279,10 @@ class _LoopWS:
         )
 
     async def broadcast_fanpilot_status(self, server_id, mode, profile, speed_pct, source_temp):
-        self.status.append({"server_id": server_id, "mode": mode, "speed_pct": speed_pct})
+        self.status.append(
+            {"server_id": server_id, "mode": mode, "speed_pct": speed_pct,
+             "source_temp": source_temp}
+        )
 
 
 class _LoopIPMI:
@@ -306,8 +309,13 @@ class _LoopIPMI:
 class _LoopDB:
     """Fake DB for the whole loop: dispatch fetchall by SQL, fetchone -> a fresh sensor reading."""
 
-    def __init__(self, servers: list[dict], config: dict | None = None) -> None:
+    def __init__(
+        self, servers: list[dict], config: dict | None = None, readings: dict | None = None
+    ) -> None:
         self._servers = servers
+        # Optional per-sensor answers (sensor name -> row dict, or None for no row). When unset,
+        # every sensor_readings lookup answers one fresh row holding sensor_value.
+        self._readings = readings
         self._config = config or {}
         self.executed: list[tuple[str, tuple]] = []
         self.commits = 0
@@ -329,6 +337,8 @@ class _LoopDB:
 
     async def fetchone(self, sql, params=()):
         if "FROM sensor_readings" in sql:
+            if self._readings is not None:
+                return self._readings.get(params[1])
             return {"value": self.sensor_value, "timestamp": _fresh_iso()}
         return None
 
@@ -351,20 +361,21 @@ def _reset_loop_state() -> None:
     for name in (
         "_last_online_state", "_controllers", "_garbage_counts", "_source_last_seen",
         "_pending_readback", "_last_commanded_speed", "_last_state", "_monitoring_only_alerted",
+        "_curve_problem_alerted",
     ):
         m = getattr(fp_tasks, name, None)
         if isinstance(m, dict):
             m.clear()
 
 
-async def _drive_loop(monkeypatch, servers, n_ticks, on_tick=None, config=None):
+async def _drive_loop(monkeypatch, servers, n_ticks, on_tick=None, config=None, readings=None):
     """Run the REAL fanpilot_loop for exactly n_ticks, stopping from the end-of-tick sleep.
 
     on_tick(tick_number) runs BETWEEN ticks (from the timeout==30 sleep hook) so a test can
     mutate a server row (e.g. switch vendor to 'dell') to exercise auto-resume.
     """
     _reset_loop_state()
-    db = _LoopDB(servers, config)
+    db = _LoopDB(servers, config, readings)
     ipmi = _LoopIPMI()
     ws = _LoopWS()
     try:

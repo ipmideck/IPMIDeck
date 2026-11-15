@@ -27,8 +27,7 @@ import { useRangeStore } from "@/stores/range-store";
 import { useEnergyResetStore } from "@/stores/energy-reset-store";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { get } from "@/api/client";
-import i18n from "@/i18n";
-import { intlLocale } from "@/i18n/languages";
+import { useDateTimeFormat } from "@/stores/display-prefs-store";
 
 const SAMPLE_INTERVAL_MS = 3000;
 
@@ -152,7 +151,8 @@ export function usePowerStats(serverId: string): PowerStats {
 }
 
 interface ChartPoint {
-  time: string;
+  /** Live: epoch ms, formatted at render. History: the UTC ISO timestamp from the server. */
+  time: string | number;
   value: number | null;
 }
 
@@ -176,6 +176,7 @@ export function PowerLiveChart({
   color?: string;
 }) {
   const range = useRangeStore((s) => s.range);
+  const { formatTime, formatDateTime } = useDateTimeFormat();
   // Below md: tooltips are tap-triggered (no hover on touch); hover above md (Wave 7).
   const isMobile = useMediaQuery("(max-width: 767px)");
   const [liveData, setLiveData] = useState<ChartPoint[]>([]);
@@ -203,14 +204,11 @@ export function PowerLiveChart({
       lastUpdateRef.current = now;
 
       const v = r[sensorName]?.value;
-      // Interval tick (not a render hook): read the active locale from the i18n singleton
-      // at format-time so X-axis time labels follow the user's locale (D-16).
-      const timeStr = new Date().toLocaleTimeString(intlLocale(i18n.resolvedLanguage), {
-        hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit",
-      });
+      // Keep the instant; the axis formats it at render, so a language or date/time
+      // preference change re-labels points already in the buffer.
       setLiveData((prev) => [
         ...prev,
-        { time: timeStr, value: typeof v === "number" ? v : null },
+        { time: now, value: typeof v === "number" ? v : null },
       ].slice(-60));
     };
 
@@ -303,12 +301,10 @@ export function PowerLiveChart({
           tickLine={false}
           axisLine={false}
           interval="preserveStartEnd"
-          tickFormatter={(t: string) =>
+          tickFormatter={(t: string | number) =>
             range === "live"
-              ? t
-              : new Date(t).toLocaleTimeString(intlLocale(i18n.resolvedLanguage), {
-                  hour12: false, hour: "2-digit", minute: "2-digit",
-                })
+              ? formatTime(t, { seconds: true, clock24: true })
+              : formatTime(t, { seconds: false, clock24: true })
           }
         />
         <YAxis
@@ -326,6 +322,11 @@ export function PowerLiveChart({
             fontSize: "12px",
           }}
           labelStyle={{ color: "var(--color-muted-foreground)" }}
+          labelFormatter={(t) =>
+            range === "live"
+              ? formatTime(t as string | number, { seconds: true, clock24: true })
+              : formatDateTime(t as string | number, { seconds: false, clock24: true })
+          }
           formatter={(value) =>
             typeof value === "number" ? [`${Math.round(value)} W`, sensorName] : [String(value ?? "—"), sensorName]
           }
@@ -464,6 +465,7 @@ export function EnergyKwhChart({ serverId }: { serverId: string }) {
   const readings = useSensorStore((s) => s.readings[serverId]);
   const sensorName = useMemo(() => pickPowerSensorName(readings), [readings]);
   const watts = usePowerWattsHistory(serverId, sensorName);
+  const { formatTime } = useDateTimeFormat();
   // Tap-triggered tooltip on touch (Wave 7); hover on desktop.
   const isMobile = useMediaQuery("(max-width: 767px)");
 
@@ -510,11 +512,7 @@ export function EnergyKwhChart({ serverId }: { serverId: string }) {
             fontSize: "12px",
           }}
           labelStyle={{ color: "var(--color-muted-foreground)" }}
-          labelFormatter={(t) =>
-            new Date(Number(t)).toLocaleTimeString(intlLocale(i18n.resolvedLanguage), {
-              hour12: false, hour: "2-digit", minute: "2-digit",
-            })
-          }
+          labelFormatter={(t) => formatTime(Number(t), { seconds: false, clock24: true })}
           formatter={(value) =>
             typeof value === "number" ? [formatKwh(value * 1000), "kWh"] : [String(value ?? "—"), "kWh"]
           }

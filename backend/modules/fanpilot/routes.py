@@ -3,13 +3,23 @@
 from __future__ import annotations
 
 import json
+import math
+from typing import Literal
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field, field_validator
 
 from backend.core.i18n import get_lang, t
 from backend.core.ipmi_service import is_fan_capable
+from backend.core.ipmitool import ERROR_CODE as IPMITOOL_MISSING
+from backend.core.ipmitool import known_missing as ipmitool_known_missing
 from backend.modules import get_ctx
+from backend.modules.fanpilot.engine import (
+    MAX_SOURCE_SENSORS,
+    clean_sensor_names,
+    normalize_profile_sensors,
+)
 from backend.modules.fanpilot.tasks import get_last_state, set_last_state, wake_loop
 from backend.modules.sensors.tasks import wake_loop as wake_sensor_loop
 
@@ -33,7 +43,83 @@ def _fan_argv_echo(*results) -> str:
     return "; ".join(echoes)
 
 
-class ProfileCreate(BaseModel):
+def _has_non_finite(body: BaseModel) -> bool:
+    """True when a profile body carries NaN / Infinity in a number the control loop reads.
+
+    The request body is parsed by json.loads, which accepts the bare tokens NaN and Infinity.
+    Stored, such a curve cannot be serialised back out (GET answers 500), and a NaN
+    comparison is always False, so a NaN safety_threshold would silently disable the safety
+    override. Checked here rather than with a model validator: FastAPI's 422 body echoes the
+    rejected input, and a NaN in it cannot be encoded as JSON either.
+    """
+    values = [
+        getattr(body, "hysteresis", None),
+        getattr(body, "safety_threshold", None),
+        getattr(body, "curve_points", None),
+    ]
+    # A point is a free-form dict, so a NaN can sit at any depth inside it and still end up
+    # stored; walk the whole structure, not just the top-level values.
+    while values:
+        value = values.pop()
+        if isinstance(value, dict):
+            values.extend(value.values())
+        elif isinstance(value, list):
+            values.extend(value)
+        elif isinstance(value, float) and not math.isfinite(value):
+            return True
+    return False
+
+
+def _load_curve(stored: str):
+    """Decode a stored curve, reading NaN / Infinity as null.
+
+    A row saved before those values were refused would otherwise make the response
+    impossible to encode, and one such profile would take down the whole listing.
+    """
+    return json.loads(stored, parse_constant=lambda _token: None)
+
+
+def _non_finite_response(lang: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=422, content={"success": False, "error": t("invalid_curve_values", lang)}
+    )
+
+
+SensorMode = Literal["max", "avg"]
+
+
+class _SensorFields(BaseModel):
+    """Validation shared by the create and update bodies for the sensors a profile follows.
+
+    source_sensors (the list) wins over source_sensor; a body with only source_sensor is an
+    older client and means that one sensor, combined as the hottest.
+    """
+
+    @field_validator("source_sensors", check_fields=False)
+    @classmethod
+    def _check_sensor_list(cls, value):
+        if value is None:
+            return None
+        names = clean_sensor_names(value)
+        if names is None:
+            raise ValueError(
+                f"source_sensors must hold 1 to {MAX_SOURCE_SENSORS} different, non-empty "
+                "sensor names of at most 64 characters"
+            )
+        return names
+
+    @field_validator("source_sensor", check_fields=False)
+    @classmethod
+    def _check_single_sensor(cls, value):
+        if value is None:
+            return None
+        names = clean_sensor_names([value])
+        if names is None:
+            raise ValueError("source_sensor must be a non-empty name of at most 64 characters")
+        return names[0]
+
+
+class ProfileCreate(_SensorFields):
     name: str
     description: str = ""
     curve_points: list[dict]
@@ -41,9 +127,11 @@ class ProfileCreate(BaseModel):
     hysteresis: float = 3.0
     safety_threshold: float = 85.0
     source_sensor: str = "CPU Temp"
+    source_sensors: list[str] | None = None
+    sensor_mode: SensorMode | None = None
 
 
-class ProfileUpdate(BaseModel):
+class ProfileUpdate(_SensorFields):
     name: str | None = None
     description: str | None = None
     curve_points: list[dict] | None = None
@@ -51,6 +139,14 @@ class ProfileUpdate(BaseModel):
     hysteresis: float | None = None
     safety_threshold: float | None = None
     source_sensor: str | None = None
+    source_sensors: list[str] | None = None
+    sensor_mode: SensorMode | None = None
+
+
+def _with_sensors(row: dict) -> dict:
+    """Replace the stored sensor-list text with the list the control loop actually follows."""
+    row["source_sensors"], row["sensor_mode"] = normalize_profile_sensors(row)
+    return row
 
 
 class FanMode(BaseModel):
@@ -71,18 +167,25 @@ async def list_profiles():
     ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
     rows = await ctx.db.fetchall("SELECT * FROM fan_profiles ORDER BY is_preset DESC, name")
     for row in rows:
-        row["curve_points"] = json.loads(row["curve_points"])
+        row["curve_points"] = _load_curve(row["curve_points"])
+        _with_sensors(row)
     return {"profiles": rows}
 
 
 @router.post("/profiles")
-async def create_profile(body: ProfileCreate):
+async def create_profile(body: ProfileCreate, lang: str = Depends(get_lang)):
+    if _has_non_finite(body):
+        return _non_finite_response(lang)
+    sensors = body.source_sensors or [body.source_sensor]
+    mode = body.sensor_mode or "max"
     ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
+    # source_sensor always holds the first sensor, so an older version reads a real one.
     await ctx.db.execute(
-        "INSERT INTO fan_profiles (name, description, curve_points, interpolation, hysteresis, safety_threshold, source_sensor) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO fan_profiles (name, description, curve_points, interpolation, hysteresis, "
+        "safety_threshold, source_sensor, source_sensors, sensor_mode) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (body.name, body.description, json.dumps(body.curve_points), body.interpolation,
-         body.hysteresis, body.safety_threshold, body.source_sensor),
+         body.hysteresis, body.safety_threshold, sensors[0], json.dumps(sensors), mode),
     )
     await ctx.db.commit()
     row = await ctx.db.fetchone("SELECT last_insert_rowid() as id")
@@ -95,12 +198,14 @@ async def get_profile(profile_id: int, lang: str = Depends(get_lang)):
     row = await ctx.db.fetchone("SELECT * FROM fan_profiles WHERE id = ?", (profile_id,))
     if not row:
         return {"success": False, "error": t("profile_not_found", lang)}
-    row["curve_points"] = json.loads(row["curve_points"])
-    return {"profile": row}
+    row["curve_points"] = _load_curve(row["curve_points"])
+    return {"profile": _with_sensors(row)}
 
 
 @router.put("/profiles/{profile_id}")
 async def update_profile(profile_id: int, body: ProfileUpdate, lang: str = Depends(get_lang)):
+    if _has_non_finite(body):
+        return _non_finite_response(lang)
     ctx = get_ctx()  # Fresh lookup — live ctx (Decision J)
     existing = await ctx.db.fetchone("SELECT is_preset FROM fan_profiles WHERE id = ?", (profile_id,))
     if not existing:
@@ -108,11 +213,29 @@ async def update_profile(profile_id: int, body: ProfileUpdate, lang: str = Depen
 
     updates = []
     params = []
-    for field in ["name", "description", "interpolation", "hysteresis", "safety_threshold", "source_sensor"]:
+    for field in ["name", "description", "interpolation", "hysteresis", "safety_threshold"]:
         val = getattr(body, field, None)
         if val is not None:
             updates.append(f"{field} = ?")
             params.append(val)
+
+    # The list wins; a body with only source_sensor comes from an older client and means
+    # that one sensor, combined as the hottest unless the body also names a mode.
+    sensors = None
+    mode = body.sensor_mode
+    if body.source_sensors is not None:
+        sensors = body.source_sensors
+    elif body.source_sensor is not None:
+        sensors = [body.source_sensor]
+        mode = mode or "max"
+    if sensors is not None:
+        updates.append("source_sensor = ?")
+        params.append(sensors[0])
+        updates.append("source_sensors = ?")
+        params.append(json.dumps(sensors))
+    if mode is not None:
+        updates.append("sensor_mode = ?")
+        params.append(mode)
 
     if body.curve_points is not None:
         updates.append("curve_points = ?")
@@ -200,8 +323,14 @@ async def set_fanpilot_mode(server_id: str, body: FanMode, lang: str = Depends(g
 
     key = auth.get_encryption_key()
     host = server["host"]
-    user = decrypt(server["username_enc"], key)
-    pwd = decrypt(server["password_enc"], key)
+    try:
+        user = decrypt(server["username_enc"], key)
+        pwd = decrypt(server["password_enc"], key)
+    except Exception:
+        # Answering with the same shape as any other failure keeps an unreadable
+        # credential from being distinguishable by status code from a BMC that simply
+        # refused the write.
+        return {"success": False, "error": t("credentials_unreadable", lang)}
     # 04-W4-02: vendor-aware dispatch (default 'dell' if NULL/empty — Decision G).
     vendor = server["vendor"] or "dell"
 
@@ -290,9 +419,13 @@ async def set_fanpilot_mode(server_id: str, body: FanMode, lang: str = Depends(g
     await ctx.db.commit()
 
     if not write_ok:
+        # A write that never reached the BMC because ipmitool is not installed is not a
+        # rejection, and saying so would send the operator looking at the wrong machine.
+        code = IPMITOOL_MISSING if ipmitool_known_missing() else "fan_write_rejected"
         return {
             "success": False,
             "mode": body.mode,
-            "error": t("fan_write_rejected", lang),
+            "error": t(code, lang),
+            **({"error_code": code} if code == IPMITOOL_MISSING else {}),
         }
     return {"success": True, "mode": body.mode}

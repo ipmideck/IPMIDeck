@@ -10,7 +10,7 @@ export function DemoBanner() {
   useEffect(() => {
     async function checkDemo() {
       try {
-        const data = await get<{ demo?: boolean }>("/api/health");
+        const data = await get<{ demo?: boolean }>("/api/config");
         if (data.demo) {
           setVisible(true);
         }

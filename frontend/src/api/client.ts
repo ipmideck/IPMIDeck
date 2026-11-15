@@ -6,6 +6,9 @@ let onUnauthorized: (() => void) | null = null;
 export function setUnauthorizedHandler(fn: () => void) {
   onUnauthorized = fn;
 }
+export function notifyUnauthorized() {
+  if (onUnauthorized) onUnauthorized();
+}
 // REVIEWS #6: exempt ONLY the boot/login auth calls. A 401 on /api/auth/toggle,
 // /api/auth/configure, or /api/auth/logout (session expiry mid-Settings) MUST still
 // redirect to /login per D-12 — so do NOT exempt all of /api/auth/*.
@@ -29,6 +32,11 @@ export async function api<T = unknown>(
   if (res.status === 401) {
     const exempt = NO_REDIRECT_PATHS.includes(path);
     if (!exempt && onUnauthorized) onUnauthorized();
+    // The exempt boot/login calls answer 401 with a meaningful, already-localized
+    // body (e.g. the invalid-credentials or lockout text). Throwing here would
+    // discard it and the caller would only be able to show a generic retry
+    // message, so the parsed body is returned to them instead.
+    if (exempt) return res.json();
     throw new Error("API error: 401 Unauthorized");
   }
   if (!res.ok) {

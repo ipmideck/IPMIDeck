@@ -11,31 +11,52 @@ WHY env vars are set BEFORE importing `backend.main` (RESEARCH Pitfall 3):
   the temp-DB + demo env via monkeypatch.setenv BEFORE the `from backend.main import app` import
   reroutes the DB into tmp_path and selects DemoIPMIService (no ipmitool, no real BMC).
 
-WHY auth-OFF is done via set_auth_enabled(False) and NOT IPMIDECK_AUTH_ENABLED (REVIEWS HIGH #1):
-  IPMIDECK_AUTH_ENABLED only sets config.auth.enabled (config.py). The runtime gate
-  require_auth -> AuthManager.is_auth_enabled() reads the DB key `auth_enabled` (auth.py), which
-  DEFAULTS to "true" on a fresh temp DB. The env var is INERT for the gate. To genuinely open
-  routes the `client` fixture writes the DB config via `bm.auth.set_auth_enabled(False)` AFTER the
+WHY auth-OFF is done via set_auth_enabled(False) and not an environment variable:
+  Whether authentication is on is stored in the DB key `auth_enabled` (auth.py), which DEFAULTS
+  to "true" on a fresh temp DB, and the runtime gate require_auth -> AuthManager.is_auth_enabled()
+  reads it from there. There is deliberately no config-file or environment override for it, so
+  that write access to the configuration cannot turn the login off. To genuinely open routes the
+  `client` fixture writes the DB config via `bm.auth.set_auth_enabled(False)` AFTER the
   TestClient lifespan has entered (so bm.auth + bm.db are live).
 
-NOTE (REVIEWS MED #11 — lifespan re-mount): each `with TestClient(app)` re-enters lifespan, which
-  re-runs module_loader.mount_routes(app, ...) and _mount_spa(app). If backend/static exists this
-  appends another SPA catch-all + re-mounts module routes. Integration tests should target static
-  `/api/*` routes — they resolve fine even with a duplicated SPA catch-all because /api routes are
-  matched before the catch-all. A session-scoped app is not required: demo mode + tmp DB make each
-  lifespan cheap.
+NOTE (lifespan re-mount): each `with TestClient(app)` re-enters lifespan, which re-runs
+  module_loader.mount_routes(app, ...) and _mount_spa(app). lifespan first drops the routes the
+  previous run registered and restores the router's lifespan_context afterwards, so the route
+  table stays the same size across clients (tests/unit/test_restart_route_table.py). A
+  session-scoped app is not required: demo mode + tmp DB make each lifespan cheap.
 """
 
 import asyncio
+import urllib.error
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 import backend.main as bm
+from backend.core import updates
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 IPMI_FIXTURES_DIR = FIXTURES_DIR / "ipmi"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _update_lookups_never_reach_the_network():
+    """Backstop: no test opens a socket to an update endpoint, stubbed or not.
+
+    Tests that exercise a lookup replace the opener themselves, and get this refusal back once
+    they finish. Anything that reaches it without doing so (a check started by an unstubbed route
+    call, say) fails as an unreachable endpoint instead of making a real request. Session-wide
+    rather than per test, because the unattended check is a background task that can outlive the
+    test that started it, and would otherwise find the real opener restored under it.
+    """
+
+    def refuse(request, timeout):
+        raise urllib.error.URLError("network disabled in tests")
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(updates, "_urlopen", refuse)
+        yield
 
 
 def _set_temp_env(tmp_path, monkeypatch) -> None:
@@ -64,9 +85,9 @@ def client_auth(tmp_path, monkeypatch):
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     """Auth-OFF TestClient. Auth is disabled by writing the DB config via
-    bm.auth.set_auth_enabled(False) AFTER the lifespan has entered (REVIEWS HIGH #1) — the
-    IPMIDECK_AUTH_ENABLED env var is INERT for the runtime gate, so it is deliberately NOT used
-    to open routes. After this fixture, GET /api/servers returns 200 (not 401).
+    bm.auth.set_auth_enabled(False) AFTER the lifespan has entered — whether auth is on lives
+    in the DB and has no config/env override, so that is the only way to open the routes.
+    After this fixture, GET /api/servers returns 200 (not 401).
     """
     _set_temp_env(tmp_path, monkeypatch)
     from backend.main import app  # import AFTER env is set (Pitfall 3)

@@ -6,6 +6,7 @@ import asyncio
 import logging
 
 from backend.core.crypto import decrypt
+from backend.core.ipmitool import IpmitoolMissingError
 from backend.modules import get_ctx
 
 logger = logging.getLogger("ipmideck.modules.sel")
@@ -14,6 +15,12 @@ logger = logging.getLogger("ipmideck.modules.sel")
 # MAX(event_id) on first poll for that server (Decision K — Codex MEDIUM fix: avoid
 # replay of old criticals on every restart).
 _last_seen_sel_id: dict[str, int] = {}
+
+
+def forget_server(server_id: str) -> None:
+    """Drop a deleted server's event-log bookmark."""
+    _last_seen_sel_id.pop(server_id, None)
+
 
 # Severity classification — map raw SEL severity text to a broadcast severity.
 CRITICAL = {"critical", "non-recoverable", "upper non-recoverable", "lower non-recoverable"}
@@ -101,8 +108,10 @@ async def _poll_one_server(server: dict) -> None:
             timeout=15.0,
         )
     except Exception as e:
-        # D-18: name the exception type/repr so the warning is never a blank reason.
-        logger.warning("sel poll failed server_id=%s: %s", sid, repr(e))
+        # D-18: name the exception type/repr so the warning is never a blank reason. A missing
+        # ipmitool was already reported once by the service.
+        if not isinstance(e, IpmitoolMissingError):
+            logger.warning("sel poll failed server_id=%s: %s", sid, repr(e))
         return
 
     last_id = await _init_cursor(sid)

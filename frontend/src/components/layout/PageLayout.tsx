@@ -2,6 +2,7 @@ import { Sidebar } from "./Sidebar";
 import { CommandPanel } from "./CommandPanel";
 import { DemoBanner } from "@/components/DemoBanner";
 import { ConnectionBanner } from "@/components/ConnectionBanner";
+import { IpmitoolBanner } from "@/components/IpmitoolBanner";
 import { useWebSocket } from "@/hooks/useWebSocket";
 
 interface PageLayoutProps {
@@ -16,7 +17,7 @@ export function PageLayout({ children }: PageLayoutProps) {
   useWebSocket();
 
   // h-screen + min-h-0 on flex children: pins the chrome (DemoBanner,
-  // ConnectionBanner, Header) to the viewport so the document never grows past
+  // ConnectionBanner, IpmitoolBanner, Header) to the viewport so the document never grows past
   // it. The scroll happens INSIDE the page's own overflow-auto region (e.g.
   // Dashboard's widget area), keeping the top bar always visible. Previously
   // min-h-screen let the page expand and dragged the header off-screen on
@@ -25,6 +26,7 @@ export function PageLayout({ children }: PageLayoutProps) {
     <div className="flex h-screen flex-col overflow-hidden">
       <DemoBanner />
       <ConnectionBanner />
+      <IpmitoolBanner />
       <div className="flex min-h-0 flex-1">
         <Sidebar />
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</main>

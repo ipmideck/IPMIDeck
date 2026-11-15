@@ -219,7 +219,13 @@ export function ServersSection({ headingRef }: ServersSectionProps) {
     if (editForm.password.trim()) payload.password = editForm.password;
     payload.cost_per_kwh = editForm.cost_per_kwh;
     try {
-      await put(`/api/servers/${id}`, payload);
+      const res = await put<{ success: boolean; error?: string }>(`/api/servers/${id}`, payload);
+      // The endpoint reports a refusal in the body with a 200, so success was announced
+      // even when nothing had been saved. The message is already localized server-side.
+      if (!res.success) {
+        toast.error(res.error || t("settings.serverUpdateFailed"));
+        return;
+      }
       toast.success(t("settings.serverUpdated"));
       // D-13 warn-but-allow: any monitoring-only (fanCapable=false) vendor warns —
       // derived from @/lib/vendors so hpe/lenovo/generic ALL warn (fixes the old

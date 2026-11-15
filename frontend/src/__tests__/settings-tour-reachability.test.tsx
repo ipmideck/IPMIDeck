@@ -23,11 +23,11 @@ import "@/i18n";
  */
 
 // Mock the API client so store mounts don't hit the network. /api/servers must
-// return a `servers` array; /api/health a version — both consumed by the shell.
+// return a `servers` array; /api/config a version — both consumed by the shell.
 vi.mock("@/api/client", () => ({
   get: vi.fn((path: string) => {
     if (path === "/api/servers") return Promise.resolve({ servers: [] });
-    if (path === "/api/health") return Promise.resolve({ version: "0.0.0-test" });
+    if (path === "/api/config") return Promise.resolve({ version: "0.0.0-test" });
     return Promise.resolve({ value: null });
   }),
   post: vi.fn(() => Promise.resolve({ success: true })),

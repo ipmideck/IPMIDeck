@@ -8,7 +8,15 @@ import logging
 from datetime import datetime
 
 from backend.core.ipmi_service import is_fan_capable
-from backend.modules.fanpilot.engine import FanPilotController
+from backend.modules.fanpilot.engine import (
+    CURVE_EMPTY,
+    CURVE_NOT_FINITE,
+    CURVE_UNREADABLE,
+    FanPilotController,
+    combine_temps,
+    curve_problem,
+    normalize_profile_sensors,
+)
 
 logger = logging.getLogger("ipmideck.modules.fanpilot")
 
@@ -38,6 +46,20 @@ _last_online_state: dict[str, bool] = {}
 # pops the entry so a later monitoring-only switch re-arms the alert. Cleared on
 # fanpilot_shutdown() alongside the other per-server maps.
 _monitoring_only_alerted: dict[str, str] = {}
+
+# === Unusable fan curve: say why the fans are at 100% ===
+# interpolate_curve() answers 100% for a curve it cannot use. That is the safe answer, but
+# on its own it leaves the operator with loud fans and no reason. The loop reports the
+# reason ONCE per (server, profile, reason) — a toast plus a command-log entry that stays
+# visible after the fact — and re-arms when the curve becomes usable again.
+CURVE_NOT_JSON = "not_json"
+_CURVE_PROBLEM_TEXT = {
+    CURVE_EMPTY: "has no points",
+    CURVE_UNREADABLE: "has a point whose temp or speed is missing or not a number",
+    CURVE_NOT_FINITE: "has a point whose temp or speed is NaN or Infinity",
+    CURVE_NOT_JSON: "is not valid JSON",
+}
+_curve_problem_alerted: dict[str, tuple[str, str]] = {}
 
 # === P0-2 (FANPILOT-FAILSAFE-VALUE): garbage-value plausibility guard ===
 # A *fresh* sensor row holding an implausible value falls through the Phase-4
@@ -371,6 +393,22 @@ _pending_readback: dict[str, dict] = {}
 # a down-command whose RPM drifts up is not mislabeled 'confirmed'. Observability only — NO
 # thermal-safety change (read-back still never trips recovery). Cleared in fanpilot_shutdown().
 _last_commanded_speed: dict[str, int] = {}
+
+
+def forget_server(server_id: str) -> None:
+    """Drop every per-server tracker a deleted server left behind.
+
+    All of these are keyed by server id and were only ever cleared at shutdown, so a
+    deleted server kept a controller, a curve state and several counters alive for the
+    lifetime of the process.
+    """
+    for tracker in (
+        _controllers, _last_state, _last_online_state, _monitoring_only_alerted,
+        _garbage_counts, _source_last_seen, _pending_readback, _last_commanded_speed,
+        _curve_problem_alerted,
+    ):
+        tracker.pop(server_id, None)
+
 # Read-back dead-band: ignore RPM changes smaller than this fraction of baseline OR this
 # many absolute RPM (sensor jitter is not movement). 05-RESEARCH §"P0-3 RPM Read-Back".
 _READBACK_DEADBAND_FRAC = 0.05
@@ -395,17 +433,49 @@ def _mean_fan_rpm(readings: list[dict]) -> float | None:
     return sum(rpms) / len(rpms)
 
 
-async def _record_command_log(ctx, server_id: str, detail: str, result: str) -> None:
+async def _record_command_log(
+    ctx, server_id: str, detail: str, result: str, error_message: str | None = None
+) -> None:
     """Best-effort command_log INSERT (the loop's own outcome marker)."""
     try:
         await ctx.db.execute(
-            "INSERT INTO command_log (server_id, command_type, command_detail, result) "
-            "VALUES (?, ?, ?, ?)",
-            (server_id, "fan_mode", detail, result),
+            "INSERT INTO command_log "
+            "(server_id, command_type, command_detail, result, error_message) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (server_id, "fan_mode", detail, result, error_message),
         )
         await ctx.db.commit()
     except Exception:
         logger.exception("FanPilot: command_log write failed for server %s", server_id)
+
+
+async def _report_curve_problem(ctx, server, problem: str | None) -> None:
+    """Tell the operator, once, why this server's fans are held at 100%.
+
+    ``problem`` is a curve_problem() reason (or CURVE_NOT_JSON), None when the curve is
+    usable. Best-effort: a failure to notify must never stop the fan write that follows.
+    """
+    server_id = server["id"]
+    if problem is None:
+        _curve_problem_alerted.pop(server_id, None)
+        return
+    profile = server["profile_name"] or "Custom"
+    if _curve_problem_alerted.get(server_id) == (profile, problem):
+        return
+    _curve_problem_alerted[server_id] = (profile, problem)
+    message = (
+        f"Fan curve of profile '{profile}' {_CURVE_PROBLEM_TEXT[problem]}; "
+        f"fans held at 100% until the curve is fixed"
+    )
+    logger.warning("FanPilot server_id=%s: %s", server_id, message)
+    await _record_command_log(
+        ctx, server_id, f"fan curve unusable ({problem})", "held_at_100", error_message=message
+    )
+    if ctx.ws is not None:
+        try:
+            await ctx.ws.broadcast_alert(server_id, "warning", "FanPilot", message, 100)
+        except Exception:
+            logger.exception("FanPilot: curve alert broadcast failed for %s", server_id)
 
 
 async def _readback_confirm(ctx, server) -> None:
@@ -722,7 +792,8 @@ async def fanpilot_loop():
                 "SELECT s.id, s.host, s.username_enc, s.password_enc, s.vendor, "
                 "s.fanpilot_profile_id, "
                 "s.fanpilot_enabled, s.is_online, fp.curve_points, fp.hysteresis, "
-                "fp.safety_threshold, fp.source_sensor, fp.name as profile_name "
+                "fp.safety_threshold, fp.source_sensor, fp.source_sensors, fp.sensor_mode, "
+                "fp.name as profile_name "
                 "FROM servers s "
                 "LEFT JOIN fan_profiles fp ON s.fanpilot_profile_id = fp.id "
                 "WHERE s.fanpilot_enabled = 1"
@@ -823,11 +894,15 @@ async def fanpilot_loop():
                 if not curve_json:
                     continue
 
+                # A stored curve that is not even JSON is the same case as an unreadable
+                # one: it resolves to 100% and is reported, rather than skipping the tick
+                # and leaving the fans at whatever speed they were last given.
                 try:
                     curve_points = json.loads(curve_json)
-                except (json.JSONDecodeError, TypeError):
-                    logger.error("Invalid curve JSON for server %s", server_id)
-                    continue
+                    curve_issue = curve_problem(curve_points)
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    curve_points = []
+                    curve_issue = CURVE_NOT_JSON
 
                 # Get or create controller
                 if server_id not in _controllers:
@@ -838,26 +913,34 @@ async def fanpilot_loop():
                     )
                 ctrl = _controllers[server_id]
 
-                # Get current temperature from latest sensor reading.
-                # 04-W1-02: also pull the timestamp for the freshness gate.
-                source_sensor = server["source_sensor"] or "CPU Temp"
-                reading = await ctx.db.fetchone(
-                    "SELECT value, timestamp FROM sensor_readings "
-                    "WHERE server_id = ? AND sensor_name = ? "
-                    "ORDER BY timestamp DESC LIMIT 1",
-                    (server_id, source_sensor),
-                )
+                # Latest reading of every sensor the profile follows (one query each, at
+                # most MAX_SOURCE_SENSORS). 04-W1-02: also pull the timestamps for the
+                # freshness gate. Every guard below applies to the whole set: one bad
+                # sensor fails the tick, none is ever silently dropped.
+                sensors, sensor_mode = normalize_profile_sensors(server)
+                readings = []
+                for sensor_name in sensors:
+                    row = await ctx.db.fetchone(
+                        "SELECT value, timestamp FROM sensor_readings "
+                        "WHERE server_id = ? AND sensor_name = ? "
+                        "ORDER BY timestamp DESC LIMIT 1",
+                        (server_id, sensor_name),
+                    )
+                    readings.append((sensor_name, row))
+
                 # C11: a vanished source row (missing / NULL value) is invisible to the
                 # freshness gate below (which only runs when a row exists). Track the gap
                 # per server; a sustained gap (>= stale_threshold) routes through the SAME
                 # fail-safe primitive + a critical alert. A single missing tick does NOT trip.
-                has_reading = bool(reading) and reading["value"] is not None
-                if not has_reading:
+                # Any one selected sensor missing counts as a missing tick.
+                missing = [name for name, row in readings if not row or row["value"] is None]
+                if missing:
+                    missing_names = ", ".join(missing)
                     if _check_source_missing(server_id, False, stale_threshold):
                         logger.warning(
                             "FanPilot source-missing guard TRIPPED server_id=%s "
                             "threshold=%.1fs sensor=%s",
-                            server_id, stale_threshold, source_sensor,
+                            server_id, stale_threshold, missing_names,
                         )
                         if auto_recover_enabled:
                             await _recover_to_bmc_auto(
@@ -866,25 +949,29 @@ async def fanpilot_loop():
                                 reason="source_missing", vendor=server["vendor"] or "dell",
                             )
                             await ctx.ws.broadcast_alert(
-                                server_id, "critical", source_sensor,
+                                server_id, "critical", missing_names,
                                 "Source sensor reading vanished; failed safe", None,
                             )
                     continue
-                # Usable reading: refresh the last-seen so the gap timer resets.
+                # Usable readings: refresh the last-seen so the gap timer resets.
                 _check_source_missing(server_id, True, stale_threshold)
 
-                # 04-W1-02 freshness gate: if the latest sensor reading is
-                # older than 2 × poll_interval, treat as missing → trigger the
-                # SAME recovery pathway as 04-W1-01. Closes the "sensor frozen
-                # with is_online=1" gap (e.g. sensor rename, DB write lag).
-                reading_ts = _parse_sqlite_timestamp(reading["timestamp"])
-                if reading_ts is not None:
-                    age_seconds = (datetime.utcnow() - reading_ts).total_seconds()
+                # 04-W1-02 freshness gate: if the OLDEST selected reading is older than
+                # 2 x poll_interval, treat as missing and trigger the SAME recovery pathway
+                # as 04-W1-01. Closes the "sensor frozen with is_online=1" gap (e.g.
+                # sensor rename, DB write lag). An unparsable timestamp is skipped.
+                oldest = None
+                for name, row in readings:
+                    reading_ts = _parse_sqlite_timestamp(row["timestamp"])
+                    if reading_ts is not None and (oldest is None or reading_ts < oldest[1]):
+                        oldest = (name, reading_ts)
+                if oldest is not None:
+                    age_seconds = (datetime.utcnow() - oldest[1]).total_seconds()
                     if age_seconds > stale_threshold:
                         logger.warning(
                             "FanPilot freshness-gate triggered server_id=%s "
                             "age=%.1fs threshold=%.1fs sensor=%s",
-                            server_id, age_seconds, stale_threshold, source_sensor,
+                            server_id, age_seconds, stale_threshold, oldest[0],
                         )
                         if auto_recover_enabled:
                             await _recover_to_bmc_auto(
@@ -896,7 +983,7 @@ async def fanpilot_loop():
                         # Don't pass stale data to compute_fan_speed.
                         continue
 
-                current_temp = reading["value"]
+                values = [row["value"] for _name, row in readings]
 
                 # === P0-2 garbage-value guard (D-P02-01..04) ===
                 # Distinct from the freshness gate above (value-blind): a FRESH row
@@ -904,12 +991,20 @@ async def fanpilot_loop():
                 # the curve (it would floor fans to idle). Debounce N=3 consecutive bad
                 # ticks per server so a single transient bad read doesn't trip; on
                 # crossing N route through the SAME fail-safe primitive + a critical
-                # alert, then skip this tick.
-                if _check_garbage_value(server_id, current_temp):
+                # alert, then skip this tick. Any one selected sensor out of range makes
+                # the tick bad; the sensor farthest outside the range is the one named.
+                worst = None
+                for name, value in zip(sensors, values):
+                    if GARBAGE_TEMP_FLOOR_C < value < GARBAGE_TEMP_CEILING_C:
+                        continue
+                    distance = max(GARBAGE_TEMP_FLOOR_C - value, value - GARBAGE_TEMP_CEILING_C)
+                    if worst is None or distance > worst[2]:
+                        worst = (name, value, distance)
+                if _check_garbage_value(server_id, worst[1] if worst else max(values)):
                     logger.warning(
                         "FanPilot garbage-value guard TRIPPED server_id=%s value=%s "
                         "threshold=%d sensor=%s",
-                        server_id, current_temp, GARBAGE_DEBOUNCE_TICKS, source_sensor,
+                        server_id, worst[1], GARBAGE_DEBOUNCE_TICKS, worst[0],
                     )
                     await _recover_to_bmc_auto(
                         ctx, server_id, server["host"],
@@ -917,26 +1012,29 @@ async def fanpilot_loop():
                         reason="sensor_garbage", vendor=server["vendor"] or "dell",
                     )
                     await ctx.ws.broadcast_alert(
-                        server_id, "critical", source_sensor,
-                        f"Implausible sensor value {current_temp}C; failed safe",
-                        current_temp,
+                        server_id, "critical", worst[0],
+                        f"Implausible sensor value {worst[1]}C; failed safe",
+                        worst[1],
                     )
                     # Reset after acting; recovery set fanpilot_enabled=0 so the server
                     # won't re-enter this loop until the operator re-engages.
                     _garbage_counts[server_id] = 0
                     continue
-                if current_temp <= GARBAGE_TEMP_FLOOR_C or current_temp >= GARBAGE_TEMP_CEILING_C:
+                if worst is not None:
                     # Bad value but below the debounce threshold — log and skip this tick
                     # WITHOUT feeding the garbage to the curve (don't idle the fans on a blip).
                     logger.warning(
                         "FanPilot garbage-value guard server_id=%s value=%s count=%d/%d "
                         "sensor=%s (below trip threshold; skipping tick)",
-                        server_id, current_temp, _garbage_counts.get(server_id, 0),
-                        GARBAGE_DEBOUNCE_TICKS, source_sensor,
+                        server_id, worst[1], _garbage_counts.get(server_id, 0),
+                        GARBAGE_DEBOUNCE_TICKS, worst[0],
                     )
                     continue
 
-                target_speed = ctrl.compute_fan_speed(curve_points, current_temp)
+                # The curve and hysteresis follow the combined value (the hottest or the
+                # mean); the safety override always watches the hottest sensor.
+                hottest = max(values)
+                current_temp = combine_temps(values, sensor_mode)
 
                 # Apply fan speed via IPMI. P0-3: _apply_fan_write consumes the
                 # FanWriteResult (transient retries / hard-reject immediate fall-back /
@@ -945,7 +1043,19 @@ async def fanpilot_loop():
                 # broadcast a false 'fanpilot active'. The classified rejection is handled
                 # INSIDE _apply_fan_write, not swallowed by this try/except (which now only
                 # guards genuine unexpected errors — e.g. a malformed credential blob).
+                #
+                # Computing the target speed is inside this guard too: the loop walks the
+                # servers in a fixed order, so an exception raised while evaluating one
+                # server's curve used to abort the whole pass and permanently starve every
+                # server after it — no curve evaluation, no fail-safe, no recovery, fans
+                # left at their last commanded speed. Failing one server at a time keeps
+                # the rest of the fleet under control.
+                await _report_curve_problem(ctx, server, curve_issue)
                 try:
+                    target_speed = ctrl.compute_fan_speed(
+                        curve_points, current_temp, safety_temp=hottest
+                    )
+
                     accepted = await _apply_fan_write(ctx, server, target_speed)
                     if not accepted:
                         continue  # fail-safe fired; do NOT broadcast active
@@ -1026,6 +1136,7 @@ async def fanpilot_shutdown():
     _last_state.clear()
     _last_online_state.clear()
     _monitoring_only_alerted.clear()
+    _curve_problem_alerted.clear()
     _garbage_counts.clear()
     _pending_readback.clear()
     _source_last_seen.clear()

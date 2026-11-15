@@ -7,6 +7,8 @@ from pathlib import Path
 
 import aiosqlite
 
+from backend.core.crypto import _set_secure_permissions
+
 logger = logging.getLogger("ipmideck.database")
 
 # Core tables (not module-specific)
@@ -75,9 +77,29 @@ class Database:
         self.db_path = db_path
         self._db: aiosqlite.Connection | None = None
 
+    def _restrict_permissions(self) -> None:
+        """Make the database readable only by its owner, sidecars included.
+
+        The database holds the BMC credentials, so a world-readable file hands them to
+        every local account on the host. This runs on every connect rather than only at
+        creation, so a database created by an earlier version repairs itself on the next
+        start with no migration step.
+
+        The write-ahead log and shared-memory sidecars are created by SQLite with the
+        main file's mode, so fixing the mode BEFORE the first write is enough for them.
+        Sidecars left behind by an abrupt shutdown are a different matter: SQLite reuses
+        those as they are, so an existing pair has to be fixed explicitly. They are
+        guarded by exists() because chmod on a missing path raises.
+        """
+        db_file = Path(self.db_path)
+        for path in (db_file, Path(f"{self.db_path}-wal"), Path(f"{self.db_path}-shm")):
+            if path.exists():
+                _set_secure_permissions(path)
+
     async def connect(self) -> None:
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self._db = await aiosqlite.connect(self.db_path)
+        self._restrict_permissions()
         self._db.row_factory = aiosqlite.Row
         await self._db.execute("PRAGMA journal_mode=WAL")
         await self._db.execute("PRAGMA foreign_keys=ON")
@@ -197,10 +219,20 @@ class Database:
                 continue
 
             logger.info("Running migration %s/%s", module_id, version)
-            sql = mf.read_text()
-            await self.conn.executescript(sql)
-            await self.execute(
-                "INSERT INTO applied_migrations (module, version) VALUES (?, ?)",
-                (module_id, version),
-            )
-            await self.commit()
+            sql = mf.read_text(encoding="utf-8")
+            # The file and its record go in ONE transaction (SQLite DDL is transactional).
+            # A start interrupted part-way (a failing statement, a killed process, a power
+            # cut) then leaves the database exactly as before this migration, and the next
+            # start runs it again. Without this, an ALTER TABLE that had already gone
+            # through stayed unrecorded and every later start failed on "duplicate column".
+            # Migration files must therefore not contain BEGIN / COMMIT themselves.
+            try:
+                await self.conn.executescript("BEGIN;\n" + sql)
+                await self.execute(
+                    "INSERT INTO applied_migrations (module, version) VALUES (?, ?)",
+                    (module_id, version),
+                )
+                await self.commit()
+            except Exception:
+                await self.rollback()
+                raise

@@ -4,20 +4,8 @@ import { useCommandStore, type CommandEntry } from "@/stores/command-store";
 import { useServerStore } from "@/stores/server-store";
 import { get } from "@/api/client";
 import { cn } from "@/lib/utils";
-import i18n from "@/i18n";
-import { intlLocale } from "@/i18n/languages";
+import { useDateTimeFormat } from "@/stores/display-prefs-store";
 import { Terminal, X } from "lucide-react";
-
-function formatTime(ts: string) {
-  try {
-    const d = new Date(ts);
-    // Module-level helper: read the active language from the i18n singleton so log
-    // timestamps format in the user's locale (D-16) without threading a prop through EntryRow.
-    return d.toLocaleTimeString(intlLocale(i18n.resolvedLanguage), { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  } catch {
-    return ts;
-  }
-}
 
 function CommandIcon({ type }: { type: string }) {
   const { t } = useTranslation();
@@ -44,6 +32,7 @@ function CommandIcon({ type }: { type: string }) {
 }
 
 function EntryRow({ entry }: { entry: CommandEntry }) {
+  const { formatTime } = useDateTimeFormat();
   const isError = !!entry.error_message;
   return (
     <div className={cn(
@@ -52,7 +41,7 @@ function EntryRow({ entry }: { entry: CommandEntry }) {
     )}>
       <div className="flex items-center justify-between gap-2">
         <CommandIcon type={entry.command_type} />
-        <span className="text-[10px] text-muted-foreground tabular-nums">{formatTime(entry.timestamp)}</span>
+        <span className="text-[10px] text-muted-foreground tabular-nums">{formatTime(entry.timestamp, { seconds: true, clock24: true })}</span>
       </div>
       <div className="mt-0.5 font-mono text-muted-foreground truncate">
         {entry.command_detail}

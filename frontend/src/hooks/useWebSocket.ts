@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import i18n from "@/i18n";
+import { notifyUnauthorized } from "@/api/client";
 import { useSensorStore } from "@/stores/sensor-store";
 import { useAlertingStore } from "@/stores/alerting-store";
 import { usePowerStore } from "@/stores/power-store";
@@ -132,10 +133,17 @@ export function useWebSocket(): void {
         }
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         if (cancelled) return;
         setStatus("disconnected");
         wsRef.current = null;
+        // 1008 is the server refusing the session, not a network blip. Retrying would
+        // loop forever behind a "disconnected" badge with no explanation, so send the
+        // user to the login page the same way a 401 on any REST call does.
+        if (event.code === 1008) {
+          notifyUnauthorized();
+          return;
+        }
         scheduleRetry();
       };
 

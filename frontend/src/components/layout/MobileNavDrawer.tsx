@@ -1,4 +1,6 @@
 import { Drawer } from "vaul";
+import { UpgradeButton } from "./UpgradeButton";
+import { VersionButton } from "./VersionButton";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import { useServerStore } from "@/stores/server-store";
@@ -63,16 +65,19 @@ export function MobileNavDrawer({ open, onClose }: Props) {
         >
           <Drawer.Title className="sr-only">{t("nav.openMenu")}</Drawer.Title>
 
-          {/* Logo */}
+          {/* Logo + version. Same control as the desktop sidebar — the mobile surface must not
+              be the one where the version and the history are unreachable. Opening it closes the
+              drawer, so the dialog is not stacked on top of a drawer the operator cannot see. */}
           <div className="border-b border-border px-4 py-3">
             <div className="flex items-center gap-2.5">
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-foreground text-sm font-bold text-background">
                 ID
               </div>
-              <div>
+              <div className="flex min-w-0 items-center whitespace-nowrap">
                 <span className="text-sm font-semibold">IPMIDeck</span>
-                <span className="ml-1 text-xs text-muted-foreground">v2</span>
+                <VersionButton onOpen={onClose} />
               </div>
+              <UpgradeButton className="ml-auto" onOpen={onClose} />
             </div>
           </div>
 

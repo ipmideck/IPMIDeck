@@ -37,9 +37,12 @@ foreach ($i in 1..30) {
 }
 if (-not $ok) { throw "health never 200" }
 
-# 4. version consistency: /api/health reports the branding version (wheel via importlib.metadata)
+# 4. version consistency: the installed package reports the branding version. /api/health no
+# longer carries a version (it discloses liveness only), so ask the package inside the container.
 $health = Invoke-RestMethod "http://localhost:$port/api/health"
-if ($health.version -ne $ver) { throw "health version $($health.version) != $ver" }
+if ($health.status -ne "ok") { throw "health status $($health.status) != ok" }
+$inner = (docker exec $name python -c "from backend.core.branding import VERSION; print(VERSION)").Trim()
+if ($inner -ne $ver) { throw "container version $inner != $ver" }
 
 # 5. SPA served (index references hashed assets/)
 $root = (Invoke-WebRequest "http://localhost:$port/" -UseBasicParsing).Content

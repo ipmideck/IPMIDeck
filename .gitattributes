@@ -1,2 +1,5 @@
 # Shell hooks must stay LF so the #!/bin/sh shebang is not corrupted by CRLF on Windows.
 .githooks/** text eol=lf
+# Same for the container entrypoint: a CRLF shebang makes the kernel refuse to exec it,
+# and the container fails to start with an opaque "exec format error".
+docker-entrypoint.sh text eol=lf

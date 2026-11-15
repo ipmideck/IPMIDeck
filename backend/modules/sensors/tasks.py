@@ -7,6 +7,8 @@ import logging
 import time
 from datetime import datetime, timezone
 
+from backend.core.ipmitool import IpmitoolMissingError
+
 logger = logging.getLogger("ipmideck.modules.sensors")
 
 _running = True
@@ -17,6 +19,12 @@ _running = True
 # so it never blocks polling of the other servers (PERF-01 head-of-line-blocking fix).
 _next_retry: dict[str, float] = {}
 _COOLDOWN_SECONDS = 60.0  # non-blocking cooldown for a failing server
+
+
+def forget_server(server_id: str) -> None:
+    """Drop a deleted server's poll state."""
+    _next_retry.pop(server_id, None)
+
 
 # Wake signal — callers (e.g. fanpilot routes that just changed fan state) can call
 # wake_loop() to make the sensor loop run its next poll immediately instead of waiting
@@ -114,8 +122,11 @@ async def _poll_one_server(server: dict, key) -> None:
         await ctx.db.commit()
         # Non-blocking cooldown — skip this server on subsequent cycles until it expires.
         _next_retry[server_id] = time.monotonic() + _COOLDOWN_SECONDS
-    except Exception:
-        logger.exception("Error polling server %s", server_id)
+    except Exception as e:
+        # A missing ipmitool was already reported once by the service; a traceback per poll
+        # per server would bury that one useful line.
+        if not isinstance(e, IpmitoolMissingError):
+            logger.exception("Error polling server %s", server_id)
         await ctx.db.execute(
             "UPDATE servers SET is_online = 0 WHERE id = ?", (server_id,)
         )

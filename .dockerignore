@@ -7,6 +7,8 @@
 !pyproject.toml
 !backend
 !frontend
+!docker-entrypoint.sh
+!docker-healthcheck.py
 
 # --- strip cruft from inside the re-included trees (last match wins) ---
 **/__pycache__
