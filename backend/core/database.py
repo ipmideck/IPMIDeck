@@ -219,10 +219,20 @@ class Database:
                 continue
 
             logger.info("Running migration %s/%s", module_id, version)
-            sql = mf.read_text()
-            await self.conn.executescript(sql)
-            await self.execute(
-                "INSERT INTO applied_migrations (module, version) VALUES (?, ?)",
-                (module_id, version),
-            )
-            await self.commit()
+            sql = mf.read_text(encoding="utf-8")
+            # The file and its record go in ONE transaction (SQLite DDL is transactional).
+            # A start interrupted part-way (a failing statement, a killed process, a power
+            # cut) then leaves the database exactly as before this migration, and the next
+            # start runs it again. Without this, an ALTER TABLE that had already gone
+            # through stayed unrecorded and every later start failed on "duplicate column".
+            # Migration files must therefore not contain BEGIN / COMMIT themselves.
+            try:
+                await self.conn.executescript("BEGIN;\n" + sql)
+                await self.execute(
+                    "INSERT INTO applied_migrations (module, version) VALUES (?, ?)",
+                    (module_id, version),
+                )
+                await self.commit()
+            except Exception:
+                await self.rollback()
+                raise
