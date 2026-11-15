@@ -20,8 +20,7 @@ import { SlidersHorizontal, Fan, LayoutGrid, LineChart as LineChartIcon } from "
 import { CHART_TYPE_META, sensorNamesForChart, type ChartType } from "@/modules/sensors/sensorUtils";
 import { SensorFilterMenu } from "@/modules/sensors/SensorFilterMenu";
 import { cn } from "@/lib/utils";
-import i18nInstance from "@/i18n";
-import { intlLocale } from "@/i18n/languages";
+import { useDateTimeFormat } from "@/stores/display-prefs-store";
 
 export type SensorChartView = "chart" | "cards";
 
@@ -179,7 +178,8 @@ function FanCard({ name, rpm, online, t }: { name: string; rpm: number | null; o
 }
 
 interface DataPoint {
-  time: string;
+  /** Live: epoch ms, formatted at render. History: the UTC ISO timestamp from the server. */
+  time: string | number;
   [key: string]: string | number | null;
 }
 
@@ -191,10 +191,9 @@ export function SensorChart({
   view = "chart",
   onViewChange,
 }: SensorChartProps) {
-  const { t, i18n } = useTranslation();
-  // Active Intl locale for user-facing time labels (D-16). Pulling i18n from
-  // useTranslation re-renders the chart on language change so the X-axis re-formats.
-  const loc = intlLocale(i18n.resolvedLanguage);
+  const { t } = useTranslation();
+  // Re-renders on a language or date/time preference change, so ticks and tooltips re-format.
+  const { formatTime, formatDateTime } = useDateTimeFormat();
   // SEPARATE state: live (WebSocket buffer) and historical (fetched) data never mix
   const [liveData, setLiveData] = useState<DataPoint[]>([]);
   const [historyData, setHistoryData] = useState<DataPoint[]>([]);
@@ -243,7 +242,7 @@ export function SensorChart({
     return meta.basePalette[(i < 0 ? 0 : i) % meta.basePalette.length];
   };
 
-  // Live buffer: poll store on interval and append clock-string points (collects ALL matching
+  // Live buffer: poll store on interval and append epoch-ms points (collects ALL matching
   // sensors; render-time filter decides what is shown). Gated to range === "live".
   useEffect(() => {
     if (range !== "live") return;
@@ -256,11 +255,9 @@ export function SensorChart({
       if (now - lastUpdateRef.current < 2000) return;
       lastUpdateRef.current = now;
 
-      // Interval tick: effect deps don't include the language, so read the active locale
-      // from the i18n singleton at tick-time to stay fresh after a language switch (D-16).
-      const timeStr = new Date().toLocaleTimeString(intlLocale(i18nInstance.resolvedLanguage), { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
-
-      const point: DataPoint = { time: timeStr };
+      // Keep the instant, not a formatted string: the axis formats it at render time, so a
+      // language or date/time preference change re-labels points already in the buffer.
+      const point: DataPoint = { time: now };
       for (const name of sensorNamesForChart(r, chartType)) {
         point[name] = r[name]?.value ?? null;
       }
@@ -415,10 +412,10 @@ export function SensorChart({
             tickLine={false}
             axisLine={false}
             interval="preserveStartEnd"
-            tickFormatter={(t: string) =>
+            tickFormatter={(t: string | number) =>
               range === "live"
-                ? t
-                : new Date(t).toLocaleTimeString(loc, { hour12: false, hour: "2-digit", minute: "2-digit" })
+                ? formatTime(t, { seconds: true, clock24: true })
+                : formatTime(t, { seconds: false, clock24: true })
             }
           />
           <YAxis
@@ -435,6 +432,11 @@ export function SensorChart({
               fontSize: "12px",
             }}
             labelStyle={{ color: "var(--color-muted-foreground)" }}
+            labelFormatter={(t) =>
+              range === "live"
+                ? formatTime(t as string | number, { seconds: true, clock24: true })
+                : formatDateTime(t as string | number, { seconds: false, clock24: true })
+            }
           />
           <Legend
             wrapperStyle={{ fontSize: "11px", paddingTop: "4px" }}

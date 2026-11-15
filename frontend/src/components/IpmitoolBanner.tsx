@@ -47,46 +47,53 @@ export function IpmitoolBanner() {
     return next;
   }, [load]);
 
-  if (!status || status.available) return null;
+  // A successful install re-reads the status while the dialog still shows the result, so the
+  // dialog outlives the notice until it is closed. It keeps its place in the tree, and with it
+  // the result it shows.
+  if (!status || (status.available && !dialogOpen)) return null;
 
   return (
-    <div
-      role="alert"
-      className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-danger/40 bg-danger/10 px-4 py-2 text-xs"
-    >
-      <span className="flex items-center gap-2">
-        <PackageX className="h-3.5 w-3.5 shrink-0 text-danger" aria-hidden="true" />
-        <span className="font-semibold text-danger">{t("banner.ipmitoolMissing")}</span>
-      </span>
-      <span className="text-muted-foreground">{t("banner.ipmitoolMissingDetail")}</span>
-
-      <span className="ml-auto flex items-center gap-2">
-        {stillMissing && (
-          <span className="text-muted-foreground" aria-live="polite">
-            {t("banner.ipmitoolStillMissing")}
+    <>
+      {!status.available && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-danger/40 bg-danger/10 px-4 py-2 text-xs"
+        >
+          <span className="flex items-center gap-2">
+            <PackageX className="h-3.5 w-3.5 shrink-0 text-danger" aria-hidden="true" />
+            <span className="font-semibold text-danger">{t("banner.ipmitoolMissing")}</span>
           </span>
-        )}
-        <button
-          type="button"
-          onClick={recheck}
-          disabled={checking}
-          className="flex items-center gap-1.5 rounded border border-border px-2 py-1 font-medium text-foreground transition-colors hover:bg-background/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
-        >
-          <RotateCw
-            className={cn("h-3.5 w-3.5", checking && "animate-spin motion-reduce:animate-none")}
-            aria-hidden="true"
-          />
-          {t("banner.ipmitoolRecheck")}
-        </button>
-        <button
-          type="button"
-          onClick={() => setDialogOpen(true)}
-          className="flex items-center gap-1.5 rounded bg-primary px-2 py-1 font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <PackagePlus className="h-3.5 w-3.5" aria-hidden="true" />
-          {t("banner.ipmitoolInstall")}
-        </button>
-      </span>
+          <span className="text-muted-foreground">{t("banner.ipmitoolMissingDetail")}</span>
+
+          <span className="ml-auto flex items-center gap-2">
+            {stillMissing && (
+              <span className="text-muted-foreground" aria-live="polite">
+                {t("banner.ipmitoolStillMissing")}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={recheck}
+              disabled={checking}
+              className="flex items-center gap-1.5 rounded border border-border px-2 py-1 font-medium text-foreground transition-colors hover:bg-background/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+            >
+              <RotateCw
+                className={cn("h-3.5 w-3.5", checking && "animate-spin motion-reduce:animate-none")}
+                aria-hidden="true"
+              />
+              {t("banner.ipmitoolRecheck")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setDialogOpen(true)}
+              className="flex items-center gap-1.5 rounded bg-primary px-2 py-1 font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <PackagePlus className="h-3.5 w-3.5" aria-hidden="true" />
+              {t("banner.ipmitoolInstall")}
+            </button>
+          </span>
+        </div>
+      )}
 
       <IpmitoolInstallDialog
         open={dialogOpen}
@@ -94,6 +101,6 @@ export function IpmitoolBanner() {
         status={status}
         onRecheck={recheck}
       />
-    </div>
+    </>
   );
 }

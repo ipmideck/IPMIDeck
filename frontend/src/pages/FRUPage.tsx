@@ -8,7 +8,7 @@ import { useBackendOnline } from "@/stores/connection-store";
 import { get, post } from "@/api/client";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/common/EmptyState";
-import { intlLocale } from "@/i18n/languages";
+import { useDateTimeFormat } from "@/stores/display-prefs-store";
 import { RefreshCw, Copy, ServerOff, CircuitBoard, Server, Cpu, Info } from "lucide-react";
 
 interface FRUData {
@@ -39,7 +39,8 @@ function pick(fields: { field: string; value: string }[], names: string[]): stri
 }
 
 export default function FRUPage() {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
+  const { formatDateTime } = useDateTimeFormat();
   const contextServerId = useServerStore((s) => s.contextServerId);
   const readings = useSensorStore((s) => (contextServerId ? s.readings[contextServerId] : undefined));
   const [data, setData] = useState<FRUData | null>(null);
@@ -233,7 +234,7 @@ export default function FRUPage() {
             {data?.fetched_at && (
               <p className="text-xs text-muted-foreground">
                 {/* Label keyed in Plan 02; the date VALUE now formats in the active locale (D-16). */}
-                {t("fru.lastUpdated", { value: new Date(data.fetched_at).toLocaleString(intlLocale(i18n.resolvedLanguage)) })}
+                {t("fru.lastUpdated", { value: formatDateTime(data.fetched_at, { seconds: true }) })}
               </p>
             )}
           </div>

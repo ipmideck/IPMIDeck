@@ -88,8 +88,8 @@ describe("the install dialog", () => {
   it("explains why it cannot install, and gives the command to run", async () => {
     ipmitool = { ...linux, install: { automatic: false, reason: "no_privileges" } };
     const dialog = await openDialog();
-    expect(dialog).toHaveTextContent("Detected system: Ubuntu 24.04 LTS");
-    expect(dialog).toHaveTextContent("not running with administrator rights");
+    expect(dialog).toHaveTextContent("Your system: Ubuntu 24.04 LTS");
+    expect(dialog).toHaveTextContent("needs administrator rights");
     expect(within(dialog).getByText("sudo apt install ipmitool")).toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: "Install now" })).toBeNull();
   });
@@ -102,6 +102,20 @@ describe("the install dialog", () => {
     expect(await within(dialog).findByText(/ipmitool is installed/)).toBeInTheDocument();
   });
 
+  it("keeps the success on screen after the notice itself goes away", async () => {
+    // The recheck after a good install finds the program, which hides the notice; the dialog
+    // must stay until it is closed, or the result is never seen.
+    ipmitool = { ...linux, install: { automatic: true, reason: null } };
+    const dialog = await openDialog();
+    ipmitool = { available: true, install_command: null, platform: "linux" };
+    await userEvent.click(within(dialog).getByRole("button", { name: "Install now" }));
+    expect(await screen.findByText(/ipmitool is installed/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(screen.getByText(/ipmitool is installed/)).toBeInTheDocument();
+    await userEvent.click(screen.getAllByRole("button", { name: "Close" })[0]);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
   it("shows the failure, the output and the command when the install fails", async () => {
     ipmitool = { ...linux, install: { automatic: true, reason: null } };
     installAnswer = {
@@ -112,26 +126,74 @@ describe("the install dialog", () => {
     const dialog = await openDialog();
     await userEvent.click(within(dialog).getByRole("button", { name: "Install now" }));
     expect(
-      await within(dialog).findByText("The installation did not complete."),
+      await within(dialog).findByText("That didn't work."),
     ).toBeInTheDocument();
     expect(dialog).toHaveTextContent("Unable to locate package ipmitool");
     expect(within(dialog).getByText("sudo apt install ipmitool")).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 
-  it("guides Windows through a vendor tool instead of inventing a command", async () => {
+  const windowsPackage = {
+    name: "Dell iDRAC Tools",
+    version: "11.4.0.0",
+    url: "https://dl.dell.com/FOLDER13988263M/1/Dell-iDRACTools-Web-WINX64-11.4.0.0-1435_A00.exe",
+    page: "https://www.dell.com/support/home/en-us/drivers/driversdetails?driverid=p05hx",
+    sha256: "dd1ba761046f6c0e739ade54c1ebe1b129b85d4d7e6ce14a34dea8f160c622ec",
+    size_mb: 32,
+    supported_os: ["Windows 10 (64-bit)", "Windows 11 (64-bit)", "Windows Server 2022", "Windows Server 2025"],
+  };
+
+  const windowsDirs = [
+    "C:\\IPMIDeck\\data\\tools\\ipmitool",
+    "C:\\Program Files\\Dell\\SysMgt\\bmc",
+  ];
+
+  it("after a failed unpack, tells Windows where to put ipmitool.exe by hand", async () => {
     ipmitool = {
       available: false,
       install_command: null,
       platform: "windows",
       os_label: "Windows",
-      install: { automatic: false, reason: "windows" },
-      search_dirs: ["C:\\Program Files\\Dell\\SysMgt\\bmc"],
+      install: { automatic: true, reason: null },
+      search_dirs: windowsDirs,
+      windows_package: windowsPackage,
+    };
+    installAnswer = {
+      success: false,
+      error_code: "ipmitool_install_windows_failed",
+      output: "msiexec exit code 1603: the unpacking failed",
     };
     const dialog = await openDialog();
-    expect(dialog).toHaveTextContent("iDRAC Tools");
-    expect(dialog).toHaveTextContent("C:\\Program Files\\Dell\\SysMgt\\bmc");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Install now" }));
+    expect(await within(dialog).findByText("That didn't work.")).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("the unpacking failed");
+    expect(dialog).toHaveTextContent("first folder under Details");
+    expect(dialog).toHaveTextContent(windowsDirs[0]);
     expect(dialog).not.toHaveTextContent("WSL");
-    expect(within(dialog).queryByRole("button", { name: "Install now" })).toBeNull();
+    expect(within(dialog).getByRole("button", { name: "Try again" })).toBeInTheDocument();
+  });
+
+  it("shows Windows where the Dell package comes from and offers to unpack it", async () => {
+    ipmitool = {
+      available: false,
+      install_command: null,
+      platform: "windows",
+      os_label: "Windows",
+      install: { automatic: true, reason: null },
+      search_dirs: windowsDirs,
+      windows_package: windowsPackage,
+    };
+    const dialog = await openDialog();
+    expect(dialog).toHaveTextContent("no administrator rights are needed");
+    expect(dialog).toHaveTextContent("dl.dell.com");
+    expect(dialog).toHaveTextContent(windowsPackage.sha256);
+    expect(dialog).toHaveTextContent("Windows 11 (64-bit)");
+    expect(dialog).toHaveTextContent("Windows Server 2025");
+    expect(within(dialog).getByRole("link", { name: "Open Dell's page" })).toHaveAttribute(
+      "href",
+      windowsPackage.page,
+    );
+    await userEvent.click(within(dialog).getByRole("button", { name: "Install now" }));
+    expect(post).toHaveBeenCalledWith("/api/system/ipmitool/install");
   });
 });

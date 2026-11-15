@@ -64,23 +64,29 @@ left out. `tests/unit/test_changelog_format.py` enforces this.
 - **See what changed, from inside the app.** The version in the sidebar opens the release
   history over any page. It ships inside the package, so it works with no network, and security
   releases are marked.
-- **Update checks, on by default.** At start-up and once a day IPMIDeck asks whether a newer
-  version exists, sending only the product name and version; nothing is downloaded. Turn it off
-  under **Settings → About → Updates**, or everywhere with `updates.enabled: false`.
-- **A Check now button, and a console `[g]` key that really checks.** Both look up the latest
-  version on demand, whatever the automatic setting is.
+- **Update checks, on by default, and a Check now button.** At start-up and once a day IPMIDeck
+  asks whether a newer version exists, sending only its name and version; nothing is downloaded.
+  Check now and the console `[g]` key ask on demand. Turn it off in **Settings → About → Updates**
+  or `updates.enabled: false`.
 - **ipmitool can be installed from the web UI.** The missing-ipmitool notice has an Install
   button: it runs the package manager when `ipmi.auto_install_ipmitool` is on and IPMIDeck is
-  privileged, and otherwise shows the command. On Windows it finds Dell's bundled ipmitool.exe.
-- **A newer version is announced in the console, with its upgrade command.** The first time the
-  automatic check finds one, the console says so whatever its verbosity (the log, when there is
-  no console), with the command for this install: Docker, pip or git.
-- **The startup log names the running version.** A report from `docker logs` now identifies
-  itself and says where to read what changed.
+  privileged. On Windows it unpacks Dell's ipmitool.exe into the data folder, with no admin rights.
+- **The console names the running version and announces a newer one.** The startup log names
+  the version and where to read what changed. The first time the check finds a newer one, the
+  console says so at any verbosity (or the log, without a console), with the upgrade command for
+  this install.
 - **Updates can be installed from the web UI.** A notice and an Upgrade button open the new
   version's notes with a Download and install button. It backs up the data, updates pip, pipx and
   uv installs and restarts; Docker goes through Watchtower when set up. Otherwise it shows the
   command.
+- **Dates and times can follow your own time zone and format.** Under **Settings → Appearance →
+  Date and time**, pick an IANA time zone, a 24- or 12-hour clock, seconds, and ISO `YYYY-MM-DD`
+  dates, whatever the interface language or the container's `TZ`. Nothing changes until you do.
+  ([#16](https://github.com/ipmideck/IPMIDeck/issues/16))
+- **A fan profile can follow several temperature sensors.** Tick up to eight in the profile
+  settings and choose whether the curve follows the hottest or their average. The safety override
+  always watches the hottest, and if any of them stops reporting the fans still fail safe.
+  ([#19](https://github.com/ipmideck/IPMIDeck/issues/19))
 
 ### Changed
 
@@ -95,6 +101,10 @@ left out. `tests/unit/test_changelog_format.py` enforces this.
   traceback on every poll are replaced by one warning, a web UI notice with the install command
   and a *Check again* button, and a localized error on every action.
   ([#14](https://github.com/ipmideck/IPMIDeck/issues/14))
+- **Times stored by the server no longer show UTC as local time.** Inventory "last updated", the
+  oldest reading and the command log were off by the UTC offset; history chart tooltips showed raw
+  UTC, and some browsers wrote midnight as 24:xx.
+  ([#16](https://github.com/ipmideck/IPMIDeck/issues/16))
 - **The container can serve HTTPS.** The image now starts through the `ipmideck` command, which
   sets up the certificate; `https` used to be silently ignored in Docker while the log announced
   it. The health check follows the scheme actually served.

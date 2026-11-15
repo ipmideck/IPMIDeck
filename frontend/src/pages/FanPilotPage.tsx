@@ -10,6 +10,14 @@ import { get, post, put, del } from "@/api/client";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/common/EmptyState";
 import { sensorNamesForType } from "@/modules/sensors/sensorUtils";
+import { SourceSensorPicker } from "@/modules/fanpilot/SourceSensorPicker";
+import {
+  combineTemps,
+  profileSavePayload,
+  profileSensorMode,
+  profileSensors,
+  type SensorMode,
+} from "@/modules/fanpilot/sourceSensors";
 import { toast } from "sonner";
 import {
   Fan,
@@ -45,6 +53,10 @@ interface FanProfile {
   hysteresis: number;
   safety_threshold: number;
   source_sensor: string;
+  /** Sensors the curve follows (1 to 8); the backend keeps source_sensor as the first. */
+  source_sensors: string[];
+  /** How several sensors combine: the hottest ("max") or their mean ("avg"). */
+  sensor_mode: SensorMode;
   is_preset: boolean;
 }
 
@@ -648,11 +660,16 @@ export default function FanPilotPage() {
     [sensorReadings]
   );
 
-  // Live temp comes from the EDITED profile's source sensor — whichever sensor the user
-  // chose drives the indicator line on the curve and the background fanpilot loop.
-  const sourceSensor = editedProfile?.source_sensor;
-  const sourceReading = sourceSensor ? sensorReadings[sourceSensor] : undefined;
-  const currentTemp = sourceReading?.value ?? null;
+  // Live temp comes from the EDITED profile's source sensors, combined the way the
+  // background fanpilot loop combines them (hottest or average), so the indicator line on
+  // the curve shows what the fans are reacting to. Null when any of them has no reading.
+  const selectedSensors = editedProfile?.source_sensors ?? [];
+  const sensorMode: SensorMode = editedProfile?.sensor_mode ?? "max";
+  const combinedTemp = combineTemps(
+    selectedSensors.map((n) => sensorReadings[n]?.value),
+    sensorMode
+  );
+  const currentTemp = combinedTemp === null ? null : Math.round(combinedTemp * 10) / 10;
 
   // All temperature sensors with a numeric value, sorted by value desc (hottest first)
   // so the top-area chip strip surfaces the most relevant ones when capped.
@@ -753,22 +770,28 @@ export default function FanPilotPage() {
         typeof profile.curve_points === "string"
           ? JSON.parse(profile.curve_points as unknown as string)
           : profile.curve_points;
-      setEditedProfile({ ...profile, curve_points: pts });
+      setEditedProfile({
+        ...profile,
+        curve_points: pts,
+        source_sensors: profileSensors(profile),
+        sensor_mode: profileSensorMode(profile),
+      });
     } else {
       setEditedProfile(null);
     }
   }, [selectedId, profiles]);
 
-  /* ---------- Auto-fix invalid source_sensor ----------
-   * If the profile's stored source_sensor doesn't exist on this server (a default
-   * "CPU Temp" left over from demo, or a profile saved against another BMC), swap
-   * it to the first real temperature sensor so the curve has live data. Local edit
+  /* ---------- Auto-fix source sensors that are all missing ----------
+   * If NONE of the profile's stored source sensors exists on this server (a default
+   * "CPU Temp" left over from demo, or a profile saved against another BMC), swap the
+   * list to the first real temperature sensor so the curve has live data. When at least
+   * one exists, the missing ones stay listed and marked so the user decides. Local edit
    * only — requires Save to persist. */
   useEffect(() => {
     if (!editedProfile) return;
     if (temperatureSensors.length === 0) return;
-    if (temperatureSensors.includes(editedProfile.source_sensor)) return;
-    setEditedProfile((p) => (p ? { ...p, source_sensor: temperatureSensors[0] } : p));
+    if (editedProfile.source_sensors.some((n) => temperatureSensors.includes(n))) return;
+    setEditedProfile((p) => (p ? { ...p, source_sensors: [temperatureSensors[0]] } : p));
   }, [editedProfile, temperatureSensors]);
 
   // Reset transient UI state when navigating to a different profile, and seed the
@@ -797,14 +820,10 @@ export default function FanPilotPage() {
   const handleSave = async () => {
     if (!editedProfile) return;
     try {
-      await put(`/api/modules/fanpilot/profiles/${editedProfile.id}`, {
-        name: editedProfile.name,
-        description: editedProfile.description,
-        curve_points: editedProfile.curve_points,
-        hysteresis: editedProfile.hysteresis,
-        safety_threshold: editedProfile.safety_threshold,
-        source_sensor: editedProfile.source_sensor,
-      });
+      await put(
+        `/api/modules/fanpilot/profiles/${editedProfile.id}`,
+        profileSavePayload(editedProfile)
+      );
       // If this profile is currently active, the backend wakes the loop on PUT so
       // the change reaches the fans within ~1s.
       toast.success(isActiveProfile ? t("fanpilot.savedApplyingLive") : t("fanpilot.profileSaved"));
@@ -820,14 +839,10 @@ export default function FanPilotPage() {
     if (!editedProfile || !contextServerId) return;
     setActivating(true);
     try {
-      await put(`/api/modules/fanpilot/profiles/${editedProfile.id}`, {
-        name: editedProfile.name,
-        description: editedProfile.description,
-        curve_points: editedProfile.curve_points,
-        hysteresis: editedProfile.hysteresis,
-        safety_threshold: editedProfile.safety_threshold,
-        source_sensor: editedProfile.source_sensor,
-      });
+      await put(
+        `/api/modules/fanpilot/profiles/${editedProfile.id}`,
+        profileSavePayload(editedProfile)
+      );
       await post(`/api/modules/fanpilot/${contextServerId}/mode`, {
         mode: "fanpilot",
         profile_id: editedProfile.id,
@@ -843,7 +858,7 @@ export default function FanPilotPage() {
   };
 
   // Reset a preset profile to its migration defaults — local edit only, user clicks
-  // Save (or Save and Activate) to persist. source_sensor is intentionally NOT reset
+  // Save (or Save and Activate) to persist. The source sensors are intentionally NOT reset
   // because the migration default ("CPU Temp") is the demo bug we already fixed; the
   // auto-fix effect handles invalid sensors transparently.
   const handleReset = () => {
@@ -887,7 +902,8 @@ export default function FanPilotPage() {
           ],
           hysteresis: 3,
           safety_threshold: 85,
-          source_sensor: "CPU Temp",
+          source_sensors: [temperatureSensors[0] ?? "CPU Temp"],
+          sensor_mode: "max",
         }
       );
       toast.success(t("fanpilot.profileCreated"));
@@ -1207,57 +1223,24 @@ export default function FanPilotPage() {
                     </h3>
                     <div className="space-y-4 p-4">
 
-                    {/* Source sensor — real sensors from this server, with the live value
-                        inline so the user sees what the curve is actually reacting to. */}
-                    <div>
-                      <div className="mb-1 flex items-center justify-between">
-                        <label className="text-xs font-medium text-muted-foreground">{t("fanpilot.sourceSensor")}</label>
-                        {/* Hide the inline live reading when offline so we don't contradict
-                            the CurveEditor (which already suppresses its live indicator). */}
-                        {online && currentTemp !== null && (
-                          <span className="inline-flex items-center gap-1 font-mono text-[11px] font-semibold text-foreground">
-                            {/* Live thermal reading driving the curve — cyan cooling
-                                cue (D-06) + a non-color thermometer companion (D-04). */}
-                            <Thermometer className="h-3 w-3 text-[var(--color-cyan-ink)]" aria-hidden />
-                            {currentTemp}°C
-                          </span>
-                        )}
-                      </div>
-                      <select
-                        value={editedProfile.source_sensor}
-                        onChange={(e) =>
-                          setEditedProfile({ ...editedProfile, source_sensor: e.target.value })
-                        }
-                        disabled={temperatureSensors.length === 0}
-                        className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
-                      >
-                        {temperatureSensors.length === 0 && (
-                          <option value="">{t("fanpilot.noTempSensors")}</option>
-                        )}
-                        {temperatureSensors.map((name) => {
-                          const r = sensorReadings[name];
-                          // Same rationale as the inline readout above: drop the live value
-                          // suffix from option labels when the backend is offline.
-                          const live = online && r?.value != null ? ` — ${r.value}°C` : "";
-                          return (
-                            <option key={name} value={name}>
-                              {name}{live}
-                            </option>
-                          );
-                        })}
-                        {/* Stored value not on this server: surface it so the select stays
-                            controlled until the auto-fix effect swaps it. */}
-                        {editedProfile.source_sensor &&
-                          !temperatureSensors.includes(editedProfile.source_sensor) && (
-                            <option value={editedProfile.source_sensor}>
-                              {t("fanpilot.notOnThisServer", { name: editedProfile.source_sensor })}
-                            </option>
-                          )}
-                      </select>
-                      <p className="mt-0.5 text-[10px] text-muted-foreground">
-                        {t("fanpilot.sourceSensorHint")}
-                      </p>
-                    </div>
+                    {/* Source sensors — real sensors from this server, with the live value
+                        the curve follows (hottest or average) so the user sees what it is
+                        actually reacting to. */}
+                    <SourceSensorPicker
+                      available={temperatureSensors}
+                      readings={sensorReadings}
+                      online={online}
+                      selected={editedProfile.source_sensors}
+                      mode={editedProfile.sensor_mode}
+                      combinedTemp={currentTemp}
+                      onChange={({ sensors, mode }) =>
+                        setEditedProfile({
+                          ...editedProfile,
+                          source_sensors: sensors,
+                          sensor_mode: mode,
+                        })
+                      }
+                    />
 
                     {/* Hysteresis — text input + decimal inputMode so the native spinner
                         is gone AND the user can clear the field without it snapping back to 0.

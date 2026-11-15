@@ -4,6 +4,7 @@ import { Database, Lock, Archive, AlertTriangle } from "lucide-react";
 import { get, post, put } from "@/api/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { useDateTimeFormat } from "@/stores/display-prefs-store";
 import { useSettings } from "./SettingsContext";
 import { SectionPanel, FieldGroup, formatBytes, inputClass, primaryBtnClass, secondaryBtnClass } from "./primitives";
 
@@ -21,6 +22,7 @@ interface SystemSectionProps {
  */
 export function SystemSection({ headingRef }: SystemSectionProps) {
   const { t, i18n } = useTranslation();
+  const { formatDateTime } = useDateTimeFormat();
   const { online, offlineTip, certPath, setCertPath, keyPath, setKeyPath } = useSettings();
   const dataLocale = i18n.resolvedLanguage || "en";
 
@@ -201,7 +203,7 @@ export function SystemSection({ headingRef }: SystemSectionProps) {
             </div>
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">{t("settings.data.oldestReading")}</span>
-              <span className="font-mono">{dbStats.oldest_reading_timestamp ? new Date(dbStats.oldest_reading_timestamp).toLocaleString(dataLocale) : "—"}</span>
+              <span className="font-mono">{dbStats.oldest_reading_timestamp ? formatDateTime(dbStats.oldest_reading_timestamp, { seconds: true }) : "—"}</span>
             </div>
           </div>
 

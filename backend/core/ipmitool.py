@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import http.client
 import logging
 import os
 import platform
 import shutil
 import subprocess
+import tempfile
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import zipfile
 from pathlib import Path
 
 from backend.core.i18n import t
@@ -57,12 +64,58 @@ _FREEBSD = ("sudo pkg install ipmitool", (("pkg", "install", "-y", "ipmitool"),)
 _MACOS = ("brew install ipmitool", (("brew", "install", "ipmitool"),))
 
 # Windows has no package to install, but Dell's iDRAC Tools and BMC Utility installers ship
-# ipmitool.exe in their own folder without adding it to PATH. Looking there means an operator who
-# installed one of them needs nothing else.
+# ipmitool.exe in their own folder without adding it to PATH. Dell's installer closes
+# <Program Files>\Dell\SysMgt to everyone but administrators, so those folders only help an
+# IPMIDeck running with administrator rights, such as a service under LocalSystem.
 _WINDOWS_VENDOR_DIRS = (
     ("Dell", "SysMgt", "bmc"),
     ("Dell", "SysMgt", "iDRACTools", "IPMI"),
 )
+
+# What the web UI downloads on Windows. Pinned: only this file, from this address, with the
+# SHA-256 Dell publishes on the download page, is ever used. A newer Dell release means changing
+# the address and the checksum together.
+#
+# The download is a WinZip self-extractor that only unpacks into C:\OpenManage and starts nothing,
+# so it is never run: the MSI inside is read straight out of the archive. The MSI is not installed
+# either, because of the closed Dell folder above. msiexec unpacks its files instead (an
+# administrative install, which needs no rights and registers nothing in Windows), and the folder
+# holding ipmitool.exe is copied into IPMIDeck's data directory, which find_ipmitool searches.
+WINDOWS_PACKAGE = {
+    "name": "Dell iDRAC Tools",
+    "version": "11.4.0.0",
+    "file": "Dell-iDRACTools-Web-WINX64-11.4.0.0-1435_A00.exe",
+    "msi": "iDRACTools_x64.msi",
+    "url": (
+        "https://dl.dell.com/FOLDER13988263M/1/"
+        "Dell-iDRACTools-Web-WINX64-11.4.0.0-1435_A00.exe"
+    ),
+    "page": "https://www.dell.com/support/home/en-us/drivers/driversdetails?driverid=p05hx",
+    "sha256": "dd1ba761046f6c0e739ade54c1ebe1b129b85d4d7e6ce14a34dea8f160c622ec",
+    "size_mb": 32,
+    "supported_os": [
+        "Windows 10 (64-bit)",
+        "Windows 11 (64-bit)",
+        "Windows Server 2022",
+        "Windows Server 2025",
+    ],
+}
+# Dell's file is about 32 MB; anything past twice that is not the file we pinned.
+_WINDOWS_PACKAGE_MAX_BYTES = 64 * 1024 * 1024
+_DOWNLOAD_TIMEOUT = 600
+_DOWNLOAD_READ_TIMEOUT = 60
+# Dell's download network turns away clients that do not look like a browser.
+_DOWNLOAD_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) IPMIDeck"
+# msiexec exit codes that mean the unpacking went through; 3010 only adds that a restart is due,
+# which ipmitool does not need.
+_MSI_SUCCESS = (0, 3010)
+_MSI_EXIT_TEXT = {
+    1602: "the unpacking was cancelled",
+    1603: "the unpacking failed",
+    1618: "another installation is already running",
+}
+# Starting the unpacked ipmitool.exe once proves its DLLs came with it.
+_VERSION_TIMEOUT = 30
 
 # Long enough for a package index refresh on a slow mirror, short enough that a hung package
 # manager does not hold the install lock forever.
@@ -94,10 +147,17 @@ def host_platform() -> str:
     return {"Windows": "windows", "Darwin": "macos", "Linux": "linux"}.get(system, "other")
 
 
+def windows_tools_dir() -> Path:
+    """Where the web UI puts ipmitool on Windows: a folder of its own in the data directory."""
+    from backend.core.config import _data_dir
+
+    return (_data_dir() / "tools" / "ipmitool").resolve()
+
+
 def windows_search_dirs() -> list[str]:
-    """The vendor folders searched on Windows when ipmitool is not on PATH."""
+    """The folders searched on Windows when ipmitool is not on PATH: IPMIDeck's own, then Dell's."""
     roots = [os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")]
-    dirs: list[str] = []
+    dirs: list[str] = [str(windows_tools_dir())]
     for root in dict.fromkeys(r for r in roots if r):
         for parts in _WINDOWS_VENDOR_DIRS:
             dirs.append(str(Path(root, *parts)))
@@ -172,8 +232,8 @@ def install_advice() -> str:
         return f"Install it with: {command}"
     if host_platform() == "windows":
         return (
-            "Install a tool that includes ipmitool.exe, such as Dell iDRAC Tools, "
-            "or put ipmitool.exe on PATH"
+            "Press Install in the web UI, which takes ipmitool.exe out of Dell iDRAC Tools into "
+            "the data folder, or put ipmitool.exe on PATH"
         )
     return "Install the ipmitool package with your system's package manager"
 
@@ -279,20 +339,22 @@ def install_plan(allowed: bool) -> dict:
 
     The reasons, in the order they are decided:
     - ``docker``: the image ships it, and a container user cannot install packages anyway.
-    - ``windows``: no package exists; the operator installs a vendor tool instead.
     - ``unsupported``: no known package manager.
     - ``disabled``: ``ipmi.auto_install_ipmitool`` is off (the default).
     - ``brew_missing`` / ``no_privileges``: the package manager cannot run as this process.
 
-    A password is never asked for: a prompt from sudo, polkit or UAC appears on the server's own
+    A password is never asked for: a prompt from sudo or polkit appears on the server's own
     console, not in the browser, and a password typed into a web page and handed to sudo is
-    exactly the kind of secret this app must not handle.
+    exactly the kind of secret this app must not handle. Windows needs no rights at all: the
+    pinned Dell package is only unpacked, into IPMIDeck's own data folder, and nothing is installed
+    in Windows. So ``ipmi.auto_install_ipmitool`` is not needed there, and a service works the same
+    as a desktop session.
     """
     if _in_container():
         return _plan(False, "docker")
     plat = host_platform()
     if plat == "windows":
-        return _plan(False, "windows")
+        return _plan(True, None, ())
     if _package() is None:
         return _plan(False, "unsupported")
     if not allowed:
@@ -348,6 +410,10 @@ def status(demo: bool, allow_install: bool = False) -> dict:
         result["os_label"] = _os_label()
         if result["platform"] == "windows":
             result["search_dirs"] = windows_search_dirs()
+            result["windows_package"] = {
+                key: WINDOWS_PACKAGE[key]
+                for key in ("name", "version", "url", "page", "sha256", "size_mb", "supported_os")
+            }
     return result
 
 
@@ -373,9 +439,13 @@ async def install(allow_install: bool) -> dict:
         # dropped first, because the privileges may have just been granted.
         _forget_sudo_answer()
         plan = await asyncio.to_thread(install_plan, allow_install)
-        package = _package()
-        if not plan["automatic"] or package is None:
+        if not plan["automatic"]:
             return _failure(plan["reason"] or "unsupported")
+        if host_platform() == "windows":
+            return await _install_windows()
+        package = _package()
+        if package is None:
+            return _failure("unsupported")
         output = b""
         for step in package[1]:
             argv = [*plan["elevate"], *step]
@@ -404,3 +474,211 @@ async def install(allow_install: bool) -> dict:
         report_present()
         logger.warning("ipmitool installed: %s", found)
         return {"success": True, "output": _tail(output)}
+
+
+# === Installing it on Windows ===
+
+
+class _HttpsOnlyRedirects(urllib.request.HTTPRedirectHandler):
+    """Follow a redirect only to another https address; the checksum is the real guard."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if urllib.parse.urlsplit(newurl).scheme != "https":
+            raise urllib.error.URLError(f"refused a redirect to {newurl}")
+        logger.info("ipmitool download: following a redirect to %s", newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_OPENER = urllib.request.build_opener(_HttpsOnlyRedirects)
+
+
+def _download_windows_package(dest: Path) -> str:
+    """Download the pinned Dell installer to ``dest`` and return its SHA-256.
+
+    Bounded in size and in time, so a stalled or oversized answer cannot hold the install lock.
+    """
+    url = WINDOWS_PACKAGE["url"]
+    logger.warning("Installing ipmitool: downloading %s", url)
+    request = urllib.request.Request(  # noqa: S310 — fixed https address, checksum checked after
+        url, headers={"User-Agent": _DOWNLOAD_USER_AGENT}, method="GET"
+    )
+    digest = hashlib.sha256()
+    size = 0
+    deadline = time.monotonic() + _DOWNLOAD_TIMEOUT
+    with _OPENER.open(request, timeout=_DOWNLOAD_READ_TIMEOUT) as response, dest.open("wb") as out:
+        while chunk := response.read(64 * 1024):
+            size += len(chunk)
+            if size > _WINDOWS_PACKAGE_MAX_BYTES:
+                raise ValueError(f"the download passed {_WINDOWS_PACKAGE_MAX_BYTES} bytes")
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"the download took longer than {_DOWNLOAD_TIMEOUT}s")
+            digest.update(chunk)
+            out.write(chunk)
+    return digest.hexdigest()
+
+
+def _extract_msi(archive: Path, dest: Path) -> None:
+    """Copy the Dell MSI out of the self-extracting download into ``dest``.
+
+    The download is a zip behind a WinZip stub, which zipfile reads as it is. Only the one
+    member is read, matched by its file name and written to a name chosen here, so no path
+    inside the archive ever decides where anything lands.
+    """
+    wanted = WINDOWS_PACKAGE["msi"].lower()
+    with zipfile.ZipFile(archive) as bundle:
+        members = [
+            m for m in bundle.infolist()
+            if not m.is_dir() and m.filename.replace("\\", "/").rsplit("/", 1)[-1].lower() == wanted
+        ]
+        if not members:
+            raise ValueError(f"{WINDOWS_PACKAGE['msi']} is not in the downloaded package")
+        member = members[0]
+        if member.file_size > _WINDOWS_PACKAGE_MAX_BYTES:
+            raise ValueError(f"{member.filename} is larger than expected")
+        with bundle.open(member) as source, dest.open("wb") as out:
+            shutil.copyfileobj(source, out)
+
+
+def _read_msi_log(path: Path) -> str:
+    """The end of the msiexec log, which it writes in UTF-16; empty when there is none."""
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return ""
+    encoding = "utf-16" if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else "utf-8"
+    return raw.decode(encoding, errors="replace")[-_OUTPUT_TAIL:]
+
+
+def _msiexec() -> str:
+    """msiexec by its full path, so nothing on PATH or in the working folder can stand in."""
+    system_root = os.environ.get("SystemRoot") or os.environ.get("windir") or r"C:\Windows"
+    return str(Path(system_root, "System32", "msiexec.exe"))
+
+
+def _unpack_msi(msi: Path, target: Path, log: Path) -> int | None:
+    """Unpack the MSI's files into ``target`` with an administrative install; its exit code.
+
+    Needs no administrator rights and registers nothing in Windows. None when msiexec is still
+    running after the timeout; it is stopped then. The command line is handed over as written,
+    because msiexec wants the quotes around a property's value, not around ``TARGETDIR=...`` as a
+    whole. The paths are this process's own temp folder, which cannot hold a quote character.
+    """
+    command = f'"{_msiexec()}" /a "{msi}" /qn TARGETDIR="{target}" /l*v "{log}"'
+    try:
+        done = subprocess.run(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=_INSTALL_STEP_TIMEOUT,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return None
+    return done.returncode
+
+
+def _copy_ipmitool(unpacked: Path, dest: Path) -> Path:
+    """Copy the folder holding ipmitool.exe out of the unpacked MSI into ``dest``; the new exe.
+
+    The folder comes whole because ipmitool.exe needs the Cygwin DLLs next to it, and only its
+    files are copied, never a subfolder. A copy left by an earlier install is replaced. Raises
+    FileNotFoundError when the package held no ipmitool.exe.
+    """
+    found = sorted(
+        path for path in unpacked.rglob("*")
+        if path.name.lower() == "ipmitool.exe" and path.is_file()
+    )
+    if not found:
+        raise FileNotFoundError("ipmitool.exe is not in the unpacked Dell package")
+    source = found[0].parent
+    staging = dest.with_name(dest.name + ".new")
+    shutil.rmtree(staging, ignore_errors=True)
+    staging.mkdir(parents=True)
+    for item in source.iterdir():
+        if item.is_file():
+            shutil.copy2(item, staging / item.name)
+    shutil.rmtree(dest, ignore_errors=True)
+    staging.rename(dest)
+    return dest / found[0].name
+
+
+def _version_of(exe: Path) -> str:
+    """What ``ipmitool -V`` prints. Raises when it does not start or exits with an error."""
+    done = subprocess.run(
+        [str(exe), "-V"],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        timeout=_VERSION_TIMEOUT,
+        check=True,
+    )
+    return (done.stdout or done.stderr).decode("utf-8", errors="replace").strip()
+
+
+async def _install_windows() -> dict:
+    """Download the pinned Dell package, check it, and unpack ipmitool into the data directory.
+
+    Nothing asks for administrator rights and nothing is installed in Windows: msiexec unpacks the
+    MSI into a temporary folder, and the folder holding ipmitool.exe is copied into IPMIDeck's own
+    tools folder. Success is judged by finding ipmitool.exe there afterwards and seeing it start.
+    """
+    folder = Path(tempfile.mkdtemp(prefix="ipmideck-ipmitool-"))
+    installer = folder / WINDOWS_PACKAGE["file"]
+    msi = folder / WINDOWS_PACKAGE["msi"]
+    unpacked = folder / "unpacked"
+    log = folder / "msiexec.log"
+    try:
+        try:
+            digest = await asyncio.to_thread(_download_windows_package, installer)
+        except (OSError, ValueError, http.client.HTTPException) as exc:
+            logger.warning("The ipmitool download failed: %s", exc)
+            return _failure("download", str(exc).encode())
+        if digest != WINDOWS_PACKAGE["sha256"]:
+            logger.warning(
+                "The downloaded package does not match the pinned SHA-256 (got %s); not used",
+                digest,
+            )
+            return _failure(
+                "checksum",
+                f"expected {WINDOWS_PACKAGE['sha256']}\nreceived {digest}".encode(),
+            )
+        try:
+            await asyncio.to_thread(_extract_msi, installer, msi)
+        except (OSError, ValueError, zipfile.BadZipFile) as exc:
+            logger.warning("The Dell package could not be unpacked: %s", exc)
+            return _failure("extract", str(exc).encode())
+        logger.warning("Installing ipmitool: unpacking %s with msiexec /a", msi.name)
+        try:
+            code = await asyncio.to_thread(_unpack_msi, msi, unpacked, log)
+        except OSError as exc:
+            logger.warning("msiexec could not be started: %s", exc)
+            return _failure("windows_failed", str(exc).encode())
+        if code is None:
+            return _failure("windows_timeout")
+        if code not in _MSI_SUCCESS:
+            meaning = _MSI_EXIT_TEXT.get(code, "")
+            summary = f"msiexec exit code {code}" + (f": {meaning}" if meaning else "")
+            logger.warning("Unpacking the Dell package failed (%s)", summary)
+            return _failure("windows_failed", (summary + "\n" + _read_msi_log(log)).encode())
+        target = windows_tools_dir()
+        try:
+            exe = await asyncio.to_thread(_copy_ipmitool, unpacked, target)
+        except FileNotFoundError as exc:
+            logger.warning("The unpacked Dell package holds no ipmitool.exe")
+            return _failure("windows_not_found", str(exc).encode())
+        except OSError as exc:
+            logger.warning("ipmitool could not be copied to %s: %s", target, exc)
+            return _failure("windows_failed", f"copying to {target}: {exc}".encode())
+        try:
+            version = await asyncio.to_thread(_version_of, exe)
+        except (OSError, subprocess.SubprocessError) as exc:
+            logger.warning("The unpacked ipmitool did not start: %s", exc)
+            return _failure("windows_failed", f"{exe} did not start: {exc}".encode())
+        found = find_ipmitool()
+        if found is None:
+            return _failure("windows_not_found", f"copied to {exe}, but it is not found".encode())
+        report_present()
+        logger.warning("ipmitool installed: %s (%s)", found, version)
+        return {"success": True, "output": f"{found}\n{version}"}
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
